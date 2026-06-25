@@ -1,0 +1,53 @@
+Version 2.0.4
+- Fixed deprecation warnings.
+- Added delegates.
+- Added ScopedSlowTasks to show generation progress.
+- Code optimizations and improvements.
+
+Version 2.0.3
+- Fixed crash in Standalone in UE5.4.3
+
+Version 2.0.2
+- Added more settings to customize in nature generation.
+- Minor code improvements.
+
+Version 2.0.1
+- Fix in FastNoiseLite.h for Linux users.
+
+Version 2.0
+- Major code refactoring, now is more efficient, simplified and cleaner.
+- LODs support.
+- Procedural Nature Generator plugin features (modifiers and height options) added.
+- Fast Noise Lite implemented instead of original Fast Noise.
+- RMC updated to version 4.1.5.
+- Many new call-in-editor and blueprint functions.
+- Different types of rotations available now for actors generation too.
+- Now you can decide whether terrain and water meshes have collision or not.
+- Random relative yaw is now applied when placed nature meshes and actors.
+- Removed Custom Mesh functionalities.
+
+Version 1.4
+- Added support to create heightmaps as png images from Plane terrains.
+- Some minor fixes.
+
+Version 1.3
+- Updated RMC to v4.
+- Fixed crashes on Mac.
+- Fixed crashes in UE4.25.
+- Now nature culling distance is customizable per each bioma element/actor.
+- PN Triangles Tessellation mode materials support.
+- Minor fixes and improvements.
+
+Version 1.2
+- Added support for tilable plane terrains.
+- Added Water Fixed Height type for water generation.
+- Fixed critical bug on GenerateProcMeshData function.
+- Minor general code enhancement.
+
+Version 1.1
+- Improved algorithm for nature and actors generation, now is more accurate and optimized.
+- Now, for each bioma element you can choose between 3 different types of rotation.
+- Added Cull Distance property for the generated nature and actors, making its rendering more lightweight.
+- Added support to create Static Mesh asset from generated terrain mesh.
+- Debug messages system improved and expanded.
+- Minor bug fixes and general optimizations.

@@ -1,0 +1,54 @@
+{
+	"FileVersion": 3,
+	"Version": 10,
+	"VersionName": "2.0.4",
+	"FriendlyName": "ProceduralTerrainGenerator",
+	"Description": "Easy and lightweight plugin for procedural terrain generation within the editor, using your own assets.",
+	"Category": "Code Plugins",
+	"CreatedBy": "Víctor Hernández Molpeceres (Rockam)",
+	"CreatedByURL": "https://www.unrealengine.com/marketplace/en-US/profile/Rockam",
+	"DocsURL": "https://drive.google.com/file/d/1Pvt5R2dNisqAcojoBX736JU7QWA6kjVi/view",
+	"MarketplaceURL": "com.epicgames.launcher://ue/marketplace/content/2e707e78b69540aeb7464b7c4e0e9c7b",
+	"SupportURL": "norlun5@gmail.com",
+	"EngineVersion": "5.8.0",
+	"CanContainContent": true,
+	"Installed": true,
+	"Modules": [
+		{
+			"Name": "RuntimeMeshComponent",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64",
+				"Linux"
+			]
+		},
+		{
+			"Name": "FastNoiseLite",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64",
+				"Linux"
+			]
+		},
+		{
+			"Name": "ProceduralTerrainGenerator",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64",
+				"Linux"
+			]
+		},
+		{
+			"Name": "ProceduralTerrainGeneratorEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64",
+				"Linux"
+			]
+		}
+	]
+}
