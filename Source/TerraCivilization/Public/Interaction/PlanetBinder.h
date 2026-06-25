@@ -11,6 +11,7 @@
 class APtgManager;
 class FSphereTopology;
 class FSphereTopologyQuery;
+class UCellHighlightComponent;
 
 /**
  * APlanetBinder
@@ -144,6 +145,10 @@ private:
 
     /** 球面拓扑查询器（O(log N) 球面方向 -> CellId）。 */
     TUniquePtr<FSphereTopologyQuery> Query;
+
+    /** 高亮渲染组件（在构造函数里 CreateDefaultSubobject）。 */
+    UPROPERTY(VisibleAnywhere, Category = "Planet")
+    TObjectPtr<UCellHighlightComponent> HighlightComp;
 
     /** 上一帧 hover 命中的 CellId，用于抖动抑制（Step 3 起开始使用）。 */
     int32 LastHoveredCellId = INDEX_NONE;

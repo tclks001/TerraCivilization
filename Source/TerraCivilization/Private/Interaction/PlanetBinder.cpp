@@ -2,6 +2,8 @@
 
 #include "Interaction/PlanetBinder.h"
 
+#include "Interaction/CellHighlightComponent.h"
+
 #include "FCell.h"
 #include "FSphereTopology.h"
 #include "FSphereTopologyQuery.h"
@@ -18,6 +20,10 @@ DEFINE_LOG_CATEGORY_STATIC(LogPlanetBinder, Log, All);
 APlanetBinder::APlanetBinder()
 {
     PrimaryActorTick.bCanEverTick = false;
+
+    // 高亮组件：作为本 Actor 的默认子对象创建。
+    // SceneRoot 不是必需的：ULineBatchComponent 是 World 级别，不依赖本 Actor Transform。
+    HighlightComp = CreateDefaultSubobject<UCellHighlightComponent>(TEXT("HighlightComp"));
 }
 
 // 注意：这两个特殊成员函数必须放在 .cpp（且本文件已 #include FSphereTopology / FSphereTopologyQuery 完整定义），
@@ -142,14 +148,21 @@ void APlanetBinder::OnHoverWorldPoint(const FVector& WorldHit)
         return;
     }
 
-    // 3) 抖动抑制：CellId 没变就什么都不做
+    // 3) 高亮该 Cell 的边界。每帧都重画一次，因为 LineBatcher 是瞬时线（受 LineLifeTime 控制）；
+    //    放在抖动抑制之前，确保鼠标静止时线条也持续可见。
+    if (HighlightComp)
+    {
+        HighlightComp->SetHighlightedCell(R.CellId);
+    }
+
+    // 4) 抖动抑制：CellId 没变就跳过下面"屏幕日志 + DebugSphere"的更新。
     if (R.CellId == LastHoveredCellId)
     {
         return;
     }
     LastHoveredCellId = R.CellId;
 
-    // 4) 屏幕调试信息：CellId / 是否五边形
+    // 5) 屏幕调试信息：CellId / 是否五边形
     const FCell& Cell = Topology->Cells[R.CellId];
     const float  Radius = GetRadius();
     if (GEngine)
@@ -200,11 +213,15 @@ void APlanetBinder::OnClickWorldPoint(const FVector& WorldHit)
 
 void APlanetBinder::OnLeavePlanet()
 {
-    // 当鼠标移出球体时，清掉抖动抑制缓存，并把屏幕消息也消掉。
+    // 当鼠标移出球体时，清掉抖动抑制缓存，并把屏幕消息、高亮都清掉。
     LastHoveredCellId = INDEX_NONE;
     if (GEngine)
     {
         GEngine->RemoveOnScreenDebugMessage(/*Key=*/1);
+    }
+    if (HighlightComp)
+    {
+        HighlightComp->ClearHighlight();
     }
 }
 

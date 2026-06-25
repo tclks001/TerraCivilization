@@ -419,6 +419,7 @@ void FSphereTopology::BuildDualFromPrimal()
 		//}
 	}
 
+	// 先用临时方式把NeighborCornerIds填上（顺序不重要，下面统一会重排）
 	for (int32 I = 0; I < Corners.Num(); ++I)
 	{
 		for (int32 EdgeId : Corners[I].EdgeIds)
@@ -427,15 +428,6 @@ void FSphereTopology::BuildDualFromPrimal()
 			AddElement(Corners[I].NeighborCornerIds, NeighborCornerId);
 		}
 	}
-
-	// 这一版顺序没对上
-	// for (int32 I = 0; I < Edges.Num(); ++I)
-	// {
-	// 	   int32 A = Edges[I].CornerIds[0];
-	//	   int32 B = Edges[I].CornerIds[1];
-    //     AddElement(Corners[A].NeighborCornerIds, B);
-    //     AddElement(Corners[B].NeighborCornerIds, A);
-	// }
 
 	// 把Edges的CellIds和CornerIds都改为从西往东
 	for (int32 I = 0; I < Edges.Num(); ++I)
@@ -452,5 +444,203 @@ void FSphereTopology::BuildDualFromPrimal()
 		{
 			Swap(Edges[I].CornerIds[0], Edges[I].CornerIds[1]);
 		}
+	}
+
+	// ============================================================================
+	// 索引数组顺时针对齐（关键不变量，下游高亮/边界遍历都依赖于此）
+	// ============================================================================
+	//
+	// 视角：从球心向外看（站在Cell中心朝Cell外侧看），CW = Clockwise。
+	//
+	// 【对Cell】NeighborCellIds[i]、EdgeIds[i]、CornerIds[i]在第i项强对齐：
+	//   - EdgeIds[i] 这条边连接 本Cell 和 NeighborCellIds[i]；
+	//   - EdgeIds[i] 的两个Corner端点正好是 CornerIds[i] 和 CornerIds[(i+1) % N]。
+	//   故"沿Cell边界走一圈"等价于：
+	//       for (i = 0..N-1) drawArc(Corners[CornerIds[i]], Corners[CornerIds[(i+1)%N]]);
+	//
+	// 【对Corner】CellIds[i]、EdgeIds[i]、NeighborCornerIds[i]在第i项强对齐：
+	//   - EdgeIds[i] 从本Corner出发指向 NeighborCornerIds[i]；
+	//   - EdgeIds[i] 两侧的Cell正好是 CellIds[i] 和 CellIds[(i+1) % 3]。
+	//
+	// 实现要点：
+	//   1. 先按"相邻元素围绕本元素中心"的极角排序（atan2 in tangent plane）。
+	//   2. 旋转方向通过法向量的方向决定 - 我们要求逆时针on-screen角度排序映射成
+	//      "从球心向外看的顺时针"（这两个等价：从外向球心看是逆时针 == 从球心向外看是顺时针）。
+	//   3. 对Cell：以NeighborCellIds为参考排出环，再据此对齐EdgeIds、CornerIds。
+	//   4. 对Corner：以NeighborCornerIds为参考排出环，再据此对齐EdgeIds、CellIds。
+
+	auto SortIndicesByAngleCW = [&](const FVector& Center, const TArray<FVector>& Dirs, TArray<int32>& OutOrder)
+		{
+			// 计算每个 Dirs[k] 相对 Dirs[0] 绕 Center（球面外法向）的"有符号方位角"，
+			// 然后按 CW（从球心向外看的顺时针）排序，且让 Dirs[0] 始终留在首位。
+			//
+			// 推导：
+			//   令 N = Center 单位法向；A = D0 - (D0·N)N（D0 在切平面投影，单位化）；B = D - ...同理。
+			//   A 到 B 绕 N 的有符号角 θ = atan2( (A × B) · N, A · B )。
+			//   "从球心向外看"= 视角朝 -N，因此该视角下 CW = "绕 +N 的 CCW" 的反向 = θ 递增的反向，
+			//   即 θ 递减。但让 Dirs[0] 留首位的最简方式是：把 θ 全部映射到 [0, 2π)（D0 处为 0），
+			//   再按 (2π - θ) 升序，即可得到"以 D0 起步、CW 巡环"。
+			OutOrder.Reset();
+			OutOrder.SetNum(Dirs.Num());
+			for (int32 K = 0; K < Dirs.Num(); ++K) OutOrder[K] = K;
+			if (Dirs.Num() <= 1) return;
+
+			const FVector N = Center.GetSafeNormal();
+			auto Project = [&](const FVector& D) -> FVector
+				{
+					return (D - FVector::DotProduct(D, N) * N).GetSafeNormal();
+				};
+			const FVector A0 = Project(Dirs[0]);
+
+			TArray<float> Theta;
+			Theta.SetNum(Dirs.Num());
+			Theta[0] = 0.0f;
+			for (int32 K = 1; K < Dirs.Num(); ++K)
+			{
+				const FVector Bk = Project(Dirs[K]);
+				const FVector Cross = FVector::CrossProduct(A0, Bk);
+				const float SinTheta = FVector::DotProduct(Cross, N); // 绕 +N 的有符号 sin
+				const float CosTheta = FVector::DotProduct(A0, Bk);
+				float Th = FMath::Atan2(SinTheta, CosTheta);          // (-π, π]
+				if (Th < 0.0f) Th += 2.0f * PI;                        // [0, 2π)
+				Theta[K] = Th;
+			}
+
+			OutOrder.Sort([&](int32 P, int32 Q)
+				{
+					// CW from outside = 绕 +N 的 CW = 绕 +N 的 θ 递减；
+					// 在 [0, 2π) 区间里把 D0(θ=0) 留首位，等价于按 (2π - θ) 升序，
+					// 其中 D0 强制按 0 处理。
+					const float Ap = (P == 0) ? 0.0f : (2.0f * PI - Theta[P]);
+					const float Aq = (Q == 0) ? 0.0f : (2.0f * PI - Theta[Q]);
+					return Ap < Aq;
+				});
+		};
+
+	// ---- (A) 对每个Cell按CW排序 NeighborCellIds，并据此重排 EdgeIds / CornerIds ----
+	for (int32 CellId = 0; CellId < Cells.Num(); ++CellId)
+	{
+		FCell& Cell = Cells[CellId];
+
+		// 邻居数：五边形=5，六边形=6
+		int32 N = 0;
+		while (N < 6 && Cell.NeighborCellIds[N] != INDEX_NONE) ++N;
+		if (N < 3) continue;
+
+		// 收集邻居方向（每个邻居Cell的UnitCenter）
+		TArray<FVector> Dirs; Dirs.SetNum(N);
+		TArray<int32>   NbCells; NbCells.SetNum(N);
+		for (int32 K = 0; K < N; ++K)
+		{
+			NbCells[K] = Cell.NeighborCellIds[K];
+			Dirs[K] = Cells[NbCells[K]].UnitCenter;
+		}
+
+		TArray<int32> Order;
+		SortIndicesByAngleCW(Cell.UnitCenter, Dirs, Order);
+
+		// 写回 NeighborCellIds 按CW顺序
+		for (int32 K = 0; K < 6; ++K) Cell.NeighborCellIds[K] = INDEX_NONE;
+		for (int32 K = 0; K < N; ++K) Cell.NeighborCellIds[K] = NbCells[Order[K]];
+
+		// 重排 EdgeIds：使 EdgeIds[i] = 连接 Cell 与 NeighborCellIds[i] 的那条边。
+		// 注意：不能再用 Cell.GetEdgeIdWithNeighborCellId(...)，因为 Cell.EdgeIds 已经被清空。
+		// 用全局 EdgeCache 反查：对 (CellId, NbCell) 的有序键直接拿到 EdgeId。
+		for (int32 K = 0; K < 6; ++K) Cell.EdgeIds[K] = INDEX_NONE;
+		for (int32 K = 0; K < N; ++K)
+		{
+			const int32 NbCell = Cell.NeighborCellIds[K];
+			const int32 Min = FMath::Min(CellId, NbCell);
+			const int32 Max = FMath::Max(CellId, NbCell);
+			const uint64 Key = ((uint64)Min << 32) | Max;
+			const int32* Found = EdgeCache.Find(Key);
+			Cell.EdgeIds[K] = Found ? *Found : INDEX_NONE;
+		}
+
+		// 重排 CornerIds：约定 EdgeIds[i] 的两个Corner端点 = CornerIds[i] 和 CornerIds[(i+1) % N]。
+		// 实现：对每条 Edge i，它的两个 Corner 端点中，必有一个被 Edge (i+1) 也共享、另一个被 Edge (i-1) 共享；
+		// 与 Edge (i-1) 共享的那个 = CornerIds[i]，与 Edge (i+1) 共享的那个 = CornerIds[(i+1) % N]。
+		for (int32 K = 0; K < 6; ++K) Cell.CornerIds[K] = INDEX_NONE;
+		for (int32 I = 0; I < N; ++I)
+		{
+			const int32 EdgeI = Cell.EdgeIds[I];
+			const int32 EdgePrev = Cell.EdgeIds[(I - 1 + N) % N];
+			if (EdgeI == INDEX_NONE || EdgePrev == INDEX_NONE) continue;
+
+			// EdgeI 的两个 Corner 端点
+			const int32 C0 = Edges[EdgeI].CornerIds[0];
+			const int32 C1 = Edges[EdgeI].CornerIds[1];
+			// 选与 EdgePrev 共享的那个
+			const FCorner& Cn0 = Corners[C0];
+			bool C0Shared = (Cn0.EdgeIds[0] == EdgePrev || Cn0.EdgeIds[1] == EdgePrev || Cn0.EdgeIds[2] == EdgePrev);
+			Cell.CornerIds[I] = C0Shared ? C0 : C1;
+		}
+	}
+
+	// ---- (B) 对每个Corner按CW排序 NeighborCornerIds，并据此重排 EdgeIds / CellIds ----
+	for (int32 CornerId = 0; CornerId < Corners.Num(); ++CornerId)
+	{
+		FCorner& Cn = Corners[CornerId];
+
+		// Corner 一定有 3 个邻居 / 3 条边 / 3 个 Cell
+		const int32 N = 3;
+		// 收集邻居方向（每个邻居 Corner 的 UnitDir）
+		TArray<FVector> Dirs; Dirs.SetNum(N);
+		TArray<int32>   NbCorners; NbCorners.SetNum(N);
+		for (int32 K = 0; K < N; ++K)
+		{
+			NbCorners[K] = Cn.NeighborCornerIds[K];
+			if (NbCorners[K] == INDEX_NONE) { Dirs[K] = FVector::ZeroVector; continue; }
+			Dirs[K] = Corners[NbCorners[K]].UnitDir;
+		}
+
+		TArray<int32> Order;
+		SortIndicesByAngleCW(Cn.UnitDir, Dirs, Order);
+
+		// 写回 NeighborCornerIds
+		TStaticArray<int32, 3> NewNb { INDEX_NONE, INDEX_NONE, INDEX_NONE };
+		for (int32 K = 0; K < N; ++K) NewNb[K] = NbCorners[Order[K]];
+		for (int32 K = 0; K < N; ++K) Cn.NeighborCornerIds[K] = NewNb[K];
+
+		// 重排 EdgeIds：使 EdgeIds[i] = 从本 Corner 通向 NeighborCornerIds[i] 的边。
+		// 直接在 Edges[] 里反查端点为 (CornerId, NbCorner) 的边。
+		// 注意：每个 Corner 的旧 Cn.EdgeIds（共3条）成员是确定的，遍历它就够了。
+		TStaticArray<int32, 3> NewEdges { INDEX_NONE, INDEX_NONE, INDEX_NONE };
+		for (int32 K = 0; K < N; ++K)
+		{
+			const int32 NbCorner = Cn.NeighborCornerIds[K];
+			if (NbCorner == INDEX_NONE) { NewEdges[K] = INDEX_NONE; continue; }
+			NewEdges[K] = INDEX_NONE;
+			for (int32 EId : Cn.EdgeIds)
+			{
+				if (EId == INDEX_NONE) continue;
+				const int32 EA = Edges[EId].CornerIds[0];
+				const int32 EB = Edges[EId].CornerIds[1];
+				if ((EA == CornerId && EB == NbCorner) || (EB == CornerId && EA == NbCorner))
+				{
+					NewEdges[K] = EId; break;
+				}
+			}
+		}
+		for (int32 K = 0; K < N; ++K) Cn.EdgeIds[K] = NewEdges[K];
+
+		// 重排 CellIds：约定 EdgeIds[i] 两侧的 Cell = CellIds[i] 和 CellIds[(i+1) % 3]。
+		// 实现：对每个 i，CellIds[i] = 同时属于 EdgeIds[(i-1+3)%3] 和 EdgeIds[i] 的那个 Cell。
+		TStaticArray<int32, 3> NewCells { INDEX_NONE, INDEX_NONE, INDEX_NONE };
+		for (int32 I = 0; I < N; ++I)
+		{
+			const int32 EdgeI = Cn.EdgeIds[I];
+			const int32 EdgePrev = Cn.EdgeIds[(I - 1 + N) % N];
+			if (EdgeI == INDEX_NONE || EdgePrev == INDEX_NONE) continue;
+
+			// EdgeI 的两侧 Cell（西/东）
+			const int32 CA = Edges[EdgeI].CellIds[0];
+			const int32 CB = Edges[EdgeI].CellIds[1];
+			// 选择同时属于 EdgePrev 的那个
+			const int32 PA = Edges[EdgePrev].CellIds[0];
+			const int32 PB = Edges[EdgePrev].CellIds[1];
+			NewCells[I] = (CA == PA || CA == PB) ? CA : CB;
+		}
+		for (int32 K = 0; K < N; ++K) Cn.CellIds[K] = NewCells[K];
 	}
 }
