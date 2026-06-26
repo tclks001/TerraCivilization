@@ -662,35 +662,40 @@ l0 /= lsum; l1 /= lsum; l2 /= lsum;
 
 进一步：**根据三对 (LayerIdxᵢ, LayerIdxⱼ) 决定噪声参数**——海岸用低频大幅、平原-森林用高频小幅、城-野用块状。可以预存一张 `LayerPair → NoiseParams` 的小 LUT，在三对之间各扰一次再综合。
 
-#### 6.4.1 R6 落地方案：在 R5 球面距离 δ 上叠加噪声扰动（与 R4/R5 几何兼容）
+#### 6.4.1 R6 落地方案：在 R5 之前对 dir 做球面切向偏移（全局连续形变）
 
-**注意**：上面 §6.4 原文是基于"在 λ 空间做噪声扰动"（路径 A），与 R3 的 argmax(λ) 折线判别相配。R5 已把判别量切换为"球面有符号弧度距离 $\delta_i$"——所以 R6 必须把噪声直接叠加到 $\delta_i$ 上，才能保持与 R4/R5 的几何严格兼容。
+**设计原则**：R6 不修改 R5 的 δ 公式，而是在调用 R5 之前把 fragment 方向 $\hat{d}$ **整体形变**为另一个单位方向 $\hat{d}'$，然后让 R5 用 $\hat{d}'$ 走完 θ→δ→smoothstep→加权流程。所有 cell 共享同一个形变后的方向，因此 cell 边几何只是"整体被平滑揉过"——边仍然处处闭合，**不会出现接缝或重叠**。
 
-**核心公式**：
+> ⚠ **不要走 per-cell 路径（已废弃）**：早期版本曾尝试 $\tilde\delta_i = \delta_i + n_i(\hat{d}, V_i) \cdot A$，让每个 cell 拥有独立噪声扰动量。该方案在调用 R5 的 $\delta_i = \theta_i - \min_{j\neq i}\theta_j$ 时，A 看 B 用的是未经扰动的 $\theta_B$（而非 $\tilde\theta_B$）—— **A 和 B 各自算出的"边在哪"不重合 → 留缝（两边 w<0.5）或重叠（两边 w>0.5）**。本节描述的全局切向偏移方案彻底规避此病理。
+
+**核心公式**（方案 B：3D 偏移 + normalize）：
 
 $$
-\tilde\delta_i = \delta_i + n_i(\hat{d}) \cdot \text{NoiseAmplitude}
+\hat{d}' = \mathrm{normalize}\!\left(\hat{d} + \mathbf{n}(\hat{d})\cdot\text{NoiseAmplitude}\right), \quad \mathbf{n}(\hat{d}) \in [-1,1]^3
 $$
 
-其中：
+然后用 $\hat{d}'$ 替换 $\hat{d}$ 走完 R5 的全部计算：
 
-- $\delta_i = \arccos(\hat{d}\cdot V_i) - \min_{j\neq i}\arccos(\hat{d}\cdot V_j)$（沿用 R5 §6.3.1 定义）
-- $n_i(\hat{d}) \in [-1, +1]$ 是与 $\hat{d}$ 和 cell $i$ 共同确定的 3D 噪声；同一空间点对同一 cell 必须返回相同值（避免接缝）
-- NoiseAmplitude 单位为**绝对弧度**，与 EdgeWidth 同制
-- 软边权重沿用 R5：$w_i = \text{smoothstep}(\text{EdgeWidth}/2, -\text{EdgeWidth}/2, \tilde\delta_i)$
+$$
+\theta_i = \arccos(\hat{d}'\cdot V_i),\quad \delta_i = \theta_i - \min_{j\neq i}\theta_j,\quad w_i = \mathrm{smoothstep}(\tfrac{\text{EW}}{2},\ -\tfrac{\text{EW}}{2},\ \delta_i)
+$$
 
-**三个核心约束**：
+其中 $\mathbf{n}(\hat{d})$ 是 3 个独立的 3D value noise 分量（用 $\hat{d}\cdot\text{NoiseScale}$ 作采样输入 + 各自 hash offset 错开）。`normalize` 把 $\hat{d}+\mathbf{n}A$ 投回单位球面——3D 偏移中沿 $\hat{d}$ 径向的分量被压缩，留下的实际就是切向偏移。
 
-1. **per-cell 独立噪声**：$n_i$ 必须基于 (dir, $V_i$) 一起采样（如 `noise3D(dir * NoiseScale + V_i * HashOffset)`），不能用全局 `noise3D(dir).xyz` 三分量——后者会让"被扰动的 Voronoi 边"依赖于第三个 cell（c2）的存在，跨三角形边时该 cell 切换会导致边形状跳变
-2. **跨 mesh 边连续性**：mesh 边上 c0/c1 两侧的两个三角形共享 c0、c1（仅 c2 不同），所以 $n_0, n_1$ 在边上完全一致 → $\tilde\delta_0, \tilde\delta_1$ 跨边连续 → cell 边在跨 mesh 边时**没有缝**
-3. **球面归一化采样**：噪声采样输入用 $\hat{d}$（单位方向）而非 WorldPos——前者跨星球半径、跨 sub 等级语义不变；后者会因 Radius 变化而视觉频率变化
+**三个核心保证**：
+
+1. **零缝零重叠**：所有 cell 共用同一个 $\hat{d}'$，cell 边仍由 $\theta_A(\hat{d}') = \theta_B(\hat{d}')$ 这个**单一等式**定义，处处闭合
+2. **跨 mesh 边连续**：$\mathbf{n}(\hat{d})$ 是 $\hat{d}$ 的纯函数，$\hat{d}$ 在 mesh 边两侧（来自同一个 fragment 真实方向）完全一致 → $\hat{d}'$ 跨 mesh 边连续
+3. **球面归一化采样**：噪声输入用 $\hat{d}$（单位方向）而非 WorldPos——跨星球半径、跨 sub 等级语义不变
 
 **参数语义**（含单位）：
 
 | 参数 | 单位 | 含义 | 推荐值 |
 | --- | --- | --- | --- |
-| `NoiseAmplitude` | 绝对弧度 | 边在垂直方向的最大摆动幅度 | 0（关闭）/ 0.02（微妙）/ 0.05（明显蜿蜒）/ 0.10（强变形） |
+| `NoiseAmplitude` | 绝对弧度（小角近似下） | dir 切向偏移的最大幅度 | 0（关闭）/ 0.02（微妙）/ 0.05（明显蜿蜒）/ 0.10（强变形） |
 | `NoiseScale` | 每弧度周期数 | 噪声频率（每弧度多少个起伏） | 5（大尺度海岸）/ 20（中等）/ 50（细密锯齿） |
+
+> 严格上 `normalize` 后切向位移略小于 $A$（径向分量被压缩约 1/3）；视觉上 `NoiseAmplitude=0.05` 对应实际边摆动约 ±2°。如需精确切向控制，可后续升级到方案 D（quaternion 微旋转），R6 阶段方案 B 已够用。
 
 **与 R5 EdgeWidth 的正交性**：
 
@@ -701,9 +706,9 @@ $$
 | > 0 | 0 | R5 软直边 |
 | > 0 | > 0 | 软边且形状蜿蜒（最丰富） |
 
-**约束上限**：`NoiseAmplitude < TriRadius`（约 0.18 弧度，sub=3 时三角形外接圆半径）。超过该值会让噪声把 cell 边推出三角形覆盖范围，产生伪影（"互锁"——见 §12 风险表）。建议 ≤ 0.1。
+**约束上限**：`NoiseAmplitude < TriRadius`（约 0.18 弧度，sub=3 时三角形外接圆半径）。超过该值会让 dir 切向偏移把 fragment 推出当前三角形覆盖的 cell 集合 $\{c_0,c_1,c_2\}$ 的几何域 → 颜色乱跳（"互锁"伪影，见 §12 风险表）。建议 ≤ 0.1。
 
-**HLSL 噪声实现**：用嵌入式 hash-based 3D value noise（约 25 行，无需依赖材质 Noise 节点）；详细代码、cpp 改动、材质接线见 [R6_BoundaryNoise.md](R6_BoundaryNoise.md)。
+**HLSL 实现**：3 次嵌入式 inline 3D value noise 采样（每次 ~50 ALU），每个分量用同一坐标 + 不同 hash offset；详细代码、cpp 改动、材质接线见 [R6_BoundaryNoise.md](R6_BoundaryNoise.md)。
 
 ### 6.5 Triplanar 解决球面 UV 接缝
 
@@ -822,7 +827,7 @@ CPU 侧：
 | **R7** | ⏳ 待开始 | 切到 `Texture2DArray + Triplanar` 真实地表纹理 | 草、沙、雪皮肤 |
 | **R8** | ⏳ 待开始 | 接入 `WorldGen` 的 `FCellGeoData → LayerIndex`，跑出第一张可玩星球 | 12 五边形可见、海陆分布 |
 | **R9** | ⏳ 待开始 | 加 Decor / Owner / Fog 三套独立 LUT | 政治版图 + 战争迷雾上线 |
-| **R10** | ⏳ 待开始 | LOD 优化：远距离用 R4（硬直边、无噪声）、近距离用 R6（软蔓蜒边） | 远景帧时间下降 |
+| **R10** | ⏳ 待开始 | LOD 优化：远距离用 R4（硬直边、无噪声）、近距离用 R6（软蜿蜒边） | 远景帧时间下降 |
 | **R11** *(生产路线)* | ⏳ 待开始 | 渲染从 IsoSphere 切到 PTG 高细分球皮 + GPU `FindNearestCell`（详见 §14） | 像素细节大幅提升、AttrLUT/材质资产无修改地继承 |
 | **R12** *(生产路线)* | ⏳ 待开始 | 在材质 WPO 节点里按 `CellHeightLUT` 沿径向位移顶点 | 海陆出现真实几何起伏 |
 | **R13** *(生产路线)* | ⏳ 待开始 | 接入 §15 高亮描边带 + 选中 / 鼠标悬停的 LUT 联动 | hex 边发光描边、选中即时反馈 |
@@ -1487,14 +1492,11 @@ float3 SphericalBarycentric(float3 dir, float3 V_A, float3 V_B, float3 V_C)
 2. $w$ 在 hex/pent 边上 = (0.5, 0.5, 0) 类二选一；
 3. $w$ 在 Cell 角点（即三 Cell 共享 Corner）上 = (1/3, 1/3, 1/3)。
 
-§14.7 的 `SphericalBarycentric` 完全满足以上三条 ⟹ §15 高亮算法的几何含义（"`gap=0` ↔ 像素正好在 hex 边界 / Corner 上"）**严格保持**，无需任何调整。
-
+§14.7 的 `SphericalBarycentric` λ 是**可微连续权重场**——R7（Triplanar 加权混合）、R11 PTG WPO 顶点位移、R13/§15 高亮 gap 都需要它（R5 不依赖 λ）。
 > **R4 dot argmax 硬边判别 vs. §14.7 λ 软边权重的并存关系**：
 > - **R4** 在 PS 端用 `argmax(dot(dir, V_i))` 做**硬边切分**——只关心"像素归哪个 cell"，无可微权重需求，得到测地线大圆等位线；
 > - **R5** 在 R4 的 dot 距离空间直接做软边——用 $\delta_i = \arccos(\hat{d}\cdot V_i) - \min_{j\neq i}\arccos(\hat{d}\cdot V_j)$ 的 smoothstep（详见 §6.3.1）。R5 既不走 λ 也不走 dot argmax，而是走"球面角距离差"，与 R4 几何严格对齐；
-> - **§14.7** 的 `SphericalBarycentric` λ 是**可微连续权重场**——R7（Triplanar 加权混合）、R11 PTG WPO 顶点位移、R13/§15 高亮 gap 都需要它（R5 不依赖 λ）。
->
-> 三条路径**严格同区**：在球面三角形内，`argmax_i(dot(dir, V_i))`、`argmax_i(λ_i)`、`argmax_i(-θ_i)` 划分出的 cell 区域**完全重合**（都满足 §14.7.4 的三个不变量：cell 中心 onehot、共享边 0.5/0.5/0、外心 1/3/1/3）。R4/R5 与 §14.7/§15 不冲突，**R11 PTG 路线 PS 端同时跑硬边、软边与 λ 三条**——硬边判别用 dot argmax、软边过渡用 acos δ smoothstep（R5）、高亮/位移用 λ。`CellDirLUT` 同时服务这三条路径：dot/acos 路径直接读 V_i；λ 路径在 §14.7 的三重积公式里也需要 V_A/V_B/V_C。
+> - **§14.7** 的 `SphericalBarycentric` λ 是**可微连续权重场**——R7（Triplanar 加权混合）、R11 PTG WPO 顶点位移、R13/§15 高亮 gap 都需要它（R5 不依赖 λ）。`CellDirLUT` 同时服务这三条路径：dot/acos 路径直接读 V_i；λ 路径在 §14.7 的三重积公式里也需要 V_A/V_B/V_C。
 
 #### 14.7.8 IsoSphere 直渲方案（§1~§13）是否需要改？
 
