@@ -662,6 +662,49 @@ l0 /= lsum; l1 /= lsum; l2 /= lsum;
 
 进一步：**根据三对 (LayerIdxᵢ, LayerIdxⱼ) 决定噪声参数**——海岸用低频大幅、平原-森林用高频小幅、城-野用块状。可以预存一张 `LayerPair → NoiseParams` 的小 LUT，在三对之间各扰一次再综合。
 
+#### 6.4.1 R6 落地方案：在 R5 球面距离 δ 上叠加噪声扰动（与 R4/R5 几何兼容）
+
+**注意**：上面 §6.4 原文是基于"在 λ 空间做噪声扰动"（路径 A），与 R3 的 argmax(λ) 折线判别相配。R5 已把判别量切换为"球面有符号弧度距离 $\delta_i$"——所以 R6 必须把噪声直接叠加到 $\delta_i$ 上，才能保持与 R4/R5 的几何严格兼容。
+
+**核心公式**：
+
+$$
+\tilde\delta_i = \delta_i + n_i(\hat{d}) \cdot \text{NoiseAmplitude}
+$$
+
+其中：
+
+- $\delta_i = \arccos(\hat{d}\cdot V_i) - \min_{j\neq i}\arccos(\hat{d}\cdot V_j)$（沿用 R5 §6.3.1 定义）
+- $n_i(\hat{d}) \in [-1, +1]$ 是与 $\hat{d}$ 和 cell $i$ 共同确定的 3D 噪声；同一空间点对同一 cell 必须返回相同值（避免接缝）
+- NoiseAmplitude 单位为**绝对弧度**，与 EdgeWidth 同制
+- 软边权重沿用 R5：$w_i = \text{smoothstep}(\text{EdgeWidth}/2, -\text{EdgeWidth}/2, \tilde\delta_i)$
+
+**三个核心约束**：
+
+1. **per-cell 独立噪声**：$n_i$ 必须基于 (dir, $V_i$) 一起采样（如 `noise3D(dir * NoiseScale + V_i * HashOffset)`），不能用全局 `noise3D(dir).xyz` 三分量——后者会让"被扰动的 Voronoi 边"依赖于第三个 cell（c2）的存在，跨三角形边时该 cell 切换会导致边形状跳变
+2. **跨 mesh 边连续性**：mesh 边上 c0/c1 两侧的两个三角形共享 c0、c1（仅 c2 不同），所以 $n_0, n_1$ 在边上完全一致 → $\tilde\delta_0, \tilde\delta_1$ 跨边连续 → cell 边在跨 mesh 边时**没有缝**
+3. **球面归一化采样**：噪声采样输入用 $\hat{d}$（单位方向）而非 WorldPos——前者跨星球半径、跨 sub 等级语义不变；后者会因 Radius 变化而视觉频率变化
+
+**参数语义**（含单位）：
+
+| 参数 | 单位 | 含义 | 推荐值 |
+| --- | --- | --- | --- |
+| `NoiseAmplitude` | 绝对弧度 | 边在垂直方向的最大摆动幅度 | 0（关闭）/ 0.02（微妙）/ 0.05（明显蜿蜒）/ 0.10（强变形） |
+| `NoiseScale` | 每弧度周期数 | 噪声频率（每弧度多少个起伏） | 5（大尺度海岸）/ 20（中等）/ 50（细密锯齿） |
+
+**与 R5 EdgeWidth 的正交性**：
+
+| EdgeWidth | NoiseAmplitude | 视觉效果 |
+| --- | --- | --- |
+| 0 | 0 | R4 测地线硬直边 |
+| 0 | > 0 | 硬边但形状蜿蜒 |
+| > 0 | 0 | R5 软直边 |
+| > 0 | > 0 | 软边且形状蜿蜒（最丰富） |
+
+**约束上限**：`NoiseAmplitude < TriRadius`（约 0.18 弧度，sub=3 时三角形外接圆半径）。超过该值会让噪声把 cell 边推出三角形覆盖范围，产生伪影（"互锁"——见 §12 风险表）。建议 ≤ 0.1。
+
+**HLSL 噪声实现**：用嵌入式 hash-based 3D value noise（约 25 行，无需依赖材质 Noise 节点）；详细代码、cpp 改动、材质接线见 [R6_BoundaryNoise.md](R6_BoundaryNoise.md)。
+
 ### 6.5 Triplanar 解决球面 UV 接缝
 
 球面没有非奇异的全局 UV 参数化。对于**细节纹理**（草、岩、沙），不要用顶点 UV，改用 Triplanar：
@@ -775,11 +818,11 @@ CPU 侧：
 | **R3** | ✅ 已完成 | 把 `argmax → hash(c)` 改为 `argmax → LUT.Load(c).r * 255 → hash(layer)`；保留 §6.2 的 `λᵢ` 加权混合作为对照写法（详见 [R3_CellAttrLUTMaterial.md](R3_CellAttrLUTMaterial.md) 附录 A） | 球面被多种色块密铺，每色块内部完全均匀；不同 layer 之间硬边、同 layer 完全融合；调小 `NumLayersHint` 看到大片相邻 hex 颜色合并；Output Log 输出 `Rebuilt (R3: ...) LUT=OK` |
 | **R4** | 🛠 cpp 完成（待材质验收） | **基于外心垂面的三角分割**——把判别准则从 `argmax(λ)`（外心→边中点折线边界）改为 `argmax(dot(dir, V_i))`（球面 Voronoi / 真正测地线 hex 边）。cpp 端新增 1×NumCells、PF_A32B32G32R32F 的 `CellDirLUT`（RGB = `UnitCenter`、A = `bIsPentagon`），通过 MID 注入 PS；`PlanetCenter` 也走 MID Vector 参数。PS 端用 R3 已解码的 c0/c1/c2 三次 `Texture2D.Load` 取得三个 cell 的中心方向，计算 `dot(dir, V_i)` 取 argmax。**消除 R3 hex/pent 边在 mesh 边中点处的可见折角**（详见 [R4_VoronoiBoundary.md](R4_VoronoiBoundary.md)） | 球面 hex/pent 边视觉上是平滑的测地线大圆弧，**任何相邻 cell 之间的边没有折点**；从近距离 / 高 sub 下侧视检查：图像中 hex 边的曲率连续；其他效果（NumLayersHint 影响、LUT 注入）保持 R3 一致 |
 | **R5** | 🛠 cpp 完成（待材质验收） | 在 R4 球面 Voronoi 距离空间做软边——定义 $\delta_i = \theta_i - \min_{j\neq i}\theta_j$（到 Voronoi 边的有符号绝对弧度距离，$\theta_i = \arccos(\hat{d}\cdot V_i)$），权重 $w_i = \text{smoothstep}(\text{EdgeWidth}/2, -\text{EdgeWidth}/2, \delta_i)$。`EdgeWidth = 0` 退化为 R4 硬边；`EdgeWidth > 0` 时过渡带是测地线大圆弧两侧的等距弧度带；颜色三层独立 hash 加权。`EdgeWidth` 单位为**绝对弧度**（跨 sub 语义不变）（详见 [R5_SharpenSoftEdge.md](R5_SharpenSoftEdge.md)） | `EdgeWidth = 0` 视觉与 R4 完全一致；`EdgeWidth = 0.05`（约 2.86°）看到 hex/pent 边变成等宽测地线软边；`EdgeWidth = 0.20` 看到大幅柔软渐变；过渡带在 mesh 边中点处与硬边路径几何严格对齐（**无相位错位**） |
-| **R6** | ⏳ 待开始 | 加边界 3D 噪声扰动（§6.4） | 海岸线/山脚不规则 |
+| **R6** | 🛠 cpp 完成 | 在 R5 球面距离空间叠加 per-cell 3D 噪声扰动——$\tilde\delta_i = \delta_i + n_i(\hat{d}) \cdot \text{NoiseAmplitude}$，软边权重沿用 R5 公式但用 $\tilde\delta_i$ 替代 $\delta_i$。`NoiseAmplitude` 单位为**绝对弧度**（与 EdgeWidth 同制），`NoiseScale` 单位为每弧度周期数；`NoiseAmplitude = 0` 退化为 R5；与 EdgeWidth **正交**——可独立控制"软/硬"和"直/蜿蜒"两个视觉维度（详见 [R6_BoundaryNoise.md](R6_BoundaryNoise.md)） | `NoiseAmplitude = 0` 视觉与 R5 一致；`NoiseAmplitude = 0.05, NoiseScale = 10` 看到 hex/pent 边变成蜿蜒曲线但仍可识别原 cell 形状；跨 mesh 边时 cell 边形状连续无缝；`EdgeWidth = 0 + NoiseAmplitude > 0` 看到硬边蜿蜒；`EdgeWidth > 0 + NoiseAmplitude > 0` 看到软边蜿蜒 |
 | **R7** | ⏳ 待开始 | 切到 `Texture2DArray + Triplanar` 真实地表纹理 | 草、沙、雪皮肤 |
 | **R8** | ⏳ 待开始 | 接入 `WorldGen` 的 `FCellGeoData → LayerIndex`，跑出第一张可玩星球 | 12 五边形可见、海陆分布 |
 | **R9** | ⏳ 待开始 | 加 Decor / Owner / Fog 三套独立 LUT | 政治版图 + 战争迷雾上线 |
-| **R10** | ⏳ 待开始 | LOD 优化：远距离用 R3（线性混合）、近距离用 R6（带噪声） | 远景帧时间下降 |
+| **R10** | ⏳ 待开始 | LOD 优化：远距离用 R4（硬直边、无噪声）、近距离用 R6（软蔓蜒边） | 远景帧时间下降 |
 | **R11** *(生产路线)* | ⏳ 待开始 | 渲染从 IsoSphere 切到 PTG 高细分球皮 + GPU `FindNearestCell`（详见 §14） | 像素细节大幅提升、AttrLUT/材质资产无修改地继承 |
 | **R12** *(生产路线)* | ⏳ 待开始 | 在材质 WPO 节点里按 `CellHeightLUT` 沿径向位移顶点 | 海陆出现真实几何起伏 |
 | **R13** *(生产路线)* | ⏳ 待开始 | 接入 §15 高亮描边带 + 选中 / 鼠标悬停的 LUT 联动 | hex 边发光描边、选中即时反馈 |
@@ -908,7 +951,7 @@ R3 验收发现：每条 cell 边在它所跨过的 mesh 边的中点处出现�
 | **R3 的 hex 边在 mesh 边中点折角** | argmax(λ) 等位线 = 外心-边中点折线，相邻三角形外心一般不重合 | R4 把判别准则改为球面 Voronoi（`argmax(dot(dir, V_i))`），等位线为大圆弧（详见 §11.3） |
 | **三角形顶点 OneHot 经过插值非线性** | 视口处于 Mip 边界 | 永远在 \"primary mesh 同分辨率\" 渲染，Mip 不影响顶点插值 |
 | **重心权重在退化三角形上发散** | 接近极地畸形三角形 | 正二十面体细分天然没有退化三角形，最差宽高比 < 2:1 |
-| **边界噪声太强导致 Cell 之间"互锁"伪影** | `NoiseAmplitude > 0.4` | 在材质里限制 `NoiseAmplitude ∈ [0, 0.3]` |
+| **边界噪声太强导致 Cell 之间"互锁"伪影** | `NoiseAmplitude > TriRadius`（sub=3 时 ≈ 0.18 弧度） | 在材质里限制 `NoiseAmplitude ∈ [0, 0.1]` 弧度（详见 §6.4.1） |
 | **更新 LUT 与渲染竞态** | 同一帧内连写 N 次 LUT | 走 `UpdateTextureRegions` 即可（UE 内部 deferred 到 RHI 线程），别用 Map/Unmap |
 | **跨 Cell 高度差导致 Z-fighting** | 地形抬升时同侧 Cell 共享顶点 | 渲染顶点已经独立化（每三角形 3 个），Z-fighting 只可能出现在同一 Cell 内的不同三角形之间，无影响 |
 | **多 Pass 的依赖**（Base 必须先于 Decor） | 写错 Pass 顺序 | 全部并入一个 PS，用顺序 `lerp` 链；不需要真正多 Pass |

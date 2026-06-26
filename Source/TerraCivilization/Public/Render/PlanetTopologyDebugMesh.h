@@ -42,6 +42,13 @@ class FSphereTopology;
  *     EdgeWidth 单位为绝对弧度（跨 sub 语义不变），EdgeWidth=0 退化为 R4 硬边。
  *     仅新增 1 个 Scalar Parameter（EdgeWidth）通过 MID 注入，无新增 LUT。
  *     详见 R5_SharpenSoftEdge.md。
+ * R6：在 R5 球面距离空间上叠加 per-cell 3D 噪声扰动——δ̃_i = δ_i + n_i(dir) * NoiseAmplitude;
+ *     其中 n_i(dir) = Noise3D(dir * NoiseScale + V_i * 7.919) ∈ [-1, 1]，per-cell 独立采样
+ *     以保证跨 mesh 边连续。软边权重公式沿用 R5 但用 δ̃_i 替代 δ_i。
+ *     NoiseAmplitude 单位为绝对弧度（与 EdgeWidth 同制），NoiseScale 单位为每弧度周期数。
+ *     NoiseAmplitude=0 退化为 R5；与 EdgeWidth 正交（可独立控制“软/硬”与“直/蔓蜒”两个视觉维度）。
+ *     仅新增 2 个 Scalar Parameters（NoiseAmplitude / NoiseScale）通过 MID 注入，无新增 LUT。
+ *     详见 R6_BoundaryNoise.md。
  */
 UCLASS()
 class TERRACIVILIZATION_API APlanetTopologyDebugMesh : public AActor
@@ -103,6 +110,42 @@ public:
      */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|R5", meta = (ClampMin = "0.0001", ClampMax = "0.5"))
     float EdgeWidth = 0.05f;
+
+    /**
+     * R6：边界噪声振幅（绝对弧度，与 EdgeWidth 同制）。
+     *
+     *   0      ：无噪声扰动，退化为 R5 测地线直边
+     *   0.02   ：约 1.15°，微妙起伏
+     *   0.05   ：约 2.86°，明显蔓蜒（材质默认）
+     *   0.10   ：约 5.73°，强变形
+     *
+     * 上限：必须 < TriRadius（sub=3 时 ≈ 0.184 弧度，sub=4 时 ≈ 0.092 弧度），
+     *       超过会导致“互锁”伪影（见 SDF 设计稿 §12 风险表）。
+     *       cpp 端 ClampMax = 0.1 防误用，跨 sub 都安全。
+     *
+     * 与 EdgeWidth 正交：
+     *   (EdgeWidth, NoiseAmplitude) = (0, 0)        → R4 硬直边
+     *   (EdgeWidth, NoiseAmplitude) = (0, 0.05)     → 硬蔓蜒边
+     *   (EdgeWidth, NoiseAmplitude) = (0.05, 0)     → R5 软直边
+     *   (EdgeWidth, NoiseAmplitude) = (0.05, 0.05)  → 软蔓蜒边（最丰富）
+     *
+     * 默认 0.0：Actor 刚创建时与 R5 视觉一致，供对比参考。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|R6", meta = (ClampMin = "0.0", ClampMax = "0.1"))
+    float NoiseAmplitude = 0.0f;
+
+    /**
+     * R6：边界噪声频率（每弧度周期数）。
+     *
+     *   5    ：低频，大尺度起伏（海岸线）
+     *   10   ：中频，明显蔓蜒（默认）
+     *   20   ：高频，细密锯齿（沙地纹理）
+     *   50   ：极高频，几乎成像素抖动
+     *
+     * 0 时噪声退化为常数（无视觉效果），所以 ClampMin = 0.1 兜底。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|R6", meta = (ClampMin = "0.1", ClampMax = "100.0"))
+    float NoiseScale = 10.0f;
 
     /**
      * 是否开启光滑法线。

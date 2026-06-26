@@ -440,6 +440,13 @@ void APlanetTopologyDebugMesh::Rebuild()
             //   PS 端：w_i = smoothstep(EdgeWidth/2, -EdgeWidth/2, δ_i)
             //   EdgeWidth=0 退化为 R4 硬边；EdgeWidth>0 过渡带总宽度 = EdgeWidth 弧度
             MID->SetScalarParameterValue(TEXT("EdgeWidth"), EdgeWidth);
+
+            // R6 新增注入：边界噪声振幅与频率
+            //   PS 端：δ̃_i = δ_i + Noise3D(dir * NoiseScale + V_i * 7.919) * NoiseAmplitude
+            //   NoiseAmplitude=0 退化为 R5；NoiseAmplitude>0 令 cell 边呈现蔓蜒曲线
+            //   per-cell 采样以保证跨 mesh 边连续（详见 R6_BoundaryNoise.md §1.5）
+            MID->SetScalarParameterValue(TEXT("NoiseAmplitude"), NoiseAmplitude);
+            MID->SetScalarParameterValue(TEXT("NoiseScale"),     NoiseScale);
         }
 
         // 注意：不能写 `MID ? (UMaterialInterface*)MID : Material` —— Material 是
@@ -452,22 +459,23 @@ void APlanetTopologyDebugMesh::Rebuild()
         // 因为 .uasset 二进制 dump 看不到 HLSL 关键字，我们必须从 cpp 端反射读
         // 编辑器内存里 UMaterialExpressionCustom::Code 的真实内容来证伪。
         //
-        // R5 期望材质里至少有一个 Custom 节点同时拥有以下 Inputs：
-        //   UV0, UV1, UV2, UV3, WorldPos, PlanetCenter, CellAttrLUT, CellDirLUT, EdgeWidth
-        // 缺失任意一项 → 打印 Error 级别日志（说明用户挂了 R3 / R4 旧材质，或新材质没接全）
+        // R6 期望材质里至少有一个 Custom 节点同时拥有以下 11 个 Inputs：
+        //   UV0, UV1, UV2, UV3, WorldPos, PlanetCenter, CellAttrLUT, CellDirLUT, EdgeWidth, NoiseAmplitude, NoiseScale
+        // 缺失任意一项 → 打印 Error 级别日志（说明用户挂了 R3/R4/R5 旧材质，或新材质没接全）
 #if WITH_EDITORONLY_DATA
         if (UMaterial* BaseMat = Material->GetMaterial())
         {
             const TConstArrayView<TObjectPtr<UMaterialExpression>> Exprs = BaseMat->GetExpressions();
             int32 CustomFound = 0;
-            // R5 期望 Inputs 集合（小写比较，容错命名风格）
-            const TArray<FString> ExpectedR5Inputs = {
+            // R6 期望 Inputs 集合（小写比较，容错命名风格）
+            const TArray<FString> ExpectedR6Inputs = {
                 TEXT("uv0"), TEXT("uv1"), TEXT("uv2"), TEXT("uv3"),
                 TEXT("worldpos"), TEXT("planetcenter"),
                 TEXT("cellattrlut"), TEXT("celldirlut"),
-                TEXT("edgewidth")
+                TEXT("edgewidth"),
+                TEXT("noiseamplitude"), TEXT("noisescale")
             };
-            bool bAnyR5Compliant = false;
+            bool bAnyR6Compliant = false;
 
             for (UMaterialExpression* Expr : Exprs)
             {
@@ -514,10 +522,10 @@ void APlanetTopologyDebugMesh::Rebuild()
                                                     .Replace(TEXT("\r"), TEXT("\\r")));
                     }
 
-                    // ---- R5 合规性检查 ----
+                    // ---- R6 合规性检查 ----
                     TArray<FString> Missing;
                     TArray<FString> Disconnected;
-                    for (const FString& Need : ExpectedR5Inputs)
+                    for (const FString& Need : ExpectedR6Inputs)
                     {
                         if (!PresentLower.Contains(Need))         { Missing.Add(Need); }
                         else if (!ConnectedLower.Contains(Need))  { Disconnected.Add(Need); }
@@ -525,23 +533,23 @@ void APlanetTopologyDebugMesh::Rebuild()
 
                     if (Missing.Num() == 0 && Disconnected.Num() == 0)
                     {
-                        bAnyR5Compliant = true;
+                        bAnyR6Compliant = true;
                         UE_LOG(LogPlanetTopologyDebugMesh, Warning,
-                            TEXT("    ✓ R5 compliance: ALL %d expected inputs present & connected"),
-                            ExpectedR5Inputs.Num());
+                            TEXT("    ✓ R6 compliance: ALL %d expected inputs present & connected"),
+                            ExpectedR6Inputs.Num());
                     }
                     else
                     {
                         if (Missing.Num() > 0)
                         {
                             UE_LOG(LogPlanetTopologyDebugMesh, Error,
-                                TEXT("    ✗ R5 missing inputs: [%s] — this is likely an R2/R3/R4 material, not R5"),
+                                TEXT("    ✗ R6 missing inputs: [%s] — this is likely an R2/R3/R4/R5 material, not R6"),
                                 *FString::Join(Missing, TEXT(", ")));
                         }
                         if (Disconnected.Num() > 0)
                         {
                             UE_LOG(LogPlanetTopologyDebugMesh, Error,
-                                TEXT("    ✗ R5 inputs declared but NOT connected: [%s]"),
+                                TEXT("    ✗ R6 inputs declared but NOT connected: [%s]"),
                                 *FString::Join(Disconnected, TEXT(", ")));
                         }
                     }
@@ -553,18 +561,18 @@ void APlanetTopologyDebugMesh::Rebuild()
                     TEXT("[PlanetTopologyDebugMesh] Material '%s' contains NO UMaterialExpressionCustom nodes!"),
                     *BaseMat->GetName());
             }
-            else if (!bAnyR5Compliant)
+            else if (!bAnyR6Compliant)
             {
                 UE_LOG(LogPlanetTopologyDebugMesh, Error,
-                    TEXT("[PlanetTopologyDebugMesh] Material '%s' has %d Custom nodes but NONE is R5-compliant. ")
-                    TEXT("Expected one Custom with inputs: UV0,UV1,UV2,UV3,WorldPos,PlanetCenter,CellAttrLUT,CellDirLUT,EdgeWidth. ")
-                    TEXT("See R5_SharpenSoftEdge.md §4 for the exact wiring."),
+                    TEXT("[PlanetTopologyDebugMesh] Material '%s' has %d Custom nodes but NONE is R6-compliant. ")
+                    TEXT("Expected one Custom with inputs: UV0,UV1,UV2,UV3,WorldPos,PlanetCenter,CellAttrLUT,CellDirLUT,EdgeWidth,NoiseAmplitude,NoiseScale. ")
+                    TEXT("See R6_BoundaryNoise.md §4 for the exact wiring."),
                     *BaseMat->GetName(), CustomFound);
             }
             else
             {
                 UE_LOG(LogPlanetTopologyDebugMesh, Log,
-                    TEXT("[PlanetTopologyDebugMesh] Material '%s' is R5-compliant ✓"),
+                    TEXT("[PlanetTopologyDebugMesh] Material '%s' is R6-compliant ✓"),
                     *BaseMat->GetName());
             }
         }
@@ -572,17 +580,20 @@ void APlanetTopologyDebugMesh::Rebuild()
     }
 
     UE_LOG(LogPlanetTopologyDebugMesh, Log,
-        TEXT("[PlanetTopologyDebugMesh] Rebuilt (R5: argmax(dot) + acos δ smoothstep soft edge). ")
+        TEXT("[PlanetTopologyDebugMesh] Rebuilt (R6: per-cell noise on δ + soft edge). ")
         TEXT("SubdivisionLevel=%d  Cells=%d  Corners=%d  Verts=%d  Tris=%d  Radius=%.1f  Smooth=%s  ")
         TEXT("CellAttrLUT=%s  CellDirLUT=%s  PlanetCenter=(%.1f,%.1f,%.1f)  ")
-        TEXT("EdgeWidth=%.4f rad (%.2f°)  NumLayersHint=%d"),
+        TEXT("EdgeWidth=%.4f rad (%.2f°)  NoiseAmplitude=%.4f rad (%.2f°)  NoiseScale=%.1f /rad  ")
+        TEXT("NumLayersHint=%d"),
         SubdivisionLevel, NumCells, NumCorners,
         Vertices.Num(), Triangles.Num() / 3, Radius,
         bSmoothNormals ? TEXT("true") : TEXT("false"),
         CellAttrLUT ? TEXT("OK") : TEXT("MISSING"),
         CellDirLUT  ? TEXT("OK") : TEXT("MISSING"),
         GetActorLocation().X, GetActorLocation().Y, GetActorLocation().Z,
-        EdgeWidth, EdgeWidth * 180.0 / PI,
+        EdgeWidth,      EdgeWidth      * 180.0 / PI,
+        NoiseAmplitude, NoiseAmplitude * 180.0 / PI,
+        NoiseScale,
         NumLayersHint);
 }
 

@@ -362,7 +362,7 @@ return (colA * wA + colB * wB + colC * wC) / wsum;
 
 | 阶段 | 接续动作 |
 | --- | --- |
-| **R6** | 在 δ 上叠 3D 噪声扰动：`δ_i_noised = δ_i + noise(WorldPos * scale) * NoiseAmplitude`，让 cell 边变蜿蜒不规则。EdgeWidth = 0 + 噪声 → 硬边但形状有机；EdgeWidth > 0 + 噪声 → 软边且形状有机。两个参数正交 |
+| **R6** | 在 δ 上叠 per-cell 3D 噪声扰动：`δ̃_i = δ_i + Noise3D(dir * NoiseScale + V_i * 7.919) * NoiseAmplitude`，让 cell 边变蜿蜒不规则。EdgeWidth = 0 + 噪声 → 硬边但形状有机；EdgeWidth > 0 + 噪声 → 软边且形状有机。两个参数正交（详见 [R6_BoundaryNoise.md](R6_BoundaryNoise.md)） |
 | **R7** | `hash(layer)` 哈希色换成 `Triplanar(TerrainAlbedoArray, layer, WorldPos, Normal)` 真实地表纹理；R5 的 $w_i$ 加权混合直接复用，每层换成 Triplanar 采样即可 |
 | **R8** | 接入 WorldGen 的 `FCellGeoData → LayerIndex` |
 | **R11** | R5 的 PS 核心 HLSL 在 PTG mesh 上零修改复用，仅 c0/c1/c2 换成 GPU `FindNearestCell` |
