@@ -9,6 +9,8 @@
 
 class UProceduralMeshComponent;
 class UMaterialInterface;
+class UMaterialInstanceDynamic;
+class UTexture2D;
 class FSphereTopology;
 
 /**
@@ -27,7 +29,9 @@ class FSphereTopology;
  *   光栅化插值出的重心坐标 (λ₀,λ₁,λ₂) 就是它到三个 Cell 的权重，
  *   这正是 SDF 设计稿 §1~§13 IsoSphere 直渲方案的拓扑前置约定。
  *
- * 当前 R1 仅渲染纯白材质，不写入任何 per-vertex 属性。
+ * R1：纯白材质，验证 mesh 几何与拓扑构建。
+ * R2：把 (TriCellId0, TriCellId1, TriCellId2, OneHot) 写入 UV1/UV2/UV3，材质里用 λ₀×hash(c₀) 着色。
+ * R3：构建 1×NumCells 的 CellAttrLUT，材质里 3 次 Load(LUT) 取每 Cell 的 LayerIndex，按 λᵢ 加权混合。
  */
 UCLASS()
 class TERRACIVILIZATION_API APlanetTopologyDebugMesh : public AActor
@@ -51,10 +55,26 @@ public:
 
     /**
      * 渲染材质。可在编辑器里指定为任意 Material；为空则使用 PMC 默认白材质
-     * （UEngine::DefaultMaterial）。R1 阶段保持纯白即可。
+     * （UEngine::DefaultMaterial）。
+     *
+     * R3 阶段：应指向一个引用了名为 "CellAttrLUT" 的 Texture2D 参数的材质。
+     * 本 Actor 会在 Rebuild 时通过 MID 把 CellAttrLUT 这张动态纹理传给材质。
      */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PlanetTopology")
     TObjectPtr<UMaterialInterface> Material;
+
+    /**
+     * R3 placeholder：每 Cell 的 LayerIndex 用伪随机值填充时的层数上限。
+     *
+     * 真正的 LayerIndex 应该由 WorldGen 根据 TerrainTag 决定（详见 SDF 设计稿）；
+     * 在 R3 阶段我们还没接入 WorldGen，所以用 (CellId * 2654435761u) %% NumLayersHint
+     * 这种 Knuth 哈希做 placeholder。
+     *
+     * 调小这个值（比如 8）可以让相同 LayerIndex 的 Cell 更频繁出现，便于看到
+     * "两个 hex 相邻地形相同时无可见边界" 的合并效果。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|R3", meta = (ClampMin = "1", ClampMax = "256"))
+    int32 NumLayersHint = 32;
 
     /**
      * 是否开启光滑法线。
@@ -85,4 +105,32 @@ private:
 
     /** 拓扑数据。OnConstruction 时按 SubdivisionLevel 构建。 */
     TUniquePtr<FSphereTopology> Topology;
+
+    /**
+     * R3：每 Cell 一个像素的 1×N 动态纹理（PF_B8G8R8A8）。
+     *   - R 通道（内存第 2 字节）= LayerIndex（uint8）
+     *   - GBA 通道留作 R3+ 扩展（LayerDecor / Variant / Mask）
+     *
+     * 由 RebuildCellAttrLUT_ 创建并填充 placeholder 数据。
+     * Filter=Nearest、SRGB=false、AddressX=Clamp。
+     */
+    UPROPERTY(VisibleAnywhere, Transient, Category = "PlanetTopology|R3")
+    TObjectPtr<UTexture2D> CellAttrLUT;
+
+    /**
+     * R3：包装外部 Material 的动态实例，用于按 Cell 数动态绑定 CellAttrLUT 参数。
+     * 每次 Rebuild 都会重建一次（保证 LUT 大小变化时材质始终绑到正确尺寸的纹理）。
+     */
+    UPROPERTY(Transient)
+    TObjectPtr<UMaterialInstanceDynamic> MID;
+
+    /**
+     * R3：构建/刷新 CellAttrLUT。每次 Rebuild() 都会调用一次。
+     *
+     * Placeholder 策略：LayerIndex = (CellId * 2654435761u) % NumLayersHint
+     *   —— 这是 Knuth 整数哈希常数（黄金分割），保证相邻 CellId 也能落在不同 Layer。
+     *
+     * R7 接入 WorldGen 后，本函数会被替换为 "按 FCellGeoData[].TerrainTag 的 LayerIndex 填表"。
+     */
+    void RebuildCellAttrLUT_(int32 NumCells);
 };
