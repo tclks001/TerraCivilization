@@ -37,6 +37,11 @@ class FSphereTopology;
  *     消除 R3 hex/pent 边在 mesh 边中点处的折角，使 cell 边视觉上是测地线大圆弧。
  *     PlanetCenter 通过 MID Vector Parameter 注入，PS 端 dir = normalize(WorldPos - PlanetCenter)。
  *     详见 R4_VoronoiBoundary.md。
+ * R5：在 R4 球面 Voronoi 距离空间加软边过渡——定义 δ_i = acos(dot(dir,V_i)) - min(acos(其它));
+ *     权重 w_i = smoothstep(EdgeWidth/2, -EdgeWidth/2, δ_i)，三层 hash 加权混合。
+ *     EdgeWidth 单位为绝对弧度（跨 sub 语义不变），EdgeWidth=0 退化为 R4 硬边。
+ *     仅新增 1 个 Scalar Parameter（EdgeWidth）通过 MID 注入，无新增 LUT。
+ *     详见 R5_SharpenSoftEdge.md。
  */
 UCLASS()
 class TERRACIVILIZATION_API APlanetTopologyDebugMesh : public AActor
@@ -80,6 +85,24 @@ public:
      */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|R3", meta = (ClampMin = "1", ClampMax = "256"))
     int32 NumLayersHint = 32;
+
+    /**
+     * R5：软边过渡带的总弧度宽度（绝对量，单位为弧度）。
+     *
+     *   0      ：退化为 R4 严格硬边（smoothstep → Heaviside）
+     *   0.02   ：约 1.15°，微妙抗锯齿
+     *   0.05   ：约 2.86°，清晰可见软边（默认）
+     *   0.10   ：约 5.73°，中等柔软
+     *   0.30   ：约 17.2°，大幅柔软（接近 sub=3 三角形外接圆半径）
+     *
+     * 上限：sub=3 时正二十面体三角形最长边 ≈ 1.107 弧度，建议 ≤ 0.3。
+     * 跨 sub 语义不变 —— sub=3 / sub=4 / R11 PTG 路线下同样的 0.05 弧度视觉宽度都是约 2.86°。
+     *
+     * ClampMin = 0.0001 而非 0：避免 smoothstep(edge0=edge1=0) 触发除零（详见 R5_SharpenSoftEdge.md 附录 B）。
+     * 视觉上 0.0001 弧度（约 0.006°）已经等同于硬边。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|R5", meta = (ClampMin = "0.0001", ClampMax = "0.5"))
+    float EdgeWidth = 0.05f;
 
     /**
      * 是否开启光滑法线。

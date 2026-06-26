@@ -261,10 +261,11 @@ Custom material missing input 4 (LUT)
 
 | 步骤 | 接续动作 |
 | --- | --- |
-| **R4** | 加 `Sharpen(λ)` 软边控制：在 R3 的 argmax 硬边与"1/3 加权"软边之间连续切换；`EdgeWidth ∈ [0, 0.5]` |
-| **R5** | 在 λ 上叠 3D 噪声扰动：边界变蜿蜒，山脚变参差不齐 |
-| **R6** | 把 `hash(layer)` 哈希色换成 `Triplanar(TerrainAlbedoArray, layer, WorldPos, Normal)` 真实地形纹理 |
-| **R7** | 接入 WorldGen 的 `FCellGeoData → LayerIndex`，跑出第一张可玩星球；`RebuildCellAttrLUT_` 中的 Knuth 哈希 placeholder 被真实数据替换 |
+| **R4** | 把 R3 的 `argmax(λ)` 折线硬边升级为球面 Voronoi `argmax(dot(dir, V_i))` 测地线大圆弧硬边——消除 hex 边在 mesh 边中点处的可见折角（详见 [R4_VoronoiBoundary.md](R4_VoronoiBoundary.md)） |
+| **R5** | 在 R4 球面 Voronoi 距离空间加 `Sharpen(δ, EdgeWidth)` 软边：过渡带几何 = 测地线大圆弧两侧的等距弧度带，`EdgeWidth = 0` 退化为 R4（详见 [R5_SharpenSoftEdge.md](R5_SharpenSoftEdge.md)） |
+| **R6** | 在 δ 上叠 3D 噪声扰动：海岸线/山脚不规则 |
+| **R7** | 把 `hash(layer)` 哈希色换成 `Triplanar(TerrainAlbedoArray, layer, WorldPos, Normal)` 真实地形纹理 |
+| **R8** | 接入 WorldGen 的 `FCellGeoData → LayerIndex`，跑出第一张可玩星球；`RebuildCellAttrLUT_` 中的 Knuth 哈希 placeholder 被真实数据替换 |
 
 ---
 

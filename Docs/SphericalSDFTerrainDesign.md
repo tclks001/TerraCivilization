@@ -603,6 +603,46 @@ w0 /= wsum; w1 /= wsum; w2 /= wsum;
 
 > 想要**Civ 风格的硬边棱柱**？`EdgeWidth = 0.0`、关闭噪声扰动；想要**E&D 风格的有机过渡**？`EdgeWidth = 0.4` + 小幅噪声。设计师可以在 `MaterialParameterCollection` 里直接调。
 
+#### 6.3.1 R5 落地方案：基于球面角距离的绝对弧度软边（路径 B）
+
+**注意**：上面的 §6.3 原文是基于"在 λ 空间做 smoothstep"的路径 A（沿用 R3 的 argmax(λ) 折线判别）。R4 已把判别准则切换到"球面 Voronoi `argmax(dot(dir, V_i))`"——λ 空间的 smoothstep 与 R4 测地线大圆硬边**不再几何对齐**：过渡带会在 mesh 边中点处出现相位错位（外面 λ 软渐变沿折线、内核 dot 硬切沿大圆弧）。
+
+**R5 实施方案**：在 R4 球面 Voronoi 距离空间直接做软边，过渡带的几何形状与 R4 硬边严格对齐为**测地线大圆弧两侧的等距带**。
+
+**核心数学**：定义当前像素方向 $\hat{d}$ 与 cell $i$ 的**球面角距离** $\theta_i = \arccos(\hat{d}\cdot V_i)$，则到 cell $i$ 的 Voronoi 边的**有符号弧度距离**为
+
+$$
+\delta_i = \theta_i - \min_{j\neq i}\theta_j
+$$
+
+- $\delta_i > 0$：cell $i$ 不是最近的（在边外侧），离边 $|\delta_i|$ 弧度
+- $\delta_i = 0$：像素正好在 cell $i$ 的 Voronoi 边上
+- $\delta_i < 0$：cell $i$ 是最近的（在边内侧），离边 $|\delta_i|$ 弧度
+
+**软边权重**：
+
+$$
+w_i = \mathrm{smoothstep}\!\left(\tfrac{\text{EdgeWidth}}{2},\ -\tfrac{\text{EdgeWidth}}{2},\ \delta_i\right)
+$$
+
+`EdgeWidth` 单位为**绝对弧度**（不归一化、不依赖三角形大小）：
+- `EdgeWidth = 0` → `smoothstep` 退化为 Heaviside 阶跃 → 严格还原 R4 硬边
+- `EdgeWidth = 0.05` → 过渡带总宽 0.05 弧度（约 2.86°），每侧延伸 0.025 弧度
+- `EdgeWidth = 0.10` → 过渡带总宽 0.10 弧度（约 5.73°）
+- 上限：sub=3 时正二十面体三角形最长边 ≈ 1.107 弧度，建议 `EdgeWidth ∈ [0, 0.3]` 远低于此
+
+**颜色三层独立加权**：
+
+$$
+\text{color} = \frac{\sum_i w_i \cdot \text{hash}(\text{layer}_i)}{\sum_i w_i + \epsilon}
+$$
+
+**为什么用 acos 而非沿用 §14.7.7 的 dot 距离**：§14.7.5 论证了 sub=3 时三重积版 λ 与球面面积版 λ 差 $O(\text{Area}^2) \approx 0.001\%$。但 R5 的 `EdgeWidth` 是**绝对弧度物理量**，需要"跨 sub 语义不变"——用 acos 后 `EdgeWidth=0.05` 在 sub=3 / sub=4 / R11 PTG 路线上视觉宽度完全相同；如果用裸 dot 差量，需要按三角形大小局部归一化，反而引入额外耦合。HLSL `acos` 在现代 GPU 上 ~2 cycle/op，每像素 3 次 acos 可忽略。
+
+**与生产路线（R11+）共用**：本路径在 R11 PTG mesh 上语义完全相同——cpp 端不变（`CellDirLUT` 沿用），HLSL 不变（`dir = normalize(WorldPos - PlanetCenter)` 起点相同），仅 `c0/c1/c2` 来源从"UV 还原"换成"GPU `FindNearestCell`"。因此 R5 的 Custom 节点可在 R11 整段直接搬运。
+
+详细落地步骤、HLSL 完整代码、cpp 改动、材质接线、验收清单详见 [R5_SharpenSoftEdge.md](R5_SharpenSoftEdge.md)。
+
 ### 6.4 边界扰动（让边缘自然不规则）
 
 直接用重心坐标得到的边界是**直线**（在三角形内部）/**测地线弧**（连成 hex 后的全局边界）——视觉上太"工程"。叠一层 3D 噪声扰动权重：
@@ -734,7 +774,7 @@ CPU 侧：
 | **R2** | ✅ 已完成 | 把每个顶点的 `(TriCellId0, TriCellId1, TriCellId2)` 与 OneHot 写到 UV1/UV2/UV3；材质用 PS 端 `argmax(λ)` 选 CellId、`hash(c_argmax)` 输出颜色（**硬边路径**，详见 [§2.1.2](#212-视觉错觉防御13-角块的判别准则用于-r2r3-验收)） | 球面被 642 个纯色 hex/pent 多边形完整密铺、12 个 pent 可见、hex/pent 之间是硬边、三角形几何边界与 hex 边界完全分离（详见 [R2_TopologyDebugMaterial.md](R2_TopologyDebugMaterial.md)） |
 | **R3** | ✅ 已完成 | 把 `argmax → hash(c)` 改为 `argmax → LUT.Load(c).r * 255 → hash(layer)`；保留 §6.2 的 `λᵢ` 加权混合作为对照写法（详见 [R3_CellAttrLUTMaterial.md](R3_CellAttrLUTMaterial.md) 附录 A） | 球面被多种色块密铺，每色块内部完全均匀；不同 layer 之间硬边、同 layer 完全融合；调小 `NumLayersHint` 看到大片相邻 hex 颜色合并；Output Log 输出 `Rebuilt (R3: ...) LUT=OK` |
 | **R4** | 🛠 cpp 完成（待材质验收） | **基于外心垂面的三角分割**——把判别准则从 `argmax(λ)`（外心→边中点折线边界）改为 `argmax(dot(dir, V_i))`（球面 Voronoi / 真正测地线 hex 边）。cpp 端新增 1×NumCells、PF_A32B32G32R32F 的 `CellDirLUT`（RGB = `UnitCenter`、A = `bIsPentagon`），通过 MID 注入 PS；`PlanetCenter` 也走 MID Vector 参数。PS 端用 R3 已解码的 c0/c1/c2 三次 `Texture2D.Load` 取得三个 cell 的中心方向，计算 `dot(dir, V_i)` 取 argmax。**消除 R3 hex/pent 边在 mesh 边中点处的可见折角**（详见 [R4_VoronoiBoundary.md](R4_VoronoiBoundary.md)） | 球面 hex/pent 边视觉上是平滑的测地线大圆弧，**任何相邻 cell 之间的边没有折点**；从近距离 / 高 sub 下侧视检查：图像中 hex 边的曲率连续；其他效果（NumLayersHint 影响、LUT 注入）保持 R3 一致 |
-| **R5** | ⏳ 待开始 | 加 §6.3 的 `Sharpen(λ)` 软边控制（在 argmax 与线性混合之间连续过渡） | `EdgeWidth` 拉到 0 时 Civ 风格硬边、拉到 0.5 时柔软渐变 |
+| **R5** | 🛠 cpp 完成（待材质验收） | 在 R4 球面 Voronoi 距离空间做软边——定义 $\delta_i = \theta_i - \min_{j\neq i}\theta_j$（到 Voronoi 边的有符号绝对弧度距离，$\theta_i = \arccos(\hat{d}\cdot V_i)$），权重 $w_i = \text{smoothstep}(\text{EdgeWidth}/2, -\text{EdgeWidth}/2, \delta_i)$。`EdgeWidth = 0` 退化为 R4 硬边；`EdgeWidth > 0` 时过渡带是测地线大圆弧两侧的等距弧度带；颜色三层独立 hash 加权。`EdgeWidth` 单位为**绝对弧度**（跨 sub 语义不变）（详见 [R5_SharpenSoftEdge.md](R5_SharpenSoftEdge.md)） | `EdgeWidth = 0` 视觉与 R4 完全一致；`EdgeWidth = 0.05`（约 2.86°）看到 hex/pent 边变成等宽测地线软边；`EdgeWidth = 0.20` 看到大幅柔软渐变；过渡带在 mesh 边中点处与硬边路径几何严格对齐（**无相位错位**） |
 | **R6** | ⏳ 待开始 | 加边界 3D 噪声扰动（§6.4） | 海岸线/山脚不规则 |
 | **R7** | ⏳ 待开始 | 切到 `Texture2DArray + Triplanar` 真实地表纹理 | 草、沙、雪皮肤 |
 | **R8** | ⏳ 待开始 | 接入 `WorldGen` 的 `FCellGeoData → LayerIndex`，跑出第一张可玩星球 | 12 五边形可见、海陆分布 |
@@ -769,7 +809,7 @@ return saturate(hash(layer + 1) + 0.25);
 
 C++ 端 `RebuildCellAttrLUT_(NumCells)` 已实现完整：用 `UTexture2D::CreateTransient` 创建 1×N 的 BGRA8 纹理，`PlatformData->Mips[0].BulkData.Lock(LOCK_READ_WRITE)` 写入 LayerIndex（Knuth 哈希 placeholder），`UpdateResource()` 同步上传。`Rebuild()` 末尾用 `UMaterialInstanceDynamic::Create` + `SetTextureParameterValue("CellAttrLUT", LUT)` 绑参数。完整代码见 [PlanetTopologyDebugMesh.cpp](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp)；材质搭建详见 [R3_CellAttrLUTMaterial.md](R3_CellAttrLUTMaterial.md)。
 
-**R3 阶段不引入"λ 加权三方混合"**——它会冲销 R2 验证过的 1/3 角块切分，倒退成"5/6 三角形围一个色块"的视觉错觉密铺，与 §2.1.2 的判别准则相违。如确实需要软边过渡，会在 R5 通过 `Sharpen(λ, edgeWidth)` 函数控制——`edgeWidth = 0` 时还原为 R4 的 Voronoi 硬边，`edgeWidth = 0.5` 时退化为 λ 加权软边，让两条路径成为同一公式的连续插值。R3 文档附录 A 保留了 λ 加权写法作对照参考。
+**R3 阶段不引入"λ 加权三方混合"**——它会冲销 R2 验证过的 1/3 角块切分，倒退成"5/6 三角形围一个色块"的视觉错觉密铺，与 §2.1.2 的判别准则相违。如确实需要软边过渡，会在 R5 通过球面 Voronoi 距离空间的 `Sharpen(δ, EdgeWidth)` 控制——`EdgeWidth = 0` 时退化为 R4 的硬边、`EdgeWidth > 0` 时过渡带是测地线大圆弧两侧的等距弧度带（详见 §6.3.1 与 [R5_SharpenSoftEdge.md](R5_SharpenSoftEdge.md)）。R3 文档附录 A 保留了 λ 加权写法作对照参考。
 
 #### 11.2.1 fp16 精度陷阱与 8-bit 拆分编码（实施期填的关键坑）
 
@@ -1408,9 +1448,10 @@ float3 SphericalBarycentric(float3 dir, float3 V_A, float3 V_B, float3 V_C)
 
 > **R4 dot argmax 硬边判别 vs. §14.7 λ 软边权重的并存关系**：
 > - **R4** 在 PS 端用 `argmax(dot(dir, V_i))` 做**硬边切分**——只关心"像素归哪个 cell"，无可微权重需求，得到测地线大圆等位线；
-> - **§14.7** 的 `SphericalBarycentric` λ 是**可微连续权重场**——R5（Sharpen 软边）、R7（Triplanar 加权混合）、R11 PTG WPO 顶点位移、R13/§15 高亮 gap 都需要它。
+> - **R5** 在 R4 的 dot 距离空间直接做软边——用 $\delta_i = \arccos(\hat{d}\cdot V_i) - \min_{j\neq i}\arccos(\hat{d}\cdot V_j)$ 的 smoothstep（详见 §6.3.1）。R5 既不走 λ 也不走 dot argmax，而是走"球面角距离差"，与 R4 几何严格对齐；
+> - **§14.7** 的 `SphericalBarycentric` λ 是**可微连续权重场**——R7（Triplanar 加权混合）、R11 PTG WPO 顶点位移、R13/§15 高亮 gap 都需要它（R5 不依赖 λ）。
 >
-> 两者**严格同区**：在球面三角形内，`argmax_i(dot(dir, V_i))` 与 `argmax_i(λ_i)` 划分出的 cell 区域**完全重合**（都满足 §14.7.4 的三个不变量：cell 中心 onehot、共享边 0.5/0.5/0、外心 1/3/1/3）。R4 与 §14.7/§15 不冲突，**R11 PTG 路线 PS 端同时跑两条**——硬边判别用 dot argmax（决定纹理硬切分），软边/高亮/位移用 λ（决定连续过渡量）。`CellDirLUT` 同时服务这两条路径：dot 路径直接读 V_i；λ 路径在 §14.7 的三重积公式里也需要 V_A/V_B/V_C。
+> 三条路径**严格同区**：在球面三角形内，`argmax_i(dot(dir, V_i))`、`argmax_i(λ_i)`、`argmax_i(-θ_i)` 划分出的 cell 区域**完全重合**（都满足 §14.7.4 的三个不变量：cell 中心 onehot、共享边 0.5/0.5/0、外心 1/3/1/3）。R4/R5 与 §14.7/§15 不冲突，**R11 PTG 路线 PS 端同时跑硬边、软边与 λ 三条**——硬边判别用 dot argmax、软边过渡用 acos δ smoothstep（R5）、高亮/位移用 λ。`CellDirLUT` 同时服务这三条路径：dot/acos 路径直接读 V_i；λ 路径在 §14.7 的三重积公式里也需要 V_A/V_B/V_C。
 
 #### 14.7.8 IsoSphere 直渲方案（§1~§13）是否需要改？
 
