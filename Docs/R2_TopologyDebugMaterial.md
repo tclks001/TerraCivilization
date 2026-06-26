@@ -58,16 +58,19 @@ R2 视觉验收的核心目标 = **让 5/6 个 1/3 角块的拼合关系肉眼�
 
 - **Output Type** = `CMOT Float3`
 - **Inputs**（依次添加，顺序必须与 Code 中的形参一致）：
-  1. `UV1` (Float2) ← `TextureCoordinate(Index=1)`
-  2. `UV2x` (Float1) ← `TextureCoordinate(Index=2)` 经 `ComponentMask R`
-  3. `UV3` (Float2) ← `TextureCoordinate(Index=3)`
+  1. `UV0` (Float2) ← `TextureCoordinate(Index=0)`
+  2. `UV1` (Float2) ← `TextureCoordinate(Index=1)`
+  3. `UV2` (Float2) ← `TextureCoordinate(Index=2)`
+  4. `UV3` (Float2) ← `TextureCoordinate(Index=3)`
 - **Code**：
 
 ```hlsl
-// 1) 还原 3 个 CellId（三个顶点写同样值，插值后 round 即可）
-int c0 = (int)(UV1.x  + 0.5);
-int c1 = (int)(UV1.y  + 0.5);
-int c2 = (int)(UV2x   + 0.5);
+// 1) 8-bit 拆分解码 3 个 CellId（避开 fp16 精度问题）
+//    cpp 端写入：UV0=(HiC,LoC)、UV1=(HiA,LoA)、UV2=(HiB,LoB)
+//    解码：CellId = round(Hi)*256 + round(Lo)
+int c0 = (int)(UV1.x + 0.5) * 256 + (int)(UV1.y + 0.5);
+int c1 = (int)(UV2.x + 0.5) * 256 + (int)(UV2.y + 0.5);
+int c2 = (int)(UV0.x + 0.5) * 256 + (int)(UV0.y + 0.5);
 
 // 2) 还原重心坐标 (λ₀, λ₁, λ₂)，硬件免费给我们的"三方权重"
 float l0 = saturate(UV3.x);

@@ -32,6 +32,11 @@ class FSphereTopology;
  * R1：纯白材质，验证 mesh 几何与拓扑构建。
  * R2：把 (TriCellId0, TriCellId1, TriCellId2, OneHot) 写入 UV1/UV2/UV3，材质里用 λ₀×hash(c₀) 着色。
  * R3：构建 1×NumCells 的 CellAttrLUT，材质里 3 次 Load(LUT) 取每 Cell 的 LayerIndex，按 λᵢ 加权混合。
+ * R4：新增 1×NumCells 的 CellDirLUT（FP32 RGBA = (UnitCenter.xyz, isPentagon)），
+ *     材质里把判别准则从 argmax(λ) 改为球面 Voronoi argmax(dot(dir, V_i))，
+ *     消除 R3 hex/pent 边在 mesh 边中点处的折角，使 cell 边视觉上是测地线大圆弧。
+ *     PlanetCenter 通过 MID Vector Parameter 注入，PS 端 dir = normalize(WorldPos - PlanetCenter)。
+ *     详见 R4_VoronoiBoundary.md。
  */
 UCLASS()
 class TERRACIVILIZATION_API APlanetTopologyDebugMesh : public AActor
@@ -87,6 +92,9 @@ public:
 
     //~ AActor
     virtual void OnConstruction(const FTransform& Transform) override;
+#if WITH_EDITOR
+    virtual void PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
     //~ End AActor
 
     /**
@@ -118,6 +126,20 @@ private:
     TObjectPtr<UTexture2D> CellAttrLUT;
 
     /**
+     * R4：每 Cell 一个像素的 1×N 动态纹理（PF_A32B32G32R32F）。
+     *   - R/G/B 通道 = Cells[Cid].UnitCenter（单位向量，FP32 精度）
+     *   - A     通道 = bIsPentagon ? 1.0 : 0.0（预留给 R5+ pent 特判）
+     *
+     * 用途：PS 端用 c0/c1/c2 三次 Load 取得三个 cell 的中心方向，
+     * 计算 dot(dir, V_i) 做球面 Voronoi 判别，等位线为测地线大圆弧。
+     *
+     * 由 RebuildCellDirLUT_ 创建并填充。Filter=Nearest、SRGB=false、AddressX=Clamp。
+     * 必须 FP32 —— R16F 对方向夹角精度不够，会让相邻 cell 中心方向被截断到同一格。
+     */
+    UPROPERTY(VisibleAnywhere, Transient, Category = "PlanetTopology|R4")
+    TObjectPtr<UTexture2D> CellDirLUT;
+
+    /**
      * R3：包装外部 Material 的动态实例，用于按 Cell 数动态绑定 CellAttrLUT 参数。
      * 每次 Rebuild 都会重建一次（保证 LUT 大小变化时材质始终绑到正确尺寸的纹理）。
      */
@@ -133,4 +155,19 @@ private:
      * R7 接入 WorldGen 后，本函数会被替换为 "按 FCellGeoData[].TerrainTag 的 LayerIndex 填表"。
      */
     void RebuildCellAttrLUT_(int32 NumCells);
+
+    /**
+     * R4：构建/刷新 CellDirLUT（1×NumCells、PF_A32B32G32R32F）。每次 Rebuild() 都会调用一次。
+     *
+     * 像素 (R, G, B, A) = (UnitCenter.x, UnitCenter.y, UnitCenter.z, isPentagon ? 1 : 0)
+     *
+     * PS 端用法：
+     *   float3 V_i = CellDirLUT.Load(int3(c_i, 0, 0)).rgb;
+     *   float  dot_i = dot(dir, V_i);
+     *   int    chosen = argmax_i(dot_i);
+     *
+     * 必须用 PF_A32B32G32R32F：R16F 对方向夹角精度不够（cell 中心方向会被截断到同一格，
+     * 导致 dot 距离判别失效）。FP32 在 sub=3 时只占 642×16 = ~10 KB，常驻 GPU L2 cache。
+     */
+    void RebuildCellDirLUT_(int32 NumCells);
 };
