@@ -40,6 +40,43 @@ FSphereTopology::~FSphereTopology()
 
 void FSphereTopology::Build()
 {
+	// 幂等保证：清空所有可变状态，无论之前 Build 过几次都得到相同结果。
+	// 如果不清空，由于 BuildIcosahedronUnit / SubdividePrimalOnce 都是
+	// Add/SetNum 追加式写入，二次调用会在原有数据上继续细分，导致
+	// Cells/Corners 数量呈倍数膨胀（实测 sub=3 重复构建一次会变 41604 Cells）。
+	{
+		// 1) 释放已有的三角形树（避免内存泄漏；同 ~FSphereTopology 的逻辑）
+		TFunction<void(FTriTreeNode*)> DeleteTree = [&](FTriTreeNode* Node)
+			{
+				if (Node == nullptr) return;
+				for (int32 I = 0; I < 4; ++I)
+				{
+					DeleteTree(Node->Children[I]);
+					Node->Children[I] = nullptr;
+				}
+				delete Node;
+			};
+		for (FTriTreeNode* Root : TriTreeRoots)
+		{
+			DeleteTree(Root);
+		}
+		TriTreeRoots.Reset();
+		PrimalTriTreeNodes.Reset();
+
+		// 2) 清空所有几何 / 拓扑数组
+		Cells.Reset();
+		Edges.Reset();
+		Tris.Reset();
+		Corners.Reset();
+		PrimalVertsUnit.Reset();
+		PrimalUVsUnit.Reset();
+		UVToPrimalVert.Reset();
+		PrimalTris.Reset();
+		PrimalUVTris.Reset();
+		MidpointCache.Reset();
+		UVCache.Reset();
+	}
+
 	BuildIcosahedronUnit();
 	for (int32 I = 0; I < SubdivisionLevel; I++)
 	{
