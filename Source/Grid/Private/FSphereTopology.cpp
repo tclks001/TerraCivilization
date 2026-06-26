@@ -394,7 +394,24 @@ void FSphereTopology::BuildDualFromPrimal()
 		AddElement(Edges[C2A].CornerIds, I);
 
 		Corners[I].CornerId = I;
-		Corners[I].UnitDir = (PrimalVertsUnit[A] + PrimalVertsUnit[B] + PrimalVertsUnit[C]).GetSafeNormal();
+		// 外心方向 = 三顶点所在平面的法向单位化（详见 SDF 设计稿 §14.7）。
+		// 几何性质：外心方向到三个顶点的角距相等，因此对偶 hex/pent 的边
+		// 在视觉上是平滑测地线，边中点权重严格 (0.5, 0.5, 0)，无折角。
+		// 与之相对的"重心方向 = (V_A+V_B+V_C).GetSafeNormal()"在非等边
+		// 三角形上会让 hex 边在中点出现折角，材质 SDF 边界产生可见裂缝。
+		{
+			const FVector& VA = PrimalVertsUnit[A];
+			const FVector& VB = PrimalVertsUnit[B];
+			const FVector& VC = PrimalVertsUnit[C];
+			FVector Circumcenter = FVector::CrossProduct(VB - VA, VC - VA).GetSafeNormal();
+			// 保证朝外（与重心方向同侧）。细分球三角形面法线本应朝外，
+			// 但叉乘符号取决于 (A,B,C) 绕序，此处显式校正以保鲁棒性。
+			if (FVector::DotProduct(Circumcenter, VA + VB + VC) < 0.0f)
+			{
+				Circumcenter = -Circumcenter;
+			}
+			Corners[I].UnitDir = Circumcenter;
+		}
 		Corners[I].CellIds = { A, B, C };
 		Corners[I].EdgeIds = { A2B, B2C, C2A };
 

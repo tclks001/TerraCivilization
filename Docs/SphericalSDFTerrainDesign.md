@@ -8,6 +8,23 @@
 >
 > 关联：[FSphereTopology.h](../Source/Grid/Public/FSphereTopology.h)、[FCell.h](../Source/Grid/Public/FCell.h)、[FCorner.h](../Source/Grid/Public/FCorner.h)、[HexHighlightInteractionPlan.md](HexHighlightInteractionPlan.md)
 >
+> ---
+>
+> ## ⚠ 阅读指引：两条实施路径
+>
+> 本文描述了两套相互衔接的方案：
+>
+> | 路径 | 渲染 mesh | 适用阶段 | 核心权重来源 |
+> | --- | --- | --- | --- |
+> | **§1~§13 IsoSphere 直渲方案** | IsoSphere primal mesh | **R1~R9 快速验证**（无地形高度） | 硬件免费的重心坐标 |
+> | **§14 PTG 集成方案** ⭐ | PTG 高细分球皮 | **R10+ 生产路线**（含地形位移与高亮） | GPU FindNearestCell + acos 三方权重 |
+>
+> **生产路线是 §14 的 PTG 集成方案**，但它的核心算法（Cell SDF、AttrLUT、Triplanar、多层混合）全部沿用 §1~§13 的设计——区别仅在于"三个 CellId 与三个权重"的来源：IsoSphere 方案用顶点属性 + 硬件光栅化器，PTG 方案用 GPU 查询纹理 + acos。**§1~§13 是其概念基础，§14 是落地形态**。
+>
+> 如果你只想了解**最终生产架构**，直接跳到 [§14](#14-ptg-几何层集成生产环境路线) 与 [§15](#15-cell-高亮算法描边带)。
+>
+> ---
+>
 > ## 拓扑前置约定（极其重要，决定整个方案的简洁度）
 >
 > 我们渲染的 mesh 是 [`FSphereTopology`](../Source/Grid/Public/FSphereTopology.h) 的 **primal mesh**（测地线球面 = geodesic icosahedron），它与逻辑层（hex/pent 网格 = Goldberg 多面体）互为**对偶多面体**：
@@ -50,6 +67,20 @@
 - [11. 实施 Roadmap（M-step）](#11-实施-roadmapm-step)
 - [12. 已知风险与对策](#12-已知风险与对策)
 - [13. 附：核心代码骨架](#13-附核心代码骨架)
+- [14. PTG 几何层集成（生产环境路线）](#14-ptg-几何层集成生产环境路线)
+  - [14.1 三层架构总览](#141-三层架构总览)
+  - [14.2 完整数据流](#142-完整数据流)
+  - [14.3 PTG mesh 着色流程（像素级）](#143-ptg-mesh-着色流程像素级)
+  - [14.4 GPU 端 FindNearestCell：拓扑下载与查询](#144-gpu-端-findnearestcell拓扑下载与查询)
+  - [14.5 PTG 顶点高度位移（WPO）](#145-ptg-顶点高度位移wpo)
+  - [14.6 与 §1~§13 \"重心坐标\" 方案的关系](#146-与-1-13-重心坐标-方案的关系)
+  - [14.7 球面重心坐标与"外心折角"修正（核心几何不变量）](#147-球面重心坐标与外心折角修正核心几何不变量)
+- [15. Cell 高亮算法（描边带）](#15-cell-高亮算法描边带)
+  - [15.1 算法直觉](#151-算法直觉)
+  - [15.2 数学定义](#152-数学定义)
+  - [15.3 多 Cell 同时高亮](#153-多-cell-同时高亮)
+  - [15.4 GPU 实现](#154-gpu-实现)
+  - [15.5 与既有 SelectLUT 的关系](#155-与既有-selectlut-的关系)
 
 ---
 
@@ -650,8 +681,11 @@ CPU 侧：
 | **R7** | 接入 `WorldGen` 的 `FCellGeoData → LayerIndex`，跑出第一张可玩星球 | 12 五边形可见、海陆分布 |
 | **R8** | 加 Decor / Owner / Fog 三套独立 LUT | 政治版图 + 战争迷雾上线 |
 | **R9** | LOD 优化：远距离用 R3（线性混合）、近距离用 R5（带噪声） | 远景帧时间下降 |
+| **R10**（生产路线） | 渲染从 IsoSphere 切到 PTG 高细分球皮 + GPU FindNearestCell（详见 §14） | 像素细节大幅提升、AttrLUT/材质资产无修改地继承 |
+| **R11**（生产路线） | 在材质 WPO 节点里按 `CellHeightLUT` 沿径向位移顶点 | 海陆出现真实几何起伏 |
+| **R12**（生产路线） | 接入 §15 高亮描边带 + 选中 / 鼠标悬停的 LUT 联动 | hex 边发光描边、选中即时反馈 |
 
-每一阶段单独可验证，不会卡死。
+每一阶段单独可验证，不会卡死。R1\~R9 用 IsoSphere 快速跑通整套 SDF 算法，R10\~R12 把它平滑搬到 PTG 几何层做生产化。
 
 ---
 
@@ -831,6 +865,506 @@ void AGlobeActor::OnCityBuilt(int32 CellId)
 
 ---
 
+## 14. PTG 几何层集成（生产环境路线）
+
+§1~§13 描述的方案把 SDF 渲染**直接绑定到 IsoSphere 的 primal mesh** 上，是一条"最快验证路径"——但它的几何细分粒度受限于逻辑 Cell 数（sub=3 时只 642 个顶点），**没有足够顶点来表达地形高低起伏**。
+
+生产环境下，我们采用**三层解耦**架构：
+
+| 层 | 角色 | 提供方 | 粒度 |
+| --- | --- | --- | --- |
+| **逻辑层** | 球面拓扑、Cell 邻接、A* 寻路、属性查询 | [`FSphereTopology`](../Source/Grid/Public/FSphereTopology.h) (sub=3, 642 Cells) | 低（hex 玩法粒度） |
+| **几何层** | 实际渲染的高细分球面 mesh、顶点位移承载地形高度 | [`ProceduralTerrainGenerator`](../Plugins/ProceduralTerrainGenerator/) (Spherified Cube, resolution=512+) | 高（像素级显示精度） |
+| **材质层** | 像素 SDF 计算、纹理混合、高亮、迷雾 | 本设计稿（重心坐标 + AttrLUT） | 像素级 |
+
+> **核心思想**：SDF 在概念上是"球面任意一点 → 它属于哪个 Cell 并以什么权重"的查询函数；这个函数**不绑定到任何具体 mesh 的拓扑**，而是把 IsoSphere 当作**采样数据源**、PTG mesh 当作**绘制载体**。
+
+### 14.1 三层架构总览
+
+```mermaid
+flowchart LR
+    subgraph Logical["逻辑层 IsoSphere (sub=3, 642 Cells)"]
+        TOPO["FSphereTopology<br/>Cells / Corners"]
+        QUERY["FSphereTopologyQuery<br/>FindNearestCell"]
+        ATTR["FCellGeoData[]<br/>TerrainTag / Elevation / Highlight"]
+    end
+
+    subgraph Geom["几何层 PTG (Spherified Cube, 高细分)"]
+        PTGMESH["UProceduralMeshComponent<br/>数十万顶点的密集球皮"]
+        WPO["WPO顶点位移<br/>沿径向按Elevation外推"]
+    end
+
+    subgraph Material["材质层 SDF"]
+        GPUQUERY["GPU FindNearestCell<br/>世界点 → 所属IsoSphere三角形 + 3 CellId"]
+        ACOS["三方权重<br/>acos(dot) → 归一化"]
+        BLEND["3层Triplanar Albedo混合"]
+        HIGHLIGHT["高亮加性混合<br/>(§15)"]
+    end
+
+    TOPO --> QUERY
+    ATTR --> QUERY
+    QUERY -->|烘焙成GPU查询纹理| GPUQUERY
+    ATTR -->|CellAttrLUT| BLEND
+    ATTR -->|CellHighlightLUT| HIGHLIGHT
+    ATTR -->|CellHeightLUT| WPO
+
+    PTGMESH --> WPO
+    WPO -->|顶点世界坐标| GPUQUERY
+    GPUQUERY --> ACOS
+    ACOS --> BLEND
+    BLEND --> HIGHLIGHT
+    HIGHLIGHT --> SCREEN["屏幕"]
+```
+
+> 注意：**几何层 PTG mesh 永远不重建**——它的顶点纯径向、永不变形；地形高度变化只是改 `CellHeightLUT` 的一行像素，下一帧 WPO 自动重新位移。**几何零重建** + **材质零重建** + **AttrLUT 一像素更新**就是这套架构的核心承诺。
+
+### 14.2 完整数据流
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Topo as FSphereTopology<br/>(sub=3)
+    participant Gen as FWorldGenerator
+    participant LUT as CellAttrLUT<br/>+ HeightLUT<br/>+ HighlightLUT
+    participant PTG as PTG Mesh<br/>(高细分球皮)
+    participant VS as 顶点着色器
+    participant PS as 像素着色器
+    participant GPUQ as GPU查询纹理<br/>(IsoSphere拓扑烘焙)
+
+    Note over Topo: 启动时一次性
+    Topo->>Topo: Build() (sub=3 → 642 Cells)
+    Topo->>GPUQ: 烘焙 CellCenterTex / TriIndexTex / NeighborTex
+    Gen->>LUT: 跑 8 步 WorldGen 写入<br/>每Cell的 TerrainTag / Elevation
+
+    Note over PTG: 启动时一次性
+    PTG->>PTG: GenerateSphereData(纯净球, no noise)
+
+    Note over PTG,PS: 每帧渲染
+    PTG->>VS: 顶点位置 P (纯球面)
+    VS->>PS: 插值出 WorldPosition
+    PS->>PS: dir = normalize(WorldPosition - PlanetCenter)
+    PS->>GPUQ: GPU FindNearestCell(dir)
+    GPUQ-->>PS: 返回 (TriId, c0, c1, c2)
+    PS->>PS: 用 acos(dot(dir, Cells[ci].UnitCenter)) 算三方权重 (w0, w1, w2)
+    PS->>LUT: 3 次 Load(CellAttrLUT) 取 LayerIndex
+    PS->>PS: 三层 Triplanar 加权混合 → 基础色
+    PS->>LUT: 3 次 Load(HighlightLUT) 取 (bSelect, color)
+    PS->>PS: 高亮算法 (§15) → 加性混合
+    PS-->>SCREEN: 最终颜色
+
+    Note over PTG,VS: 顶点位移（同步发生）
+    PTG->>VS: WPO 节点：同样跑一遍 GPU FindNearestCell + 三方权重
+    VS->>LUT: 3 次 Load(HeightLUT) 取 Elevation
+    VS->>VS: 加权混合得到 h，沿径向外推顶点
+```
+
+> **重点**：WPO 阶段和 PS 阶段**跑同样的 GPU FindNearestCell + 同样的三方权重计算**，确保几何位移与材质着色对齐。否则会出现"地形隆起处的纹理边界与几何边界错位"的视觉裂缝。
+
+### 14.3 PTG mesh 着色流程（像素级）
+
+按你确定的精确步骤：
+
+```hlsl
+// === Step 1: 把 PTG mesh 三角形上的像素世界坐标归一化 ===
+float3 WP  = GetWorldPosition();           // PTG 提供
+float3 dir = normalize(WP - PlanetCenter); // 单位球方向
+
+// === Step 2: GPU 实现 FSphereTopologyQuery::FindNearestCell ===
+//    用一棵预先烘焙到纹理的"20根球面四叉树"做 O(log N) 下降；
+//    叶子节点对应 IsoSphere 的一个三角形，输出该三角形的 3 个 CellId
+int triId;
+int3 cellIds = GPU_FindNearestTri(dir, /*outTriId=*/triId);
+int c0 = cellIds.x, c1 = cellIds.y, c2 = cellIds.z;
+
+// === Step 3: 用「球面重心坐标」算三方权重（详见 §14.7） ===
+//   λ_i = det[dir, V_{j}, V_{k}] / (λ_A + λ_B + λ_C)，其中 (i,j,k) 为 (A,B,C) 轮换
+//   这套公式：(a) 顶点处 (1,0,0)；(b) 球面边中点 (0.5,0.5,0)；
+//             (c) 三角形外心 O 处 (1/3,1/3,1/3)；(d) 跨三角形边连续，无 SDF 裂缝。
+//   **关键前提**：Corners[I].UnitDir 必须取「外心方向」而非「重心归一化方向」，
+//   见 §14.7 折角问题与外心修正。
+float3 V_A = SampleCellCenter(c0);
+float3 V_B = SampleCellCenter(c1);
+float3 V_C = SampleCellCenter(c2);
+float3 weights = SphericalBarycentric(dir, V_A, V_B, V_C);  // 见 §14.7
+float w0 = weights.x;
+float w1 = weights.y;
+float w2 = weights.z;
+
+// === Step 4: 三方权重 + 三张纹理采样 → 实际模型颜色 ===
+float4 a0 = CellAttrLUT.Load(int3(c0, 0, 0));
+float4 a1 = CellAttrLUT.Load(int3(c1, 0, 0));
+float4 a2 = CellAttrLUT.Load(int3(c2, 0, 0));
+
+float3 alb0 = SampleTriplanar(TerrainAlbedoArray, (uint)(a0.r * 255), WP, dir);
+float3 alb1 = SampleTriplanar(TerrainAlbedoArray, (uint)(a1.r * 255), WP, dir);
+float3 alb2 = SampleTriplanar(TerrainAlbedoArray, (uint)(a2.r * 255), WP, dir);
+float3 albedo = alb0 * w0 + alb1 * w1 + alb2 * w2;
+
+// === Step 5: 高亮叠加（详见 §15）===
+albedo += ComputeHighlight(c0, c1, c2, w0, w1, w2);
+```
+
+### 14.4 GPU 端 FindNearestCell：拓扑下载与查询
+
+`FSphereTopologyQuery::FindNearestCell` 的 CPU 实现是"在 20 棵球面 4 叉树上下降"。把它移植到 GPU 只需把树平铺成两张纹理：
+
+| 纹理 | 维度 | 格式 | 内容 |
+| --- | --- | --- | --- |
+| `TriTreeNodes` | 2D（节点数 × 1） | `R32G32B32A32_FLOAT` | `(CenterXYZ, leafTriId)`；非叶节点 leafTriId = -1 |
+| `TriTreeChildren` | 2D（节点数 × 1） | `R32G32B32A32_UINT` | 4 个孩子的节点索引；叶节点 child0 = 0xFFFFFFFF |
+| `TriCellIds` | 1D（NTri × 1） | `R32G32B32A32_UINT` | 每个叶 Tri 的 `Corner.CellIds[0..2]`（第 4 通道空） |
+| `CellCenterLUT` | 1D（NCells × 1） | `R16G16B16A16_FLOAT` | `(UnitCenter.xyz, isPentagon)` |
+
+> sub=3 时 NTri=1280、NCells=642，整个查询数据 < 100KB。**这些纹理是静态的**，启动一次烘焙、终生不变。
+
+GPU 查询：
+
+```hlsl
+int GPU_FindNearestTri(float3 dir, out int outTriId)
+{
+    // 步骤 1：从 20 个根中选最近
+    int bestRoot = 0; float bestDot = -2;
+    [unroll] for (int r = 0; r < 20; ++r) {
+        float3 c = TriTreeNodes.Load(int3(r, 0, 0)).xyz;
+        float d = dot(dir, c);
+        if (d > bestDot) { bestDot = d; bestRoot = r; }
+    }
+
+    // 步骤 2：层层下降（最多 N 层 = SubdivisionLevel）
+    int curr = bestRoot;
+    [unroll(MAX_TREE_DEPTH)] for (int lv = 0; lv < MaxTreeDepth; ++lv) {
+        uint4 children = TriTreeChildren.Load(int3(curr, 0, 0));
+        if (children.x == 0xFFFFFFFFu) break;        // 叶节点
+
+        int  bestChild = (int)children.x; float bd = -2;
+        [unroll] for (int k = 0; k < 4; ++k) {
+            uint  childIdx = children[k];
+            float3 cc = TriTreeNodes.Load(int3(childIdx, 0, 0)).xyz;
+            float  d = dot(dir, cc);
+            if (d > bd) { bd = d; bestChild = (int)childIdx; }
+        }
+        curr = bestChild;
+    }
+
+    outTriId = (int)TriTreeNodes.Load(int3(curr, 0, 0)).w;
+    uint4 ids = TriCellIds.Load(int3(outTriId, 0, 0));
+    return int3(ids.x, ids.y, ids.z);   // 返回三个 CellId
+}
+```
+
+> sub=3 时 `MaxTreeDepth = 3`，每像素 `20 + 3 × 4 = 32` 次 dot——比纯 acos+遍历 O(642) 快 20 倍。
+
+### 14.5 PTG 顶点高度位移（WPO）
+
+PTG 默认提供"沿径向加正向噪声"的位移（[`ApplyNoiseToSphereVertex`](../Plugins/ProceduralTerrainGenerator/Source/ProceduralTerrainGenerator/Private/PtgProcMeshDataHelper.cpp)），但**只能凸起、不能凹陷**（`if (noiseValue < 0) noiseValue *= -1`）。我们需要既有海底盆地又有山峰，所以方案是：
+
+1. **生成 PTG mesh 时关闭 noise**（`fastNoiseLiteWrapper = nullptr`），得到一个纯净的 spherified-cube 球皮；
+2. **在材质 WPO 节点里**重新做位移，按 Cell `Elevation` 沿径向，**正负皆可**：
+
+```hlsl
+// WPO 阶段（顶点着色器）
+float3 dir = normalize(WP - PlanetCenter);
+
+// 同样跑一遍 GPU 查询 + 三方权重（与 PS 一致，确保几何/材质对齐）
+int3 cellIds = GPU_FindNearestTri(dir, /*out*/ TriId);
+float3 weights = SphericalBarycentric(dir,
+    SampleCellCenter(cellIds.x),
+    SampleCellCenter(cellIds.y),
+    SampleCellCenter(cellIds.z));   // 见 §14.7
+
+// 取每个 Cell 的高度，按权重混合
+float h0 = HeightLUT.Load(int3(cellIds.x, 0, 0)).r;  // [-1, 1]
+float h1 = HeightLUT.Load(int3(cellIds.y, 0, 0)).r;
+float h2 = HeightLUT.Load(int3(cellIds.z, 0, 0)).r;
+float h = h0 * weights.x + h1 * weights.y + h2 * weights.z;
+
+// 沿径向位移
+return dir * h * ElevationScale;   // ElevationScale 是设计师暴露的标量
+```
+
+> **WPO 与 PS 的一致性约束**：两阶段必须用**完全相同**的 `GPU_FindNearestTri` 与权重公式。最简单的做法：把整套代码封装到一个 .ush 文件里，VS / PS 各 `#include` 一次。
+>
+> **WPO 不加噪声扰动**：把 §6.4 的边界噪声只放在 PS 里（仅扰动材质纹理边界），WPO 用裸权重做几何位移——这样山脚的几何线条干净，但纹理仍然有有机过渡。
+
+### 14.6 与 §1~§13 "重心坐标" 方案的关系
+
+| 项 | §1~§13 IsoSphere 直渲方案 | §14 PTG 集成方案 |
+| --- | --- | --- |
+| 渲染 mesh | IsoSphere primal mesh（sub 决定细分） | PTG 高细分球皮（独立分辨率） |
+| 三个 CellId 来源 | 顶点属性（每三角形 3 独立顶点） | GPU FindNearestCell 查询 |
+| 三个权重来源 | 硬件免费的重心坐标 | 球面重心坐标（三重积，§14.7） |
+| 几何位移 | 不支持（顶点 = Cell 中心，固定） | WPO 实时径向位移 |
+| 边界形态 | 真正的 Goldberg hex 边 | 球面 Voronoi（视觉几乎一致） |
+| GPU 资源 | `CellAttrLUT` | `CellAttrLUT` + `HeightLUT` + `HighlightLUT` + 4 张静态查询纹理 |
+| 每像素成本 | 3 tex.Load | 32 dot（树查询）+ 13 ops（权重）+ 9 Load + 9 tex.Sample |
+| 适用阶段 | 快速验证（R1~R7） | 生产路线（R10~） |
+
+> **R10**（接续 §11 Roadmap）：把渲染从 IsoSphere 切到 PTG mesh + GPU FindNearestCell。
+> **R11**：在材质里加 WPO，海陆开始有几何起伏。
+>
+> **共享内容**：`CellAttrLUT`、Triplanar 采样、Decor 层混合、SelectLUT 接口在两套方案里**完全一致**——R1~R9 的所有材质资产都可以无修改地搬到 R10 用。
+
+> 共有 5 处需要"GPU FindNearestCell + 三方权重"：(a) PS 主着色，(b) WPO 顶点位移，(c) Decor 装饰层，(d) Highlight 高亮，(e) Fog of War。**全部用同一个 .ush 函数**（即 §14.7 的 `SphericalBarycentric`），避免任何不一致。
+
+---
+
+### 14.7 球面重心坐标与"外心折角"修正（核心几何不变量）
+
+#### 14.7.1 折角问题的发现
+
+直觉上"用 acos 距离反比"或"重心方向插值"看似自然，但会在**对偶 hex/pent 边中点处产生折角**——理由：
+
+- 球面三角形的**重心方向** $\hat{G} = \widehat{(V_A + V_B + V_C)}$ 与三条边的距离**不相等**（除非三角形严格等边）；
+- 由对偶定义：hex/pent 的边 = 两个相邻 Corner 之间的测地线；如果 Corner 取在重心方向上，那么 hex 边**不会**正交于原始三角形边的中垂面；
+- 像素权重在 hex 边中点附近**两侧分别用不同的局部三角形**计算，由于重心方向偏移产生方向跳变 → **可见的法线折痕**，PTG 几何位移叠加后会被放大成肉眼可见的"折角带"。
+
+**根因**：要让 hex 边在 PS 中视觉上是一条平滑的测地线，必须满足"两侧三角形权重在边上等价"+"边中点是 (0.5, 0.5, 0) 这个对称权重对应的点"——这两个条件**同时只有当 Corner 取在球面三角形外心时才成立**。
+
+#### 14.7.2 球面外心 $O$ 的几何定义
+
+外心 $\hat{O}$ 满足：
+
+$$
+\hat{O} \cdot V_A = \hat{O} \cdot V_B = \hat{O} \cdot V_C
+$$
+
+（即到三个顶点角距相等）。它就是三角形所在平面的法向单位化：
+
+$$
+\hat{O} = \frac{(V_B - V_A) \times (V_C - V_A)}{\|(V_B - V_A) \times (V_C - V_A)\|}
+$$
+
+注意需保证朝外（与重心方向同侧），否则取负号：
+
+```cpp
+FVector O = FVector::CrossProduct(V_B - V_A, V_C - V_A).GetSafeNormal();
+if (FVector::DotProduct(O, V_A + V_B + V_C) < 0.0f) O = -O;
+```
+
+> **代码改动**：把 [`FSphereTopology.cpp`](../Source/Grid/Private/FSphereTopology.cpp) 中
+> ```cpp
+> Corners[I].UnitDir = (PrimalVertsUnit[A] + PrimalVertsUnit[B] + PrimalVertsUnit[C]).GetSafeNormal();
+> ```
+> 改为外心方向。`TriTreeNode::Center` 用作 GPU 四叉树的粗筛 dot 距离，**仍可保留重心**，因为粗筛只决定下降路径，最终输出的叶子三角形仍然正确。
+
+#### 14.7.3 权重的统一数学描述
+
+定义"球面重心坐标" $\lambda = (\lambda_A, \lambda_B, \lambda_C)$ ：
+
+$$
+\boxed{\;
+\lambda_A^{\mathrm{raw}} = \det[\,\text{dir},\, V_B,\, V_C\,], \quad
+\lambda_B^{\mathrm{raw}} = \det[\,\text{dir},\, V_C,\, V_A\,], \quad
+\lambda_C^{\mathrm{raw}} = \det[\,\text{dir},\, V_A,\, V_B\,]
+\;}
+$$
+
+$$
+\lambda_i = \frac{\lambda_i^{\mathrm{raw}}}{\lambda_A^{\mathrm{raw}} + \lambda_B^{\mathrm{raw}} + \lambda_C^{\mathrm{raw}}}
+$$
+
+其中 $\det[a, b, c] = (a \times b) \cdot c$（标量三重积，几何上 = 三向量张成的平行六面体的有符号体积）。
+
+#### 14.7.4 关键性质（逐项验证）
+
+| 位置 | $\lambda_A^{\mathrm{raw}}$ | $\lambda_B^{\mathrm{raw}}$ | $\lambda_C^{\mathrm{raw}}$ | 归一化结果 |
+| --- | --- | --- | --- | --- |
+| $\text{dir} = V_A$ | $\det[V_A,V_B,V_C]$（总体积） | 0（行列重复） | 0 | **(1, 0, 0)** ✓ |
+| $\text{dir} = V_B$ | 0 | 总体积 | 0 | (0, 1, 0) ✓ |
+| $\text{dir}$ 在球面 AB 边上（$\propto \alpha V_A + \beta V_B$）| $\beta \cdot V$ | $\alpha \cdot V$ | **0** | $(\alpha, \beta, 0)$ 归一化 ✓ |
+| $\text{dir} = M_{AB}$（球面 AB 边中点）| $V/2$ | $V/2$ | 0 | **(0.5, 0.5, 0)** ✓ |
+| $\text{dir} = \hat{O}$（外心）| $V/3$ | $V/3$ | $V/3$ | **(1/3, 1/3, 1/3)** ✓ |
+
+最后一行的证明：因为 $\hat{O} \cdot V_A = \hat{O} \cdot V_B = \hat{O} \cdot V_C \equiv c$（外心定义），加上 $A,B,C$ 轮换对称，三个 $\lambda^{\mathrm{raw}}$ 在轮换下不变 ⟹ 它们必相等。
+
+**跨三角形边的连续性**：相邻两三角形共享边 $V_A V_B$，在该边上两侧的 $\lambda_C^{\mathrm{raw}} = \det[\text{dir}, V_A, V_B] = 0$，且 $\lambda_A, \lambda_B$ 都只与 $V_A, V_B, \text{dir}$ 相关，与"另一侧的第三个顶点"无关——所以**两个三角形给出完全相同的边上权重**，SDF 边界无裂缝。
+
+#### 14.7.5 为什么三重积公式 = 球面重心坐标
+
+球面重心坐标的标准定义是"球面三角形面积比"：
+
+$$
+\lambda_A = \frac{\text{Area}_{\text{sph}}(\text{dir}, V_B, V_C)}{\text{Area}_{\text{sph}}(V_A, V_B, V_C)}
+$$
+
+这个公式涉及 acos，开销大。但我们在最后做了归一化 $\sum \lambda = 1$——这等价于把"球面面积"换成任何**单调正比于面积的量**，归一化后结果不变。
+
+**标量三重积** $\det[\text{dir}, V_B, V_C]$ 几何上 = 三向量张成的四面体（单位球内的扇形）的 6 倍**直线体积**。当三角形球面面积很小时（sub≥3 后所有三角形球面面积 < 0.001 sr），直线体积与球面面积之比为常数 $1 + O(\text{Area}^2)$，即 4 阶小量级误差——肉眼不可见。
+
+而归一化把这个公共常数约掉：**三重积版本的 $\lambda$ 与球面三角形面积版本的 $\lambda$ 在数值上相差 $O(\text{Area}^2)$**，对 sub=3 量级而言完全等价，且无 acos / sqrt。
+
+#### 14.7.6 高效 Shader 实现（最终版）
+
+```hlsl
+// =====================================================================
+// SphericalBarycentric.ush  ——  球面重心坐标核心（5 处共享）
+// 用法：在 VS（WPO）和 PS（材质着色）同时 #include
+// =====================================================================
+//
+// 计算 dir 在球面三角形 (V_A, V_B, V_C) 内的归一化三方权重。
+// 假设：四个向量都已是单位球面向量，dir 在三角形内或边上
+//      （由 §14.4 GPU_FindNearestTri 保证）。
+//
+// 性质（§14.7.4 已证）：
+//   - dir = V_i             → λ_i = 1, 余 = 0
+//   - dir 在球面边 V_iV_j 上 → λ_k = 0（k ≠ i,j），且 λ_i + λ_j = 1
+//   - dir = 外心 O          → λ = (1/3, 1/3, 1/3)
+//   - 跨三角形边时 λ 连续    → SDF 边界无裂缝、无折角
+//
+// 成本：3 cross + 3 dot + 1 madd + 1 rcp ≈ 13 ops（无 acos / sqrt）
+//
+float3 SphericalBarycentric(float3 dir, float3 V_A, float3 V_B, float3 V_C)
+{
+    // 标量三重积 det[a,b,c] = (a×b)·c
+    float lA = dot(cross(dir, V_B), V_C);   // det[dir, V_B, V_C]
+    float lB = dot(cross(dir, V_C), V_A);   // det[dir, V_C, V_A]
+    float lC = dot(cross(dir, V_A), V_B);   // det[dir, V_A, V_B]
+    float invSum = 1.0 / (lA + lB + lC + 1e-12);
+    return float3(lA, lB, lC) * invSum;
+}
+```
+
+#### 14.7.7 与 §15 高亮算法的兼容性
+
+§15 的 `gap = w_i - max(w_others)` 公式**与权重的具体来源无关**——只要保证：
+
+1. $w$ 在 Cell 中心处 = (1,0,0) 类 onehot；
+2. $w$ 在 hex/pent 边上 = (0.5, 0.5, 0) 类二选一；
+3. $w$ 在 Cell 角点（即三 Cell 共享 Corner）上 = (1/3, 1/3, 1/3)。
+
+§14.7 的 `SphericalBarycentric` 完全满足以上三条 ⟹ §15 高亮算法的几何含义（"`gap=0` ↔ 像素正好在 hex 边界 / Corner 上"）**严格保持**，无需任何调整。
+
+#### 14.7.8 IsoSphere 直渲方案（§1~§13）是否需要改？
+
+**不需要**。IsoSphere 直渲方案中：
+
+- 渲染三角形 = `(V_A, V_B, V_C)` 三个 Cell 中心张成的**平面三角形**；
+- 硬件光栅化器自动给出的重心坐标 = 把 fragment 在该平面内做的**平面重心坐标**；
+- 这正是把球面方向 `dir` 沿径向投到该平面后再做平面重心 —— 与 §14.7 的三重积公式**数学上完全等价**（对小三角形 4 阶等价）。
+
+所以 §1~§13 IsoSphere 方案**继续直接用硬件 lerp 输出**，§14 PTG 集成方案**显式调用 `SphericalBarycentric`**——两条路径数学一致，可平滑切换。
+
+---
+
+## 15. Cell 高亮算法（描边带）
+
+### 15.1 算法直觉
+
+我们要的视觉效果：**选中某 Cell 时，在它的 hex 边界附近画一圈发光的描边带**，Cell 内部不亮，Cell 中心更不亮。这是 Civ 6 / Old World 的标准选中表现。
+
+观察：在重心权重 `(w_A, w_B, w_C)` 空间里，Cell A 的 hex 边界恰好是"`w_A` = 次大权重"的轨迹：
+
+| 像素位置 | (w_A, w_B, w_C) | A 是否最大 | A − second |
+| --- | --- | --- | --- |
+| Cell A 中心 | (1, 0, 0) | ✅ | 1.0 |
+| Cell A 内部偏向 B | (0.7, 0.2, 0.1) | ✅ | 0.5 |
+| Cell A 与 B 共边中点 | (0.5, 0.5, 0) | ✅(并列) | **0** |
+| Cell A、B、C 共角 Corner | (1/3, 1/3, 1/3) | ✅(三并列) | **0** |
+| Cell A 与 C 共边中点 | (0.5, 0, 0.5) | ✅(并列) | **0** |
+| Cell B 内部 | (0.2, 0.7, 0.1) | ❌ | — |
+
+→ **`w_A − w_second = 0` 等价于"像素正好在 Cell A 的 hex 边界上"**；
+→ **`w_A − w_second = 1` 等价于"像素正好在 Cell A 的中心"**。
+
+把这个差值映射到高亮强度（差越小越亮），就得到了一条**沿 hex 边界向内扩散的发光描边带**，而且：
+- 在 Corner（三 Cell 交点）处差也是 0，**描边带在 Corner 自动汇合**，不会断开；
+- 当相邻 Cell 也被高亮时，共享边上**两侧都判定为"边界上"**，颜色叠加自然加强。
+
+### 15.2 数学定义
+
+设当前像素在 Cell `(c0, c1, c2)` 内的权重为 `(w0, w1, w2)`，每个 Cell 在 `HighlightLUT` 中存储两个属性：
+
+```cpp
+struct FCellHighlight
+{
+    uint8 bSelected;     // 0 或 255
+    uint8 ColorR;        // 高亮颜色 R
+    uint8 ColorG;
+    uint8 ColorB;
+};
+```
+
+定义 **Cell A 的高亮强度函数**：
+
+```
+gap_A     = w_A - max(w_others)         // ∈ [-1, 1]，正值说明 A 是最大权重
+edge_A    = max(0, gap_A)               // 仅在 A 是最大时考虑
+intensity = 1 - smoothstep(0, padding, edge_A) × bSelected_A
+```
+
+- `padding ∈ (0, 1]` 是描边带宽度参数（推荐 0.15）；越小描边带越窄；
+- 当 `edge_A = 0`（在边界上）→ `smoothstep = 0` → `intensity = 1`（最亮）；
+- 当 `edge_A ≥ padding`（深入 Cell 内部）→ `smoothstep = 1` → `intensity = 0`（不亮）；
+- 当 `edge_A < 0`（A 不是最大权重，像素不属于 A）→ `intensity = 0`；
+- `bSelected_A = 0` → `intensity = 0`。
+
+最终高亮颜色：对三个 Cell 各算一次，加性叠加：
+
+```
+highlight = Σᵢ intensity_i × ColorOfCellᵢ
+```
+
+### 15.3 多 Cell 同时高亮
+
+当 A、B 都被选中时，在 A-B 共享边上：
+- 对 A 评估：`w_A = 0.5, w_others_max = w_B = 0.5, gap_A = 0` → A 全亮
+- 对 B 评估：`w_B = 0.5, w_others_max = w_A = 0.5, gap_B = 0` → B 全亮
+- 两个高亮叠加（如果 ColorA、ColorB 不同会得到混合色，相同则加倍 → 自动饱和钳制即可）
+
+当只有 A 被选中时，B 一侧的描边带不会出现——因为 `bSelected_B = 0`，B 评估贡献为 0；A 一侧的描边带正常显示。
+
+> **特性**：算法**完全在重心权重空间里完成**，不依赖任何"我在哪条边附近"的几何判断；所有边界、角点、内部退化都自动消化。
+
+### 15.4 GPU 实现
+
+```hlsl
+// 输入：3 CellId 与 3 权重（来自 §14.3 的 PS 主着色）
+//       HighlightLUT: R8G8B8A8_UNORM，A=bSelected, RGB=高亮色
+// 参数：HighlightPadding ∈ (0, 1], 推荐 0.15
+//       HighlightStrength: 全局描边强度倍率
+
+float3 ComputeHighlight(int c0, int c1, int c2, float w0, float w1, float w2)
+{
+    float4 h0 = HighlightLUT.Load(int3(c0, 0, 0));
+    float4 h1 = HighlightLUT.Load(int3(c1, 0, 0));
+    float4 h2 = HighlightLUT.Load(int3(c2, 0, 0));
+
+    // gap_i = w_i - max(其它两个)
+    float gap0 = w0 - max(w1, w2);
+    float gap1 = w1 - max(w0, w2);
+    float gap2 = w2 - max(w0, w1);
+
+    // 仅在 i 是最大权重时贡献（gap_i >= 0）；
+    // gap=0 → 边界上 → intensity=1；gap>=padding → 内部 → intensity=0
+    float i0 = (1.0 - smoothstep(0.0, HighlightPadding, max(0.0, gap0))) * h0.a;
+    float i1 = (1.0 - smoothstep(0.0, HighlightPadding, max(0.0, gap1))) * h1.a;
+    float i2 = (1.0 - smoothstep(0.0, HighlightPadding, max(0.0, gap2))) * h2.a;
+
+    return (h0.rgb * i0 + h1.rgb * i1 + h2.rgb * i2) * HighlightStrength;
+}
+```
+
+调用方（在 §14.3 的 Step 5 末尾）：
+
+```hlsl
+albedo += ComputeHighlight(c0, c1, c2, w0, w1, w2);
+```
+
+### 15.5 与既有 SelectLUT 的关系
+
+§9 描述的 `SelectLUT` 方案是**整 Cell 涂色**（按重心权重的线性加权），适合"可达范围预览"等"整片着色"语义；本节的 `HighlightLUT` 方案是**沿 hex 边描边**，适合"当前选中 Cell"语义。两者**正交并存**：
+
+| 视觉用途 | 推荐方案 | LUT |
+| --- | --- | --- |
+| 当前选中 Cell（聚焦） | 描边带（§15） | HighlightLUT |
+| 单位可达范围 | 整 Cell 涂色（§9） | SelectLUT |
+| 鼠标悬停 hover | 测地线描边（[HexHighlightInteractionPlan.md](HexHighlightInteractionPlan.md)） | LineBatcher |
+| 战争迷雾 | 整 Cell 暗化（§8/§9 式） | FogLUT |
+
+它们共享同一套 "GPU FindNearestCell + 3 个 CellId + 3 个权重" 的查询基础，**只在最后的混合公式上有所区别**——这是本设计稿"采样函数与混合策略解耦"思想的最佳体现。
+
+---
+
 ## 结语
 
 整套方案的核心可以浓缩为一句话：
@@ -847,4 +1381,4 @@ void AGlobeActor::OnCityBuilt(int32 CellId)
 - **天然多层**：Base / Decor / Owner / Fog / Path 五张独立 LUT，全部跑在一套重心坐标之上；
 - **天然兼容现有 Grid 数据**：`FCell.UnitCenter` 与 `FCorner.CellIds` 已是构建 mesh 与 AttrLUT 所需的全部材料。
 
-按本设计实施，**最小可看效果**（R1~R3）预计 **2 天**；完整 R1~R8 预计 **1 周**；后续板块、河流、迷雾、政治版图等扩展都只是"增加一张 LUT + 改材质混合链"的增量工作。
+按本设计实施，**最小可看效果**（R1\~R3）预计 **2 天**；完整 R1\~R8 预计 **1 周**；后续板块、河流、迷雾、政治版图等扩展都只是"增加一张 LUT + 改材质混合链"的增量工作。
