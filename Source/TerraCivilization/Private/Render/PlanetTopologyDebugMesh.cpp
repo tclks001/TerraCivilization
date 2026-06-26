@@ -64,12 +64,31 @@ void APlanetTopologyDebugMesh::Rebuild()
 
     // 2) 装填顶点 / 索引缓冲：每个 Corner（三角形）展开为 3 个独立顶点。
     //    Vertices 长度 = NumCorners * 3，Triangles 是 0,1,2,3,4,5,... 的顺序索引。
+    //
+    //    R2 顶点属性布局（详见 SDF 设计稿 §4.3 方案 A、§14.7）：
+    //      Position, Normal     — 几何
+    //      UV0  = (0, 0)        — 预留给后续细节纹理 fallback
+    //      UV1.xy = (c0, c1)    — 当前三角形 3 个 Cell 中第 0、第 1 个 CellId（float 存 int，<= 16M 精确）
+    //      UV2.xy = (c2, _ )    — 第 2 个 CellId；y 通道空着（留作未来"五边形 mask"等用途）
+    //      UV3.xy = (OneHot.x, OneHot.y)
+    //                           — Role 0 顶点写 (1,0)、Role 1 写 (0,1)、Role 2 写 (0,0)
+    //                           — 经过光栅化器线性插值后，PS 阶段：
+    //                               λ₀ = UV3.x，λ₁ = UV3.y，λ₂ = saturate(1 − λ₀ − λ₁)
+    //                               即"硬件免费的重心坐标 / 三方权重"
+    //      VertexColor          — R2 暂留作纯白；R3+ 可复用为其它通道
+    //
+    //    关键技巧：**三角形的 3 个顶点都写入相同的 (c0, c1, c2)**——
+    //    经过插值后 UV1/UV2 仍是常量（三个顶点同值，插值结果不变），PS 用 round() 还原。
+    //    只有 UV3 的 OneHot 在三个顶点之间不同，插值后形成重心权重。
     const int32 NumVerts = NumCorners * 3;
 
     TArray<FVector>          Vertices;
     TArray<int32>            Triangles;
     TArray<FVector>          Normals;
     TArray<FVector2D>        UV0;
+    TArray<FVector2D>        UV1;     // (c0, c1)
+    TArray<FVector2D>        UV2;     // (c2, _ )
+    TArray<FVector2D>        UV3;     // OneHot (λ₀, λ₁)
     TArray<FLinearColor>     VertexColors;
     TArray<FProcMeshTangent> Tangents;   // 留空：纯白材质不需要切线空间
 
@@ -77,6 +96,9 @@ void APlanetTopologyDebugMesh::Rebuild()
     Triangles.Reserve(NumVerts);
     Normals.Reserve(NumVerts);
     UV0.Reserve(NumVerts);
+    UV1.Reserve(NumVerts);
+    UV2.Reserve(NumVerts);
+    UV3.Reserve(NumVerts);
     VertexColors.Reserve(NumVerts);
 
     // PMC 的网格顶点是 Component-Local 空间。Actor 通过 Transform 摆放，
@@ -117,29 +139,52 @@ void APlanetTopologyDebugMesh::Rebuild()
             NA = NB = NC = Face;
         }
 
-        // R1 阶段 UV 用不到（纯白材质），统一塞 (0,0)；后续 R2 可以把它替换成
-        //   onehot 的"我属于哪个 Cell"或者重心权重等 per-vertex 属性。
-        const FVector2D ZeroUV(0.0f, 0.0f);
+        // R2 共享给三角形所有顶点的属性：3 个 CellId（顺序固定为 Cor.CellIds 自身）
+        const FVector2D TriCellId01((float)CA, (float)CB);   // 写入 UV1
+        const FVector2D TriCellId2_((float)CC, 0.0f);        // 写入 UV2
 
-        // R1 顶点色统一白；R3+ 可写入 LayerIndex 等数据。
+        // R2 顶点 onehot —— 三角形的三个角色 0/1/2
+        //   Role 0 顶点：OneHot = (1, 0) → λ₀ = 1
+        //   Role 1 顶点：OneHot = (0, 1) → λ₁ = 1
+        //   Role 2 顶点：OneHot = (0, 0) → λ₂ = 1 (= 1 − 0 − 0)
+        const FVector2D OneHotA(1.0f, 0.0f);
+        const FVector2D OneHotB(0.0f, 1.0f);
+        const FVector2D OneHotC(0.0f, 0.0f);
+
+        // R2 阶段 UV0 仍然预留（细节纹理 fallback 暂不使用）；顶点色统一白。
+        const FVector2D    ZeroUV(0.0f, 0.0f);
         const FLinearColor WhiteColor(1.0f, 1.0f, 1.0f, 1.0f);
 
         const int32 BaseIdx = Vertices.Num();   // 当前三角形第一个顶点的索引
 
-        Vertices.Add(PA);   Normals.Add(NA);   UV0.Add(ZeroUV);   VertexColors.Add(WhiteColor);
-        Vertices.Add(PB);   Normals.Add(NB);   UV0.Add(ZeroUV);   VertexColors.Add(WhiteColor);
-        Vertices.Add(PC);   Normals.Add(NC);   UV0.Add(ZeroUV);   VertexColors.Add(WhiteColor);
+        // Role 0
+        Vertices.Add(PA);  Normals.Add(NA);  UV0.Add(ZeroUV);
+        UV1.Add(TriCellId01);  UV2.Add(TriCellId2_);  UV3.Add(OneHotA);
+        VertexColors.Add(WhiteColor);
+
+        // Role 1
+        Vertices.Add(PB);  Normals.Add(NB);  UV0.Add(ZeroUV);
+        UV1.Add(TriCellId01);  UV2.Add(TriCellId2_);  UV3.Add(OneHotB);
+        VertexColors.Add(WhiteColor);
+
+        // Role 2
+        Vertices.Add(PC);  Normals.Add(NC);  UV0.Add(ZeroUV);
+        UV1.Add(TriCellId01);  UV2.Add(TriCellId2_);  UV3.Add(OneHotC);
+        VertexColors.Add(WhiteColor);
 
         Triangles.Add(BaseIdx + 0);
         Triangles.Add(BaseIdx + 1);
         Triangles.Add(BaseIdx + 2);
     }
 
-    // 3) 提交给 PMC。R1 不创建碰撞（Actor 仅为可视化）。
+    // 3) 提交给 PMC。R2 起使用 4 通道 UV 的完整重载。R1 的不创建碰撞约束保持不变。
+    //    PMC SceneProxy 内部固定按 4 个 UV 通道初始化（InitFromDynamicVertex 第三参 = 4），
+    //    所以 GPU 端材质可直接通过 TexCoord[1]/[2]/[3] 节点读到我们写入的值。
     MeshComp->ClearAllMeshSections();
     MeshComp->CreateMeshSection_LinearColor(
         /*SectionIndex=*/0,
-        Vertices, Triangles, Normals, UV0,
+        Vertices, Triangles, Normals,
+        UV0, UV1, UV2, UV3,
         VertexColors, Tangents,
         /*bCreateCollision=*/false);
 
@@ -150,7 +195,8 @@ void APlanetTopologyDebugMesh::Rebuild()
     }
 
     UE_LOG(LogPlanetTopologyDebugMesh, Log,
-        TEXT("[PlanetTopologyDebugMesh] Rebuilt. SubdivisionLevel=%d  Cells=%d  Corners=%d  Verts=%d  Tris=%d  Radius=%.1f  Smooth=%s"),
+        TEXT("[PlanetTopologyDebugMesh] Rebuilt (R2: per-vertex CellIds + OneHot in UV1/UV2/UV3). ")
+        TEXT("SubdivisionLevel=%d  Cells=%d  Corners=%d  Verts=%d  Tris=%d  Radius=%.1f  Smooth=%s"),
         SubdivisionLevel, NumCells, NumCorners,
         Vertices.Num(), Triangles.Num() / 3, Radius,
         bSmoothNormals ? TEXT("true") : TEXT("false"));
