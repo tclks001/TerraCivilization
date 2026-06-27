@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Templates/UniquePtr.h"
+#include "WorldGenSettings.h"
 #include "PlanetTopologyDebugMesh.generated.h"
 
 class UProceduralMeshComponent;
@@ -75,6 +76,15 @@ public:
     /** 正二十面体细分层数。Cells 数 = 10*4^N + 2、Tris 数 = 20*4^N。N=3 -> 642 Cells / 1280 Tris。 */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PlanetTopology", meta = (ClampMin = "1", ClampMax = "6"))
     int32 SubdivisionLevel = 3;
+
+    /**
+     * WorldGen 流水线参数面板。W1 阶段：仅暴露 UPROPERTY，Rebuild() 末尾跑一次空 Generate()
+     * 验证模块加载与日志通道；不消费任何字段、不影响 R7 Triplanar 视觉。
+     * W2 起逐 step 启用：W2 板块/海陆、W3 高程/温湿度、W4 Whittaker 生物群系、W5 河流、W6 基地。
+     * 详见 Docs/WorldGenDesign.md §4.1 与 Docs/W1_ModuleSkeleton.md §2.1。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PlanetTopology|WorldGen")
+    FWorldGenSettings WorldGenSettings;
 
     /** 渲染用的名义球半径（cm）。仅做几何缩放，不参与拓扑。 */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PlanetTopology", meta = (ClampMin = "1.0"))

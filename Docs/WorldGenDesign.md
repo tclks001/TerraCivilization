@@ -686,7 +686,7 @@ W2/W3 在 cpp 内显式实例化两个：`PlateNoise`（low-freq, 板块大格�
 
 | 阶段 | 状态 | 目标 | 验证 |
 | --- | --- | --- | --- |
-| **W1** | 📝 详稿完成（待 cpp 落地） | 新建 `Source/WorldGen/` 模块；`FCellGeoData`、`FWorldGenSettings`、`FWorldGenerator` 空骨架；TerraCivilization 主模块 Build.cs 加依赖；`APlanetTopologyDebugMesh` 持有 `FWorldGenSettings` UPROPERTY；编译通过、跑空 `Generate()` 无崩溃 | Output Log 输出 `[WorldGen] Skeleton OK, 642 cells, no-op generate`；详稿见 [W1_ModuleSkeleton.md](W1_ModuleSkeleton.md) |
+| **W1** | 🛠 cpp 完成（待用户 Rebuild 与 PIE 验收） | 新建 `Source/WorldGen/` 模块；`FCellGeoData`、`FWorldGenSettings`、`FWorldGenerator` 空骨架；TerraCivilization 主模块 Build.cs 加依赖；`APlanetTopologyDebugMesh` 持有 `FWorldGenSettings` UPROPERTY；编译通过、跑空 `Generate()` 无崩溃 | Output Log 输出 `[WorldGen] Skeleton OK, 642 cells, no-op generate`；详稿见 [W1_ModuleSkeleton.md](W1_ModuleSkeleton.md) |
 | **W2** | ⏳ 待开始 | Step1（板块构造） + Step3（海陆分离）；为每 cell 写 `PlateId / bIsLand / bIsCoast`；接 R3 LUT —— `LayerIndex = bIsLand ? 4 : 0`（草地/海洋两色） | 球面看到 12 板块色块（debug 染色模式） + 海陆轮廓清晰（草地/海洋两色） |
 | **W3** | ⏳ 待开始 | Step2（高程场） + Step4（湿度场） + Step5（温度场）；写 `Elevation/Moisture/Temperature/bIsMountain`；LUT 仍用 W2 的两色（仅看标量场，不影响渲染） | Debug 三标量场热图分别显示合理分布；山脉沿板块汇聚边界、海岸湿润内陆干燥、极地寒冷赤道炎热 |
 | **W4** | ⏳ 待开始 | Step6（Whittaker 生物群系分类）；19-Layer 映射 cpp 硬编码；`RebuildCellAttrLUT_()` 改为按 `Def->LayerIndex` 写入；**正式接 R8** | 球面呈现：12 五边形可见、12 板块边界山脉链、海陆 + 19 layer 生物群系合理分布 |
@@ -700,9 +700,10 @@ W2/W3 在 cpp 内显式实例化两个：`PlateNoise`（low-freq, 板块大格�
 ### 11.1 当前进度记录
 
 - **W0（✅ 2026-06）**：本设计稿创建。WorldGen 从 [SphericalSDFTerrainDesign.md](SphericalSDFTerrainDesign.md) 中独立出来，明确解耦边界（仅 `FCellGeoData` 单向契约）；19-Layer Whittaker 映射建议表完成；W1~W8 子阶段计划锁定。
-- **W1（📝 2026-06）**：[W1_ModuleSkeleton.md](W1_ModuleSkeleton.md) 详稿完成——含 9 个新文件可粘贴全文 + `TerraCivilization` 主模块对接清单 + 11 项验收清单 + 14 条排错表。**下一步**：按附录 A 落 cpp、编译验证、PIE 命中 `[WorldGen] Skeleton OK, 642 cells, no-op generate`。
+- **W1（📝 2026-06）**：[W1_ModuleSkeleton.md](W1_ModuleSkeleton.md) 详稿完成——含 9 个新文件可粘贴全文 + `TerraCivilization` 主模块对接清单 + 11 项验收清单 + 14 条排错表。
+- **W1（🛠 2026-06）**：W1 cpp 落地完成——`Source/WorldGen/` 9 个新文件全部创建、`TerraCivilization.Build.cs` 追加 `WorldGen + GameplayTags` 依赖、`APlanetTopologyDebugMesh.h` 加 `FWorldGenSettings WorldGenSettings` UPROPERTY、`Rebuild()` 末尾接入 `FWorldGenerator` 空 Generate 调用。**待用户：**在 UE Editor / Visual Studio 中 Rebuild 全项目，PIE 运行后验证 Output Log 命中 `[WorldGen] Skeleton OK, 642 cells, no-op generate`、R7 视觉零回归。
 
-**下一阶段**：W1 cpp 落地——执行 [W1_ModuleSkeleton.md §3](W1_ModuleSkeleton.md#3-cpp-落地清单) 改动顺序 1→7。
+**下一阶段**：W1 验收通过后启动 W2（板块构造 + 海陆分离），待创建 [W2_PlatesAndLandSea.md](W2_PlatesAndLandSea.md) 详稿。
 
 ---
 

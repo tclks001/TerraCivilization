@@ -304,6 +304,34 @@ cpp 落地后给用户一份"下一步该做什么"清单，包含：
 
 不对齐：编辑器红色错误，材质 fallback 到 WorldGridMaterial。
 
+### 3.6 ⚠ 顶点法线写法通则（UE5 左手系 + CCW 约定，R7 经典踩坑）
+
+> **核心结论**：UE5 是左手坐标系 + CCW frontface（[`D3D12State.cpp:356`](../../Program%20Files/Epic%20Games/UE_5.8/Engine/Source/Runtime/D3D12RHI/Private/D3D12State.cpp) `FrontCounterClockwise = true`，对所有材质硬编码全局生效）+ 漫反射用 `saturate(dot(N, L))`（[`ForwardLightingCommon.ush:387-392`](../../Program%20Files/Epic%20Games/UE_5.8/Engine/Shaders/Private/ForwardLightingCommon.ush)，6 处 lit 路径全部命中同一公式）。**对球外渲染的球面 mesh，正确的顶点法线应指向球心而非球外**——这与几何直觉相反。
+
+#### 3.6.1 硬性要求
+
+| # | 要求 | 实施 |
+| --- | --- | --- |
+| ① | **任何时候不要用原始数据直接写法线** | 例如 ❌ `Normal = UnitCenter`（朝外）/ `Normal = (P - PlanetCenter).Normalize()`（朝外）—— 都是几何直觉外法线，与 UE 的 face_normal_LH 反向，Lit 漆黑 |
+| ② | **法线必须自动生成或由三角形叉积计算得到** | 首选 `KismetProceduralMeshLibrary::CalculateTangentsForMesh`（自动按 `cross(P1-P0, P2-P0)` 累加）；或显式 `cross(P1-P0, P2-P0).GetSafeNormal()` 后**确认方向**再写入 |
+| ③ | **如确实需要手填，必须取负** | 例如 球面 mesh 写 `Normal = -UnitCenter`（朝内）并加注释解释——这与 UE face_normal_LH 同向 |
+
+#### 3.6.2 判别法
+
+- View Mode 切 Lit ↔ Unlit：**Unlit 正常 + Lit 漆黑**是法线方向反向的指纹（不是材质 fallback、不是绕序错误、不是相机位置）
+- Buffer Visualization → World Normal viewmode：**朝光源一侧的半球应在 lit 后呈亮**；若反过来 → 法线方向反了
+
+#### 3.6.3 错误归因路径（已避免重蹈，R7 复盘）
+
+R7 Lit 漆黑曾被多次误归因，不要再走这些弯路：
+1. ❌ 怀疑材质槽位挂错 → 实际不是
+2. ❌ 怀疑 Texture Object Parameter 位置 A 空槽 → 实际不是
+3. ❌ 怀疑相机在球内 / Actor 负 Scale / 材质 PDO → 全部排除
+4. ❌ **怀疑绕序错误** → 一度修改 `Triangles.Add` 引入"朝外校正"，反而出现"看到内壁 + 相机移动方向反"等更严重的视觉错误（绕序原本就是对的，CCW from outside）
+5. ✅ 用 `KismetTangents` 自动法线 + 用户实测三角形 CCW from outside + 源码验证 `FrontCounterClockwise=true` + `saturate(dot(N, L))` → 闭环
+
+**详见**：[SphereTopologyReference.md §11](SphereTopologyReference.md#11-顶点法线与-ue5-光照约定重要结论--经验沉淀)（权威参考）/ [SphericalSDFTerrainDesign.md §11.2](SphericalSDFTerrainDesign.md#112-pmcptg-渲染契约顶点法线与-ue5-光照约定)（PMC↔PTG 跨期契约）/ [R7_TerrainTriplanar.md §6](R7_TerrainTriplanar.md) 排错表"整球 Lit 模式漆黑"行。
+
 ---
 
 ## 4. 文档维护规范

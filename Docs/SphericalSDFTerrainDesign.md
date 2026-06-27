@@ -69,6 +69,7 @@
 - [9. 与高亮/选择/路径预览的协同](#9-与高亮选择路径预览的协同)
 - [10. 性能预算](#10-性能预算)
 - [11. 实施 Roadmap（M-step）](#11-实施-roadmapm-step)
+  - [11.2 PMC↔PTG 渲染契约（顶点法线与 UE5 光照约定）](#112-pmcptg-渲染契约顶点法线与-ue5-光照约定) ⭐
 - [12. 已知风险与对策](#12-已知风险与对策)
 - [13. 附：核心代码骨架](#13-附核心代码骨架)
 - [14. PTG 几何层集成（生产环境路线）](#14-ptg-几何层集成生产环境路线)
@@ -881,6 +882,62 @@ CPU 侧：
 - **R7（✅ 2026-06）**：把 R6 输出里的三层 `hash(layer_i+1)` 哈希色换为 `SampleTriplanar(TerrainAlbedoArray, layer_i, WorldPos, Normal)`——三平面世界空间投影、`pow(|N|, TriplanarSharpness)` 加权融合、`TileScale` 控制 tile 尺寸。**关键踩坑**：`Texture2DArray` 必须挂在 Custom 节点 `Inputs` 列表的 **位置 A（Texture Object Parameter）**，不能挂在材质实例参数面板的 `TerrainAlbedoArray` 字段（否则 fallback 到 `GBlackTexture`）。详见 [R7_TerrainTriplanar.md](R7_TerrainTriplanar.md)。
 
 **下一阶段**：R7 已完成所有"渲染管线"层面的能力建设（拓扑→着色→软边→噪声→真实地表）。R8 起**消费 WorldGen 已生成的 `FCellGeoData[]`**（替换 R3 的 Knuth 哈希 placeholder），跑出第一张可玩星球——但 WorldGen 本身已从本主稿中**完全独立出去**，详见 [WorldGenDesign.md](WorldGenDesign.md)。R8 在 SDF 端仅是一行查表改动 + 反射诊断升级；前置依赖是 WorldGenDesign 的 W1~W4 子阶段。后续 R9~R13 见 §11 Roadmap 表。
+
+---
+
+### 11.2 PMC↔PTG 渲染契约（顶点法线与 UE5 光照约定）
+
+> ⚠ **本节是跨期同构性的硬约束**——SDF 模块本质是**为生产路线 PTG 提供"材质 + 着色公式"的研发载体**，PMC 调试 mesh 只是用于在 IsoSphere 几何上验证这套 HLSL 是否正确。R11 切换到 PTG mesh 时，**几何会换，但顶点法线方向的约定不能换**。本节为 R7 Lit 漆黑根因复盘的最终产物。
+
+#### 11.2.1 UE5 渲染管线的两条硬约定
+
+| # | 约定 | 源码出处 |
+| --- | --- | --- |
+| **左手系 + CCW frontface** | UE5 是左手坐标系（X 前 / Y 右 / Z 上），D3D12 RasterizerDesc 全局硬编码 `FrontCounterClockwise = true`；默认 `CullMode = CM_CW` 映射为 `D3D12_CULL_MODE_BACK`（剔除背面、**保留 CCW frontface**） | [`D3D12State.cpp` L34 / L356](../../Program%20Files/Epic%20Games/UE_5.8/Engine/Source/Runtime/D3D12RHI/Private/D3D12State.cpp) |
+| **漫反射 N·L 同侧** | 所有 lit 路径共用 `float NoL = saturate(dot(N, L));`，顶点法线 `N` 与该路径定义的光向 `L` 同侧才亮，反侧被 clamp 为 0 | [`ForwardLightingCommon.ush` L387-392](../../Program%20Files/Epic%20Games/UE_5.8/Engine/Shaders/Private/ForwardLightingCommon.ush)（6 处 lit 路径全部同公式） |
+
+#### 11.2.2 几何推论：球面 mesh 顶点法线应指向球心
+
+在 UE5 左手系下，对一个从球外被相机看到的 CCW from outside 三角形：
+
+```
+face_normal_LH = -cross_RH(P1-P0, P2-P0)
+
+        由于 CCW from outside + 相机在球外 = CCW from camera
+        且 face_normal_LH 指向「远离相机的一侧」
+   →   face_normal_LH 指向**球心**（而非几何外法线朝外的方向）
+```
+
+**与几何直觉相反**。直觉说"球面外法线 = 顶点位置归一化（朝外）"，但 UE 的 lit shading 假设你写入的顶点法线**与该三角形的 face_normal_LH 同向**（朝内）；写反了 `dot(N, L)` 大多数像素会落在 ≤ 0 一侧 → 整球漆黑。
+
+#### 11.2.3 PMC 端实现（R1~R10）
+
+[`PlanetTopologyDebugMesh.cpp`](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp) Rebuild 中，顶点法线 / 切线**不手填**，一律交给 `KismetProceduralMeshLibrary::CalculateTangentsForMesh` 自动生成——该工具内部用 `cross(P1-P0, P2-P0)` 累加到顶点，结果严格遵循 UE 的几何约定（朝球心）。
+
+**成本**：sub=3 下一次 ~6000 条 cross product（µ0.05 ms），对 OnConstruction 冷路径可忽。
+
+**禁止**：手填 `Normal = UnitCenter`（朝外、几何直觉外法线）——这在 R7 之前的手填代码中是隐藏错误，R1~R6 Unlit/Emissive 不参与光照所以不暴露，R7 切到 Default Lit 立刻漆黑。如确实需要手填，必须 `Normal = -UnitCenter`（朝内）并加注释解释。
+
+#### 11.2.4 PTG 端实现（R11+）
+
+R11 把 PMC 换成 PTG 高细分球皮时，`UProceduralMeshComponent` 顶点流由 `ProceduralTerrainGenerator` 插件的 `GenerateSphereData` 生成（spherified-cube）。**必须验证**：
+
+1. **PTG 生成的 6 个 face 三角形索引是否 CCW from outside** —— 这是 UE 默认 frontface 的必要条件
+2. **PTG 顶点法线是否与 face_normal_LH 同向**（对球外渲染 = **朝球心**） —— spherified-cube 默认可能输出 face normal 或顶点位置归一化朝外，都是错的；仅是"关 backface culling"也是治标不治本
+3. **PTG 启用 WPO（R12 顶点位移）后法线是否仍同向** —— 径向位移不改变 face normal 方向；任何切向位移都需重新烘焙法线
+
+R11 验收黄金检查点：在 Buffer Visualization → World Normal viewmode 下，**朝光源一侧的半球** lit 后应亮（验证 `dot(N, L) > 0`），反面应暗。若全黑 → 法线方向是反的，需取负。
+
+#### 11.2.5 为什么 R1~R6 没暴露这个问题
+
+R1~R6 主验证路径全部使用 **Unlit shading model**（纯白 / Emissive 哈希色 / Emissive 真实纹理）。Unlit **不消费顶点法线**，颜色只由 BaseColor / Emissive 决定。所以 R1~R6 调试阶段手填 `Normal = UnitCenter`（朝外）也一直视觉正常。
+
+**R7 是第一个消费顶点法线的阶段**（Default Lit 走 N·L 漫反射），隐藏错误立刻暴露为整球漆黑。这是为什么该修复滞后到 R7 才落地的原因。
+
+#### 11.2.6 与上游的关系
+
+- **权威参考**：本节仅为"跨期同构性契约"在 SDF 主稿中的映射；完整理论、根因复盘、下游契约表详见 [SphereTopologyReference.md §11](SphereTopologyReference.md#11-顶点法线与-ue5-光照约定重要结论--经验沉淀)。
+- **工作流通则**："任何时候尽量不要用原始数据直接写出法线——除非你真的明白自己在做什么——否则法线必须自动生成或由三角形叉积计算得到"，详见 [AgentWorkflow.md §3.6](AgentWorkflow.md#36--顶点法线写法通则ue5-左手系-ccw-约定)。
 
 ---
 

@@ -11,10 +11,12 @@
 #include "Materials/MaterialExpressionCustom.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "KismetProceduralMeshLibrary.h"
 #include "PixelFormat.h"
 #include "ProceduralMeshComponent.h"
 #include "Serialization/BulkData.h"
 #include "TextureResource.h"
+#include "WorldGenerator.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogPlanetTopologyDebugMesh, Log, All);
 
@@ -295,21 +297,18 @@ void APlanetTopologyDebugMesh::Rebuild()
         const FVector PB = Topology->Cells[CB].UnitCenter * Radius;
         const FVector PC = Topology->Cells[CC].UnitCenter * Radius;
 
-        // 法线：
-        //   - 光滑：每顶点法线 = 该 Cell 的 UnitCenter（球面外法向）
-        //   - 平面：整个三角形使用面法线（叉乘后归一化），3 个顶点用同一个值
-        FVector NA, NB, NC;
-        if (bSmoothNormals)
-        {
-            NA = Topology->Cells[CA].UnitCenter;
-            NB = Topology->Cells[CB].UnitCenter;
-            NC = Topology->Cells[CC].UnitCenter;
-        }
-        else
-        {
-            const FVector Face = FVector::CrossProduct(PB - PA, PC - PA).GetSafeNormal();
-            NA = NB = NC = Face;
-        }
+        // 法线：完全交给 KismetProceduralMeshLibrary::CalculateTangentsForMesh 自动计算
+        //（见下方 CreateMeshSection 前的取代块）。这里只预占 NA/NB/NC 顶点法线变量，
+        // 填入临时 placeholder（各顶点位置单位化），后续会被自动法线整体覆盖。
+        //
+        // 这里也可以改成手填 -UnitCenter（指向球心）——事实上那才是 UE5 左手系 +
+        // CCW frontface 约定下「与几何 face normal 同向」的法线，与 KismetTangents 自动推出的结果完全一致。
+        // 但**不推荐手填**——任何时候除非你真的明白自己在做什么，否则法线必须自动生成或由三角形
+        // 叉积计算得到（详见 [SphereTopologyReference.md §11](../../../Docs/SphereTopologyReference.md)
+        // 与 [AgentWorkflow.md §3.6](../../../Docs/AgentWorkflow.md)）。
+        const FVector NA = FVector::ZeroVector;
+        const FVector NB = FVector::ZeroVector;
+        const FVector NC = FVector::ZeroVector;
 
         // ===================================================================
         //  ★ CellId 编码：高 8 位 + 低 8 位拆分，避开 fp16 精度问题（极其重要！）
@@ -386,6 +385,32 @@ void APlanetTopologyDebugMesh::Rebuild()
         UV0.Add(EncCellC); UV1.Add(EncCellA);  UV2.Add(EncCellB);  UV3.Add(OneHotC);
         VertexColors.Add(ColC);
 
+        // ===================================================================
+        //  ★ 三角形索引绕序：直接沿用 FCorner.CellIds 的原始顺序
+        //
+        //  追踪链路（详见 [SphereTopologyReference.md §11](../../../Docs/SphereTopologyReference.md)
+        //  与 [SphericalSDFTerrainDesign.md §11.2](../../../Docs/SphericalSDFTerrainDesign.md)）：
+        //    1. FSphereTopology::BuildIcosahedronUnit() 中 AddTriangle(0,5,11)
+        //       等 20 个根三角形是 CCW from outside（球外向内看逆时针，已用户实测确认）
+        //    2. SubdividePrimalOnce() 的 4 个子三角形 (A,A2B,C2A) / (B,B2C,A2B) /
+        //       (C,C2A,B2C) / (A2B,B2C,C2A) 全部继承父三角形的绕序方向，**不反转**
+        //    3. BuildDualFromPrimal() 中 Corner.CellIds = {A, B, C} 直接来自 PrimalTris[I]
+        //       绕序仍为 CCW from outside
+        //    4. 这里 Triangles.Add 按 CellIds[0..2] 顺序写入，绕序保持一致
+        //
+        //  这条链路在 UE5 默认 CullMode（CM_CW → D3D12_CULL_MODE_BACK，剔除背面、保留 CCW
+        //  frontface；详见 [D3D12State.cpp:34/356]） 配合下，相机在球外时近端壳呈 CCW
+        //  from camera = frontface 被渲染、远端壳呈 CW from camera 被剔除——这正是
+        //  「球外看到外壁」的正确视觉。**绕序在 cpp 端是正确的，不要做"朝外校正"**。
+        //
+        //  ⚠ 历史教训（已避免重蹈）：
+        //  曾误以为绕序是 CW from outside（注释滞后）+ 误以为 R7 Lit 漆黑是绕序问题
+        //  → 一度引入 bFlipWinding"朝外校正"，反而把对的绕序弄反，出现"看到内壁、
+        //  相机移动方向反"等更严重的视觉错误（已撤销）。R7 Lit 漆黑的真正根因是
+        //  「手填法线 +UnitCenter 朝外，与 UE5 左手系 CCW 的 face_normal_LH（朝球心）
+        //  反向，saturate(dot(N,L)) 大多数像素 ≤ 0 → 漆黑」——已通过 KismetTangents
+        //  自动法线修复（见上方 CreateMeshSection 前的法线生成块）。
+        // ===================================================================
         Triangles.Add(BaseIdx + 0);
         Triangles.Add(BaseIdx + 1);
         Triangles.Add(BaseIdx + 2);
@@ -394,6 +419,24 @@ void APlanetTopologyDebugMesh::Rebuild()
     // 3) 提交给 PMC。R2 起使用 4 通道 UV 的完整重载。R1 的不创建碰撞约束保持不变。
     //    PMC SceneProxy 内部固定按 4 个 UV 通道初始化（InitFromDynamicVertex 第三参 = 4），
     //    所以 GPU 端材质可直接通过 TexCoord[1]/[2]/[3] 节点读到我们写入的值。
+    //
+    // ★ 顶点法线 / 切线一律交给 KismetProceduralMeshLibrary::CalculateTangentsForMesh
+    //
+    //   该工具按"Vertices 位置 + Triangles 绕序 + UVs 切线方向"自动推算，顶点法线严格与 UE5
+        //   左手系 + CCW frontface 约定同调（[ForwardLightingCommon.ush:387-392](../../../../Program%20Files/Epic%20Games/UE_5.8/Engine/Shaders/Private/ForwardLightingCommon.ush)
+    //   中 `saturate(dot(N, L))` 要求法线与光向同侧）。
+    //
+    //   成本：sub=3 下一次 ~6000 条 cross product（µ0.05 ms），对 OnConstruction 冷路径可忽。
+    //   详见 [SphereTopologyReference.md §11 顶点法线与 UE5 光照约定](../../../Docs/SphereTopologyReference.md)。
+    {
+        TArray<FVector> AutoNormals;
+        TArray<FProcMeshTangent> AutoTangents;
+        UKismetProceduralMeshLibrary::CalculateTangentsForMesh(
+            Vertices, Triangles, UV0, AutoNormals, AutoTangents);
+        Normals  = MoveTemp(AutoNormals);
+        Tangents = MoveTemp(AutoTangents);
+    }
+
     MeshComp->ClearAllMeshSections();
     MeshComp->CreateMeshSection_LinearColor(
         /*SectionIndex=*/0,
@@ -624,6 +667,18 @@ void APlanetTopologyDebugMesh::Rebuild()
         TileScale,
         TriplanarSharpness,
         NumLayersHint);
+
+    // ===== W1: WorldGen 骨架接入 =====
+    // 目的：调通 Source/WorldGen 模块；运行时跑一次空 Generate() 验证模块加载与日志通道。
+    // W1 阶段 Generate() 不修改任何渲染数据；R7 视觉效果保持不变。
+    // W2 起：把 Generator 持有为 TUniquePtr 成员，并把 GeoData 喂给 LUT。
+    // 详见 Docs/W1_ModuleSkeleton.md §4.1.2。
+    if (Topology.IsValid())
+    {
+        FWorldGenerator TmpGen(Topology.Get(), WorldGenSettings);
+        TmpGen.Generate();
+        // W1 不消费 TmpGen.GetCellData()；构造析构即弃。
+    }
 }
 
 // =====================================================================
