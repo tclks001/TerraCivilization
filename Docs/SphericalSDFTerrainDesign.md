@@ -730,6 +730,35 @@ float3 SampleTriplanar(Texture2DArray T, uint layer, float3 WP, float3 N)
 
 > 与球心的距离不影响：因为我们传入的 `WorldNormal = WorldDir`（球面外法），Triplanar 三个面的混合权重只看法线方向。这避免了 PTG `spherified-cube` 那种 6 面 UV 重叠的灾难。
 
+#### 6.5.1 R7 落地方案：从 R6 哈希色升级为真实 Triplanar 采样
+
+**设计原则**：R7 不修改 R6 的 dirP / θ / δ / w 计算链路，只把最后的"三层颜色加权"从 `hash(layer_i+1)` 哈希色换为 `SampleTriplanar(TerrainAlbedoArray, layer_i, WorldPos, dir)` 真实纹理采样。三层权重 $w_A, w_B, w_C$ 、软边、蜿蜒、球面 Voronoi 边几何全部沿用 R6。
+
+**核心公式**（只变颜色采样路径）：
+
+$$
+\text{color} = \frac{\sum_i w_i \cdot \text{Triplanar}(\text{Albedo}, \text{layer}_i, \mathbf{x}, \hat{n})}{\sum_i w_i + \epsilon},\quad \hat{n} = \hat{d}
+$$
+
+其中 $\mathbf{x}$ = WorldPosition，$\hat{n}$ = 球面外法（等于未扰动的 `dir`——不能用 R6 的 dirP，否则 Triplanar 权重会随噪声拖拽，在 cell 内部产生伪影）。
+
+**三个关键资产**：
+
+1. **`TerrainAlbedoArray`**：`Texture2DArray<float4>`，每个 slice = 1 张 BaseColor（sRGB）。由已导入的 `T_<Name>_BaseColor` 资产拼合而成。
+2. **`TerrainNormalArray`**：同上但为 Normal Map（Linear），与 Albedo Array slice 一一对齐。R7 阶段可选（仅 BaseColor 也能跑）。
+3. **`CellAttrLUT.r`**：沿用 R3 定义的每-cell LayerIndex（1 个字节），作为上面两个 Texture2DArray 的 slice 下标。
+
+**当前已导入的测试资产**（[Content/Textures/](../Content/Textures/)）：共 19 个 layer，每个含 BaseColor + Normal 双通道。详细分类、Texture2DArray 拼合步骤、`SampleTriplanar` HLSL 细节、`TileScale`/`TriplanarSharpness` 等参数含义、cpp 改动、材质接线、验收清单、排错表见 [R7_TerrainTriplanar.md](R7_TerrainTriplanar.md)。
+
+**与 R6 / R5 / R4 的退化关系**：
+
+| 可调参数 | 取值 | 视觉效果 |
+| --- | --- | --- |
+| 仅 R7 | NoiseAmplitude=0, EdgeWidth=0.0001 | R4 硬直边 + 真实地表纹理（Civ 风格棱柱带纹） |
+| R7+R5 | NoiseAmplitude=0, EdgeWidth=0.05 | 软直边 + 真实纹理（Old World 风格） |
+| R7+R5+R6 | NoiseAmplitude=0.05, EdgeWidth=0.05 | 软蜿蜒边 + 真实纹理（E&D 风格，最丰富） |
+| 全关 R7 | （材质中切回 hash 模式） | 退化为 R6 哈希色验证 |
+
 ---
 
 ## 7. 备选权重方案对比
@@ -741,9 +770,9 @@ float3 SampleTriplanar(Texture2DArray T, uint layer, float3 WP, float3 N)
 | **A. 重心坐标 3 Cell（本文主方案）** | 3 | ✅ Cell 中心精确、Corner 对称无歧义、边界连续 | **3 次 tex.Load**，无 acos | 默认采用 ✅ |
 | **B. 球面 Voronoi acos**（顶点 3 + 邻居 6） | 7 | ⚠ 需要 ε clamp，Corner 处易跳变 | 7 次 acos+dot+Load + 邻居 LUT | 需要"球面真实距离"语义时（罕见） |
 | **C. 全 GPU 4 叉树下降** | log N | ✅ | 高（树纹理 + 循环） | 不参与本方案——拓扑层 CPU 端用即可 |
-| **D. CPU 每帧预筛 \"屏幕 K 个候选 Cell\"** | 屏幕 K | ✅ | 屏幕复杂度 | 低 cell 高分辨率时 |
+| **D. CPU 每帧预筛 "屏幕 K 个候选 Cell"** | 屏幕 K | ✅ | 屏幕复杂度 | 低 cell 高分辨率时 |
 
-> 方案 A 与方案 B 的几何结果**在三角形内部完全等价**（因为三角形顶点恰好就是 3 个 Cell 中心，重心坐标是 \"线性版的 dist 反比\"）。差别仅在三角形外的过渡形态——但本方案下 mesh 已经覆盖整个球面，每个像素都在某个三角形内，没有"三角形外"。
+> 方案 A 与方案 B 的几何结果**在三角形内部完全等价**（因为三角形顶点恰好就是 3 个 Cell 中心，重心坐标是 "线性版的 dist 反比"）。差别仅在三角形外的过渡形态——但本方案下 mesh 已经覆盖整个球面，每个像素都在某个三角形内，没有"三角形外"。
 >
 > **结论**：方案 A 是几何上最干净、计算上最便宜、没有任何数值病态的解，无需考虑其它备选。
 
@@ -801,7 +830,7 @@ albedo = lerp(albedo, SelectColor.rgb, selMask * SelectStrength);
 | 加权混合 + 装饰层混合 | ~20 ALU | ~0.2 ms |
 | **总计 / 帧 / 1080p** | | **~3.8 ms** |
 
-> 与 acos 方案 \"~3.5 ms\" 相差几乎为零——多花的 1 路 Triplanar 抵消了少花的 acos 循环。**真正胜出的不是性能，而是\"一行 acos 都没有、一处数值奇点都没有、一个 NeighborLUT 都不需要\"的工程简洁性**。
+> 与 acos 方案 "~3.5 ms" 相差几乎为零——多花的 1 路 Triplanar 抵消了少花的 acos 循环。**真正胜出的不是性能，而是"一行 acos 都没有、一处数值奇点都没有、一个 NeighborLUT 都不需要"的工程简洁性**。
 >
 > **4K 屏会到 ~14 ms**，到时候要么降软边噪声、要么只对屏幕内可见 Cell 做半屏分辨率（half-res combine）。
 
@@ -824,7 +853,7 @@ CPU 侧：
 | **R4** | 🛠 cpp 完成（待材质验收） | **基于外心垂面的三角分割**——把判别准则从 `argmax(λ)`（外心→边中点折线边界）改为 `argmax(dot(dir, V_i))`（球面 Voronoi / 真正测地线 hex 边）。cpp 端新增 1×NumCells、PF_A32B32G32R32F 的 `CellDirLUT`（RGB = `UnitCenter`、A = `bIsPentagon`），通过 MID 注入 PS；`PlanetCenter` 也走 MID Vector 参数。PS 端用 R3 已解码的 c0/c1/c2 三次 `Texture2D.Load` 取得三个 cell 的中心方向，计算 `dot(dir, V_i)` 取 argmax。**消除 R3 hex/pent 边在 mesh 边中点处的可见折角**（详见 [R4_VoronoiBoundary.md](R4_VoronoiBoundary.md)） | 球面 hex/pent 边视觉上是平滑的测地线大圆弧，**任何相邻 cell 之间的边没有折点**；从近距离 / 高 sub 下侧视检查：图像中 hex 边的曲率连续；其他效果（NumLayersHint 影响、LUT 注入）保持 R3 一致 |
 | **R5** | 🛠 cpp 完成（待材质验收） | 在 R4 球面 Voronoi 距离空间做软边——定义 $\delta_i = \theta_i - \min_{j\neq i}\theta_j$（到 Voronoi 边的有符号绝对弧度距离，$\theta_i = \arccos(\hat{d}\cdot V_i)$），权重 $w_i = \text{smoothstep}(\text{EdgeWidth}/2, -\text{EdgeWidth}/2, \delta_i)$。`EdgeWidth = 0` 退化为 R4 硬边；`EdgeWidth > 0` 时过渡带是测地线大圆弧两侧的等距弧度带；颜色三层独立 hash 加权。`EdgeWidth` 单位为**绝对弧度**（跨 sub 语义不变）（详见 [R5_SharpenSoftEdge.md](R5_SharpenSoftEdge.md)） | `EdgeWidth = 0` 视觉与 R4 完全一致；`EdgeWidth = 0.05`（约 2.86°）看到 hex/pent 边变成等宽测地线软边；`EdgeWidth = 0.20` 看到大幅柔软渐变；过渡带在 mesh 边中点处与硬边路径几何严格对齐（**无相位错位**） |
 | **R6** | 🛠 cpp 完成 | 在 R5 球面距离空间叠加 per-cell 3D 噪声扰动——$\tilde\delta_i = \delta_i + n_i(\hat{d}) \cdot \text{NoiseAmplitude}$，软边权重沿用 R5 公式但用 $\tilde\delta_i$ 替代 $\delta_i$。`NoiseAmplitude` 单位为**绝对弧度**（与 EdgeWidth 同制），`NoiseScale` 单位为每弧度周期数；`NoiseAmplitude = 0` 退化为 R5；与 EdgeWidth **正交**——可独立控制"软/硬"和"直/蜿蜒"两个视觉维度（详见 [R6_BoundaryNoise.md](R6_BoundaryNoise.md)） | `NoiseAmplitude = 0` 视觉与 R5 一致；`NoiseAmplitude = 0.05, NoiseScale = 10` 看到 hex/pent 边变成蜿蜒曲线但仍可识别原 cell 形状；跨 mesh 边时 cell 边形状连续无缝；`EdgeWidth = 0 + NoiseAmplitude > 0` 看到硬边蜿蜒；`EdgeWidth > 0 + NoiseAmplitude > 0` 看到软边蜿蜒 |
-| **R7** | ⏳ 待开始 | 切到 `Texture2DArray + Triplanar` 真实地表纹理 | 草、沙、雪皮肤 |
+| **R7** | 🛠 cpp 已落地（待资产 + 材质验收）| 把 R6 输出里的三层 `hash(layer_i+1)` 哈希色换为 `SampleTriplanar(TerrainAlbedoArray, layer_i, WorldPos, dir)` 真实地表采样；R4-R6 的 δ / w / dirP 计算链路全部保留。需新建 1–2 张 `Texture2DArray`（`TerrainAlbedoArray` + 可选 `TerrainNormalArray`），slice 下标从 `CellAttrLUT.r` 读取。面法 $\hat{n}$ 必须用**未扰动的 dir** 而非 R6 dirP（详见 [R7_TerrainTriplanar.md](R7_TerrainTriplanar.md)） | 调小 NumLayersHint（如 4）后能看到同色块上三个 Triplanar 采样区块（yz / xz / xy 三面混合未出接缝）；调大 NumLayersHint=16 后 cell 内部是草/沙/雪/岩交错的马赛克拼接，cell 边处蜿蜒软过渡（R6） |
 | **R8** | ⏳ 待开始 | 接入 `WorldGen` 的 `FCellGeoData → LayerIndex`，跑出第一张可玩星球 | 12 五边形可见、海陆分布 |
 | **R9** | ⏳ 待开始 | 加 Decor / Owner / Fog 三套独立 LUT | 政治版图 + 战争迷雾上线 |
 | **R10** | ⏳ 待开始 | LOD 优化：远距离用 R4（硬直边、无噪声）、近距离用 R6（软蜿蜒边） | 远景帧时间下降 |
@@ -838,7 +867,7 @@ CPU 侧：
 
 - **R1（✅ 2026-06）**：`APlanetTopologyDebugMesh` 已将 sub=3 的 1280 个 primal 三角形（642 个 Cell 顶点）完整渲出来；`OnConstruction` 自动 Rebuild、编辑器视口即时刷新。验证了拓扑构建（`FSphereTopology` 数据正确、`Cells.UnitCenter` × `Corner.CellIds` 索引装填正确、12 个 pentagon 位置与正二十面体顶点对齐）。修复了 `FSphereTopology::Build()` 二次累加导致的 sub=3 → 41604 Cells 爆炸问题。
 - **R2（✅ 2026-06）**：每个三角形展开为 3 个独立顶点，UV1/UV2/UV3 + VertexColor 全部装填到位（详见 [PlanetTopologyDebugMesh.cpp](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp) 顶部大段注释）。**R2 验收路径选定为 PS 端 argmax(λ) 硬边着色**——这是排除"VertexColor 直显路径下 5/6 个三角形围中心顶点产生『hex 占完整 5/6 三角形 + 过渡三角形』视觉错觉"的唯一办法（详见 [§2.1.2](#212-视觉错觉防御13-角块的判别准则用于-r2r3-验收)）。argmax 域恰好与 §14.7 外心-边中点连线划出的 1/3 角块吻合，因此视觉效果直接对应"5/6 个 1/3 角块拼成 hex/pent"的拓扑事实，肉眼可数 hex/pent 边数、可见三角形几何边界横跨 hex 内部。
-- **R3（✅ 2026-06）**：在 R2 基础上加入 `CellAttrLUT`（1×NumCells、PF_B8G8R8A8、Filter=Nearest、SRGB=false 的动态纹理），R 通道存 LayerIndex（Knuth 哈希 placeholder）。`Rebuild()` 末尾把外部 Material 包装为 MID，注入 `CellAttrLUT` Texture Object 参数与 `NumLayersHint`/`NumCells` 标量参数。PS 端着色公式从 `hash(chosen+1)` 升级为 `hash(LUT.Load(chosen).r * 255 + 1)`——保留 R2 的 argmax 硬边切分，仅多一次 `Texture2D.Load(int3)`。验收成功的关键证据：调小 `NumLayersHint` 后大片相邻 hex 立刻融合成同色，证明 LUT 真实驱动着色（而非 CellId 自身哈希）。详见 [R3_CellAttrLUTMaterial.md](R3_CellAttrLUTMaterial.md)。
+- **R3（✅ 2026-06）**：在 R2 基础上加入 `CellAttrLUT`（1×NumCells、PF_B8G8R8A8、Filter=Nearest、SRGB=false 的动态纹理），R 通道存 LayerIndex（Knuth 哈希 placeholder）。`Rebuild()` 末尾把外部 Material 包装为 MID，注入 `CellAttrLUT` Texture Object 参数与 `NumLayersHint`/`NumCells` 标量参数。PS 端着色公式从 `hash(chosen + 1)` 升级为 `hash(LUT.Load(chosen).r * 255 + 1)`——保留 R2 的 argmax 硬边切分，仅多一次 `Texture2D.Load(int3)`。验收成功的关键证据：调小 `NumLayersHint` 后大片相邻 hex 立刻融合成同色，证明 LUT 真实驱动着色（而非 CellId 自身哈希）。详见 [R3_CellAttrLUTMaterial.md](R3_CellAttrLUTMaterial.md)。
 
 ### 11.2 R3 落地总结（已完成）
 

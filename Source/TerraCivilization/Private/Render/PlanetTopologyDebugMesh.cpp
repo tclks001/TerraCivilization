@@ -3,6 +3,7 @@
 #include "Render/PlanetTopologyDebugMesh.h"
 
 #include "Engine/Texture2D.h"
+#include "Engine/Texture2DArray.h"
 #include "FCorner.h"
 #include "FSphereTopology.h"
 #include "Materials/Material.h"
@@ -447,6 +448,23 @@ void APlanetTopologyDebugMesh::Rebuild()
             //   per-cell 采样以保证跨 mesh 边连续（详见 R6_BoundaryNoise.md §1.5）
             MID->SetScalarParameterValue(TEXT("NoiseAmplitude"), NoiseAmplitude);
             MID->SetScalarParameterValue(TEXT("NoiseScale"),     NoiseScale);
+
+            // R7 新增注入：地表 Texture2DArray + Triplanar 参数
+            //   PS 端：color_i = SampleTriplanar(TerrainAlbedoArray, layer_i, WorldPos, dir)
+            //   - layer_i 从 R3 的 CellAttrLUT.r * 255 读取（slice 下标）
+            //   - dir 是未扰动的球面外法（不是 R6 dirP，详见 R7_TerrainTriplanar.md §1.4 / 附录 C）
+            //   - TileScale 单位 cm/周期，跨星球大小调这个值而不是缩放坐标
+            //   - TriplanarSharpness 推荐 4；SetTextureParameterValue 对 Texture2DArray 适用
+            if (TerrainAlbedoArray)
+            {
+                MID->SetTextureParameterValue(TEXT("TerrainAlbedoArray"), TerrainAlbedoArray);
+            }
+            if (TerrainNormalArray)
+            {
+                MID->SetTextureParameterValue(TEXT("TerrainNormalArray"), TerrainNormalArray);
+            }
+            MID->SetScalarParameterValue(TEXT("TriplanarSharpness"), TriplanarSharpness);
+            MID->SetScalarParameterValue(TEXT("TileScale"),         TileScale);
         }
 
         // 注意：不能写 `MID ? (UMaterialInterface*)MID : Material` —— Material 是
@@ -462,20 +480,26 @@ void APlanetTopologyDebugMesh::Rebuild()
         // R6 期望材质里至少有一个 Custom 节点同时拥有以下 11 个 Inputs：
         //   UV0, UV1, UV2, UV3, WorldPos, PlanetCenter, CellAttrLUT, CellDirLUT, EdgeWidth, NoiseAmplitude, NoiseScale
         // 缺失任意一项 → 打印 Error 级别日志（说明用户挂了 R3/R4/R5 旧材质，或新材质没接全）
+        //
+        // R7 期望材质里至少有一个 Custom 节点拥有以下 14 个 Inputs（R6 11 项 + R7 新增 3 项）：
+        //   ... R6 11 项 ... + TerrainAlbedoArray, TriplanarSharpness, TileScale
+        // TerrainNormalArray 是 R7 可选项，反射诊断不强制要求。
 #if WITH_EDITORONLY_DATA
         if (UMaterial* BaseMat = Material->GetMaterial())
         {
             const TConstArrayView<TObjectPtr<UMaterialExpression>> Exprs = BaseMat->GetExpressions();
             int32 CustomFound = 0;
-            // R6 期望 Inputs 集合（小写比较，容错命名风格）
-            const TArray<FString> ExpectedR6Inputs = {
+            // R7 期望 Inputs 集合（小写比较，容错命名风格）
+            const TArray<FString> ExpectedR7Inputs = {
                 TEXT("uv0"), TEXT("uv1"), TEXT("uv2"), TEXT("uv3"),
                 TEXT("worldpos"), TEXT("planetcenter"),
                 TEXT("cellattrlut"), TEXT("celldirlut"),
                 TEXT("edgewidth"),
-                TEXT("noiseamplitude"), TEXT("noisescale")
+                TEXT("noiseamplitude"), TEXT("noisescale"),
+                TEXT("terrainalbedoarray"),                  // R7 新增
+                TEXT("triplanarsharpness"), TEXT("tilescale") // R7 新增
             };
-            bool bAnyR6Compliant = false;
+            bool bAnyR7Compliant = false;
 
             for (UMaterialExpression* Expr : Exprs)
             {
@@ -522,10 +546,10 @@ void APlanetTopologyDebugMesh::Rebuild()
                                                     .Replace(TEXT("\r"), TEXT("\\r")));
                     }
 
-                    // ---- R6 合规性检查 ----
+                    // ---- R7 合规性检查 ----
                     TArray<FString> Missing;
                     TArray<FString> Disconnected;
-                    for (const FString& Need : ExpectedR6Inputs)
+                    for (const FString& Need : ExpectedR7Inputs)
                     {
                         if (!PresentLower.Contains(Need))         { Missing.Add(Need); }
                         else if (!ConnectedLower.Contains(Need))  { Disconnected.Add(Need); }
@@ -533,23 +557,23 @@ void APlanetTopologyDebugMesh::Rebuild()
 
                     if (Missing.Num() == 0 && Disconnected.Num() == 0)
                     {
-                        bAnyR6Compliant = true;
+                        bAnyR7Compliant = true;
                         UE_LOG(LogPlanetTopologyDebugMesh, Warning,
-                            TEXT("    ✓ R6 compliance: ALL %d expected inputs present & connected"),
-                            ExpectedR6Inputs.Num());
+                            TEXT("    ✓ R7 compliance: ALL %d expected inputs present & connected"),
+                            ExpectedR7Inputs.Num());
                     }
                     else
                     {
                         if (Missing.Num() > 0)
                         {
                             UE_LOG(LogPlanetTopologyDebugMesh, Error,
-                                TEXT("    ✗ R6 missing inputs: [%s] — this is likely an R2/R3/R4/R5 material, not R6"),
+                                TEXT("    ✗ R7 missing inputs: [%s] — this is likely an R2/R3/R4/R5/R6 material, not R7"),
                                 *FString::Join(Missing, TEXT(", ")));
                         }
                         if (Disconnected.Num() > 0)
                         {
                             UE_LOG(LogPlanetTopologyDebugMesh, Error,
-                                TEXT("    ✗ R6 inputs declared but NOT connected: [%s]"),
+                                TEXT("    ✗ R7 inputs declared but NOT connected: [%s]"),
                                 *FString::Join(Disconnected, TEXT(", ")));
                         }
                     }
@@ -561,18 +585,18 @@ void APlanetTopologyDebugMesh::Rebuild()
                     TEXT("[PlanetTopologyDebugMesh] Material '%s' contains NO UMaterialExpressionCustom nodes!"),
                     *BaseMat->GetName());
             }
-            else if (!bAnyR6Compliant)
+            else if (!bAnyR7Compliant)
             {
                 UE_LOG(LogPlanetTopologyDebugMesh, Error,
-                    TEXT("[PlanetTopologyDebugMesh] Material '%s' has %d Custom nodes but NONE is R6-compliant. ")
-                    TEXT("Expected one Custom with inputs: UV0,UV1,UV2,UV3,WorldPos,PlanetCenter,CellAttrLUT,CellDirLUT,EdgeWidth,NoiseAmplitude,NoiseScale. ")
-                    TEXT("See R6_BoundaryNoise.md §4 for the exact wiring."),
+                    TEXT("[PlanetTopologyDebugMesh] Material '%s' has %d Custom nodes but NONE is R7-compliant. ")
+                    TEXT("Expected one Custom with inputs: UV0,UV1,UV2,UV3,WorldPos,PlanetCenter,CellAttrLUT,CellDirLUT,EdgeWidth,NoiseAmplitude,NoiseScale,TerrainAlbedoArray,TriplanarSharpness,TileScale. ")
+                    TEXT("See R7_TerrainTriplanar.md §4 for the exact wiring."),
                     *BaseMat->GetName(), CustomFound);
             }
             else
             {
                 UE_LOG(LogPlanetTopologyDebugMesh, Log,
-                    TEXT("[PlanetTopologyDebugMesh] Material '%s' is R6-compliant ✓"),
+                    TEXT("[PlanetTopologyDebugMesh] Material '%s' is R7-compliant ✓"),
                     *BaseMat->GetName());
             }
         }
@@ -580,10 +604,11 @@ void APlanetTopologyDebugMesh::Rebuild()
     }
 
     UE_LOG(LogPlanetTopologyDebugMesh, Log,
-        TEXT("[PlanetTopologyDebugMesh] Rebuilt (R6: per-cell noise on δ + soft edge). ")
+        TEXT("[PlanetTopologyDebugMesh] Rebuilt (R7: 3-layer Triplanar real terrain). ")
         TEXT("SubdivisionLevel=%d  Cells=%d  Corners=%d  Verts=%d  Tris=%d  Radius=%.1f  Smooth=%s  ")
         TEXT("CellAttrLUT=%s  CellDirLUT=%s  PlanetCenter=(%.1f,%.1f,%.1f)  ")
         TEXT("EdgeWidth=%.4f rad (%.2f°)  NoiseAmplitude=%.4f rad (%.2f°)  NoiseScale=%.1f /rad  ")
+        TEXT("TerrainAlbedoArray=%s  TerrainNormalArray=%s  TileScale=%.0f cm  TriplanarSharpness=%.1f  ")
         TEXT("NumLayersHint=%d"),
         SubdivisionLevel, NumCells, NumCorners,
         Vertices.Num(), Triangles.Num() / 3, Radius,
@@ -594,6 +619,10 @@ void APlanetTopologyDebugMesh::Rebuild()
         EdgeWidth,      EdgeWidth      * 180.0 / PI,
         NoiseAmplitude, NoiseAmplitude * 180.0 / PI,
         NoiseScale,
+        TerrainAlbedoArray ? TEXT("OK") : TEXT("MISSING"),
+        TerrainNormalArray ? TEXT("OK") : TEXT("(none)"),
+        TileScale,
+        TriplanarSharpness,
         NumLayersHint);
 }
 

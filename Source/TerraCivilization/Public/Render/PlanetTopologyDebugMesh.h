@@ -11,6 +11,7 @@ class UProceduralMeshComponent;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 class UTexture2D;
+class UTexture2DArray;
 class FSphereTopology;
 
 /**
@@ -49,6 +50,15 @@ class FSphereTopology;
  *     NoiseAmplitude=0 退化为 R5；与 EdgeWidth 正交（可独立控制“软/硬”与“直/蔓蜒”两个视觉维度）。
  *     仅新增 2 个 Scalar Parameters（NoiseAmplitude / NoiseScale）通过 MID 注入，无新增 LUT。
  *     详见 R6_BoundaryNoise.md。
+ * R7：把 R6 输出公式中的三层 hash 哈希色换成三层 Triplanar 真实地表纹理采样——
+ *       color = Σ w_i * Triplanar(TerrainAlbedoArray, layer_i, WorldPos, dir) / Σ w_i
+ *     R4/R5/R6 几何链路（Voronoi 边、软边过渡、噪声扰动）原封保留，R7 仅是"颜色源"升级。
+ *     关键约束：Triplanar 法线 hat{n} 必须用未扰动的 dir，不是 R6 dirP
+ *     （否则 cell 内部 fp32 噪声方向抖动会让三平面权重突变 → 出现纹理切换伪影）。
+ *     新增 4 个 UPROPERTY：TerrainAlbedoArray（Texture2DArray，slice=layer，由 19 张
+ *     T_*_BaseColor 拼装）、TerrainNormalArray（可选）、TriplanarSharpness（默认 4.0）、
+ *     TileScale（默认 100 cm/周期）。LUT 沿用 R3 CellAttrLUT + R4 CellDirLUT，无新建动态纹理。
+ *     详见 R7_TerrainTriplanar.md。
  */
 UCLASS()
 class TERRACIVILIZATION_API APlanetTopologyDebugMesh : public AActor
@@ -146,6 +156,59 @@ public:
      */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|R6", meta = (ClampMin = "0.1", ClampMax = "100.0"))
     float NoiseScale = 10.0f;
+
+    /**
+     * R7：地表 BaseColor 纹理数组。
+     *
+     * 每个 slice = 1 个 layer 的 BaseColor（sRGB）；slice 下标对应 CellAttrLUT.r * 255
+     * （即 R3 写入的 LayerIndex）。通过编辑器在 Content/Textures/T_TerrainAlbedoArray.uasset
+     * 创建，由 19 张 T_<Name>_BaseColor 拼合而成（详细分类与拼装步骤见 R7_TerrainTriplanar.md
+     * 附录 A）。
+     *
+     * 留空时材质退化为 R6 哈希色（Custom 节点的 TerrainAlbedoArray Input 没接 → 反射诊断报错）。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PlanetTopology|R7")
+    TObjectPtr<UTexture2DArray> TerrainAlbedoArray;
+
+    /**
+     * R7：地表 Normal 纹理数组（可选，R7 默认仅 BaseColor 通路即可完成视觉验收）。
+     *
+     * 与 TerrainAlbedoArray 的 slice 一一对齐；空时材质退化为只用 BaseColor 平涂
+     * （世界法线 = 球面外法 dir，无凹凸细节）。R8+ 再启用以加 Normal/Roughness 真实化。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PlanetTopology|R7")
+    TObjectPtr<UTexture2DArray> TerrainNormalArray;
+
+    /**
+     * R7：Triplanar 三个轴对齐采样平面的混合锐度（详见 R7_TerrainTriplanar.md 附录 B.2）。
+     *
+     *   1   ：三平面均匀混合（极模糊，不推荐）
+     *   2   ：平滑过渡，球极区软糊（卡通风格）
+     *   4   ：平衡（默认，大多数地表）
+     *   8   ：三平面快速切换，球极区可见但锐利（写实地形）
+     *   16  ：接近硬切，球极区出现 "+" 形接缝（验证用上限）
+     *
+     * 不要超过 16——会让 Triplanar 退化为非连续 piecewise，球极区出现明显伪影。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|R7",
+              meta = (ClampMin = "1.0", ClampMax = "16.0"))
+    float TriplanarSharpness = 4.0f;
+
+    /**
+     * R7：Triplanar 纹理周期长度（cm/周期，详见 R7_TerrainTriplanar.md 附录 B.1）。
+     *
+     *   50    ：极近距离草皮颗粒可见（单位人物视角）
+     *   100   ：每米一个纹理周期（默认，玩家俯视 cell 视角）
+     *   200   ：每 2 米，中近距离地表细节
+     *   500   ：每 5 米，中尺度地貌（地图视角）
+     *   2000  ：每 20 米，大尺度地形（远观行星全景）
+     *
+     * 跨星球大小时只调这个值——纹理按"米"平铺，不要跨星球自动缩放（详见 §1.5 关键约束 2）。
+     * Radius=15000 cm 的小行星与 Radius=600000 cm 的大行星，TileScale 都用 100 不需要变。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|R7",
+              meta = (ClampMin = "10.0", ClampMax = "10000.0"))
+    float TileScale = 100.0f;
 
     /**
      * 是否开启光滑法线。
