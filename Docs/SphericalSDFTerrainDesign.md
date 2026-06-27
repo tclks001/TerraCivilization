@@ -8,6 +8,10 @@
 >
 > 关联：[FSphereTopology.h](../Source/Grid/Public/FSphereTopology.h)、[FCell.h](../Source/Grid/Public/FCell.h)、[FCorner.h](../Source/Grid/Public/FCorner.h)、[HexHighlightInteractionPlan.md](HexHighlightInteractionPlan.md)
 >
+> 📐 **拓扑几何含义参考**：本稿假设读者已理解 `FSphereTopology` 各字段的几何含义（FCell = hex/pent 多边形、FCorner = 球面外心 / dual 顶点、primal vs dual 对偶关系、12 五边形不变量等）。如对拓扑细节有疑问，请先查阅 [SphereTopologyReference.md](SphereTopologyReference.md)（"真理之源"基础设施稿）。
+>
+> ⚠ **WorldGen 已独立成稿**：每 Cell 的 `TerrainTag / Elevation / Moisture / PlateId / bIsCoast/...` 由独立的 [WorldGenDesign.md](WorldGenDesign.md) 主稿负责生成。本稿（SDF 渲染层）从 R8 起**只读消费** `FCellGeoData[]`——通过 `UTerrainDefinition::LayerIndex` 间接拿到 `Texture2DArray` slice 索引，对 WorldGen 内部算法（板块构造、Whittaker 表、河流追踪等）一无所知，亦不依赖。两侧通过 §4.1 / §14.1 的 LUT 字段表锁死契约。
+>
 > ---
 >
 > ## ⚠ 阅读指引：两条实施路径
@@ -254,9 +258,9 @@ flowchart LR
 | 模块 | 角色 |
 | --- | --- |
 | `Grid` | 已存在；提供拓扑 + Voronoi 查询；本方案仅消费它 |
-| `WorldGen` | 写入每 Cell 的 `TerrainTag`、`LayerIndex` |
+| `WorldGen` | **上游模块**（独立设计稿见 [WorldGenDesign.md](WorldGenDesign.md)）；本方案只读消费其输出的 `FCellGeoData[]`，不关心生成算法 |
 | `GridRender`（本方案核心） | 构建 Mesh + LUT 资源 + 材质参数；管理动态更新 |
-| `TerrainTags` | 提供 `UTerrainDefinition::LayerIndex` 的来源 |
+| `TerrainTags` | 提供 `UTerrainDefinition::LayerIndex` 的来源（`TerrainTag → LayerIndex` 映射） |
 
 ---
 
@@ -371,6 +375,7 @@ sequenceDiagram
 
     Topo->>Globe: BuildMesh(Cells, Corners.CellIds)<br/>顶点=Cells，三角形=Corner.CellIds
     Note over Globe: 每个三角形展开成 3 个独立顶点<br/>分别带 CellId 与 OneHot(0/1/2)
+    Note over Gen: WorldGen 黑盒：跑完整 8 步流水线<br/>详见 WorldGenDesign.md
     Gen->>Globe: GeoData[CellId].TerrainTag → LayerIndex
     Globe->>GPU: CellAttrLUT (R=LayerBase, G=Decor, ...)
     Mat->>GPU: TerrainAlbedoArray, NormalArray
@@ -488,7 +493,7 @@ void UGlobeMeshComponent::SetCellLayer(int32 CellId, uint8 LayerBase, uint8 Laye
 }
 ```
 
-> 注意 [`FCellGeoData`](TechnicalDesign.md) 在 `WorldGen` 里已经计算好 `TerrainTag`；`GridRender` 只取 `Def->LayerIndex` 灌库即可。
+> 注意：`FCellGeoData` 在 `WorldGen` 里已经计算好 `TerrainTag`（详见 [WorldGenDesign.md](WorldGenDesign.md) §3.3 输入/输出契约）；`GridRender` 只取 `Def->LayerIndex` 灌库即可。**SDF 渲染层不关心 WorldGen 内部如何生成**——这是两侧解耦的硬承诺。
 
 ### 5.3 终结：每帧只更新 LUT，不重建几何
 
@@ -856,7 +861,7 @@ CPU 侧：
 | **R5** | ✅ 已完成 | 在 R4 球面 Voronoi 距离空间做软边——定义 $\delta_i = \theta_i - \min_{j\neq i}\theta_j$（到 Voronoi 边的有符号绝对弧度距离，$\theta_i = \arccos(\hat{d}\cdot V_i)$），权重 $w_i = \text{smoothstep}(\text{EdgeWidth}/2, -\text{EdgeWidth}/2, \delta_i)$。`EdgeWidth = 0` 退化为 R4 硬边；`EdgeWidth > 0` 时过渡带是测地线大圆弧两侧的等距弧度带；颜色三层独立 hash 加权。`EdgeWidth` 单位为**绝对弧度**（跨 sub 语义不变）（详见 [R5_SharpenSoftEdge.md](R5_SharpenSoftEdge.md)） | `EdgeWidth = 0` 视觉与 R4 完全一致；`EdgeWidth = 0.05`（约 2.86°）看到 hex/pent 边变成等宽测地线软边；`EdgeWidth = 0.20` 看到大幅柔软渐变；过渡带在 mesh 边中点处与硬边路径几何严格对齐（**无相位错位**） |
 | **R6** | ✅ 已完成 | 在 R5 球面距离空间叠加 per-cell 3D 噪声扰动——$\tilde\delta_i = \delta_i + n_i(\hat{d}) \cdot \text{NoiseAmplitude}$，软边权重沿用 R5 公式但用 $\tilde\delta_i$ 替代 $\delta_i$。`NoiseAmplitude` 单位为**绝对弧度**（与 EdgeWidth 同制），`NoiseScale` 单位为每弧度周期数；`NoiseAmplitude = 0` 退化为 R5；与 EdgeWidth **正交**——可独立控制"软/硬"和"直/蜿蜒"两个视觉维度（详见 [R6_BoundaryNoise.md](R6_BoundaryNoise.md)） | `NoiseAmplitude = 0` 视觉与 R5 一致；`NoiseAmplitude = 0.05, NoiseScale = 10` 看到 hex/pent 边变成蜿蜒曲线但仍可识别原 cell 形状；跨 mesh 边时 cell 边形状连续无缝；`EdgeWidth = 0 + NoiseAmplitude > 0` 看到硬边蜿蜒；`EdgeWidth > 0 + NoiseAmplitude > 0` 看到软边蜿蜒 |
 | **R7** | ✅ 已完成 | 把 R6 输出里的三层 `hash(layer_i+1)` 哈希色换为 `SampleTriplanar(TerrainAlbedoArray, layer_i, WorldPos, dir)` 真实地表采样；R4-R6 的 δ / w / dirP 计算链路全部保留。需新建 1–2 张 `Texture2DArray`（`TerrainAlbedoArray` + 可选 `TerrainNormalArray`），slice 下标从 `CellAttrLUT.r` 读取。面法 $\hat{n}$ 必须用**未扰动的 dir** 而非 R6 dirP（详见 [R7_TerrainTriplanar.md](R7_TerrainTriplanar.md)） | 调小 NumLayersHint（如 4）后能看到同色块上三个 Triplanar 采样区块（yz / xz / xy 三面混合未出接缝）；调大 NumLayersHint=16 后 cell 内部是草/沙/雪/岩交错的马赛克拼接，cell 边处蜿蜒软过渡（R6） |
-| **R8** | ⏳ 待开始 | 接入 `WorldGen` 的 `FCellGeoData → LayerIndex`，跑出第一张可玩星球 | 12 五边形可见、海陆分布 |
+| **R8** | ⏳ 待开始 | **消费 WorldGen 已生成的 `FCellGeoData[]`** —— 把 R3 阶段的 Knuth 哈希 placeholder 换成 `Def->LayerIndex` 真实查表写入 `CellAttrLUT.R`；本期 SDF 端工作量极小（一行 cpp 改动 + 反射诊断升级）。**前置依赖**：[WorldGenDesign.md](WorldGenDesign.md) 的 W1~W4 已完成（详见该稿 §11 W-step Roadmap） | 12 五边形可见、海陆分布、19-layer 生物群系合理 |
 | **R9** | ⏳ 待开始 | 加 Decor / Owner / Fog 三套独立 LUT | 政治版图 + 战争迷雾上线 |
 | **R10** | ⏳ 待开始 | LOD 优化：远距离用 R4（硬直边、无噪声）、近距离用 R6（软蜿蜒边） | 远景帧时间下降 |
 | **R11** *(生产路线)* | ⏳ 待开始 | 渲染从 IsoSphere 切到 PTG 高细分球皮 + GPU `FindNearestCell`（详见 §14） | 像素细节大幅提升、AttrLUT/材质资产无修改地继承 |
@@ -875,7 +880,7 @@ CPU 侧：
 - **R6（✅ 2026-06）**：在 R5 之后**全局连续 3D 噪声偏移（方案 B）**——对 PS 端 `d̂` 做切向小角度扰动 `d̂' = normalize(d̂ + NoiseAmplitude·n3D(NoiseScale·d̂))`，再走 R5 全流程。彻底避免 per-cell 噪声的接缝/重叠；`NoiseAmplitude` 弧度量级、`NoiseScale` 控制空间频率。详见 [R6_BoundaryNoise.md](R6_BoundaryNoise.md)。
 - **R7（✅ 2026-06）**：把 R6 输出里的三层 `hash(layer_i+1)` 哈希色换为 `SampleTriplanar(TerrainAlbedoArray, layer_i, WorldPos, Normal)`——三平面世界空间投影、`pow(|N|, TriplanarSharpness)` 加权融合、`TileScale` 控制 tile 尺寸。**关键踩坑**：`Texture2DArray` 必须挂在 Custom 节点 `Inputs` 列表的 **位置 A（Texture Object Parameter）**，不能挂在材质实例参数面板的 `TerrainAlbedoArray` 字段（否则 fallback 到 `GBlackTexture`）。详见 [R7_TerrainTriplanar.md](R7_TerrainTriplanar.md)。
 
-**下一阶段**：R7 已完成所有"渲染管线"层面的能力建设（拓扑→着色→软边→噪声→真实地表）。R8 起接入 `WorldGen` 的 `FCellGeoData → LayerIndex`（替换 R3 的 Knuth 哈希 placeholder），跑出第一张可玩星球；R8 详稿待创建。后续 R9~R13 见 §11 Roadmap 表。
+**下一阶段**：R7 已完成所有"渲染管线"层面的能力建设（拓扑→着色→软边→噪声→真实地表）。R8 起**消费 WorldGen 已生成的 `FCellGeoData[]`**（替换 R3 的 Knuth 哈希 placeholder），跑出第一张可玩星球——但 WorldGen 本身已从本主稿中**完全独立出去**，详见 [WorldGenDesign.md](WorldGenDesign.md)。R8 在 SDF 端仅是一行查表改动 + 反射诊断升级；前置依赖是 WorldGenDesign 的 W1~W4 子阶段。后续 R9~R13 见 §11 Roadmap 表。
 
 ---
 
@@ -1130,7 +1135,8 @@ sequenceDiagram
     Note over Topo: 启动时一次性
     Topo->>Topo: Build() (sub=3 → 642 Cells)
     Topo->>GPUQ: 烘焙 CellCenterTex / TriIndexTex / NeighborTex
-    Gen->>LUT: 跑 8 步 WorldGen 写入<br/>每Cell的 TerrainTag / Elevation
+    Note over Gen: WorldGen 黑盒：完整 8 步流水线<br/>（板块/海陆/温湿度/生物群系/河流/基地）<br/>详见 WorldGenDesign.md
+    Gen->>LUT: 写入每Cell的 TerrainTag → LayerIndex<br/>+ Elevation（供 R12 WPO 位移）
 
     Note over PTG: 启动时一次性
     PTG->>PTG: GenerateSphereData(纯净球, no noise)

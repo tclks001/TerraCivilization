@@ -348,7 +348,7 @@ void FSphereTopology::BuildDualFromPrimal()
 	// Edges的bIsPlateBoundary和BoundaryStrength涉及到板块划分，暂时不设置
 	// 
 	// Corners的CornerId就是当前三角形的索引
-	// Corners的UnitDir就是当前三角形的重心归一化
+	// Corners的UnitDir就是当前三角形的"球面外心"（详见循环体内实现 + Docs/SphereTopologyReference.md §3.4 / §4.1）
 	// Corners的CellIds就是三个顶点的索引
 	// Corners的EdgeIds就是当前三角形的三条边的索引
 	// Corners的NeighborCornerIds在遍历完之后，重新遍历Edges设置

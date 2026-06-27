@@ -17,7 +17,7 @@ public:
 
     TStaticArray<int32, 6> NeighborCellIds{INDEX_NONE, INDEX_NONE, INDEX_NONE, INDEX_NONE, INDEX_NONE, INDEX_NONE}; // 5或6个邻居Cells
     TStaticArray<int32, 6> EdgeIds{INDEX_NONE, INDEX_NONE, INDEX_NONE, INDEX_NONE, INDEX_NONE, INDEX_NONE};         // 5或6个边
-    TStaticArray<int32, 6> CornerIds{INDEX_NONE, INDEX_NONE, INDEX_NONE, INDEX_NONE, INDEX_NONE, INDEX_NONE};       // 5或6个角，位于本CellCenter直接连接的Tri的中点上
+    TStaticArray<int32, 6> CornerIds{INDEX_NONE, INDEX_NONE, INDEX_NONE, INDEX_NONE, INDEX_NONE, INDEX_NONE};       // 5或6个角，位于围绕本Cell的primal三角形的"球面外心"上（即本Cell对偶hex/pent的角点）；详见 Docs/SphereTopologyReference.md §3.2
 	FCell();
 	~FCell();
 

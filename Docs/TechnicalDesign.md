@@ -27,12 +27,19 @@
 
 ## 1. 模块划分与依赖关系
 
+> ⚠ **WorldGen 与 GridRender(SDF) 已分别拥有独立主设计稿**：
+> - 程序化地理生成 → [WorldGenDesign.md](WorldGenDesign.md)（W1~W8 子阶段）
+> - 球面 SDF 多层地表渲染 → [SphericalSDFTerrainDesign.md](SphericalSDFTerrainDesign.md)（R1~R13 子阶段）
+> - 球面拓扑几何含义（FCell/FCorner/FCellEdge/FRenderTri 字段详解）→ [SphereTopologyReference.md](SphereTopologyReference.md)（基础设施参考稿）
+>
+> 两者通过 `FCellGeoData[]` 单向契约解耦：WorldGen 仅写 `TerrainTag/Elevation/.../bIsPentagon`；GridRender 经 `UTerrainDefinition::LayerIndex` 间接只读消费。本节仅维护**全模块拓扑视图**——具体设计思路、算法、HLSL 全部在子稿中。
+
 ```mermaid
 graph TD
     Grid[Grid<br/>球面拓扑/查询]
-    WorldGen[WorldGen<br/>程序化地理生成]
+    WorldGen[WorldGen<br/>程序化地理生成<br/>详见 WorldGenDesign.md]
     TerrainTag[TerrainTags<br/>GameplayTag定义+数据]
-    GridRender[GridRender<br/>SDF多层地表渲染]
+    GridRender[GridRender<br/>SDF多层地表渲染<br/>详见 SphericalSDFTerrainDesign.md]
     GameCore[GameCore<br/>GameMode/State/Player]
     Gameplay[Gameplay<br/>单位/建筑/势力/回合]
     GameplaySystem[GameplaySystem<br/>战斗/围吃/移动/占领]
@@ -46,6 +53,8 @@ graph TD
     TerrainTag --> WorldGen
     TerrainTag --> Gameplay
     TerrainTag --> GridRender
+    WorldGen -->|FCellGeoData TerrainTag-LayerIndex| GridRender
+    WorldGen -->|FCellGeoData TerrainTag-OwnerId-bIsPentagon| Gameplay
     WorldGen --> GameCore
     GridRender --> GameCore
     Gameplay --> GameplaySystem
@@ -57,21 +66,30 @@ graph TD
     Gameplay --> SaveLoad
 ```
 
+> **解耦不变量**：
+> - `WorldGen --> GridRender` / `WorldGen --> Gameplay` 两条新边只是**数据流**（POD 结构按 CellId 索引），不是 Build.cs 模块依赖——`WorldGen` 模块本身不依赖 `GridRender` / `Gameplay`，反向被它们读取。
+> - SaveLoad 仅持久化 `(SubdivisionLevel, RandomSeed, FWorldGenSettings)` 三元组（约 100 字节），不序列化整张 `FCellGeoData[]`；详见 [WorldGenDesign.md §10.3](WorldGenDesign.md#103-saveload-只序列化-randomseed--subdivisionlevel)。
+
 **模块清单：**
 
-| 模块 | 类型 | 依赖 | 职责 |
-|---|---|---|---|
-| `Grid`（已存在） | Runtime | Core/CoreUObject/Engine | 球面拓扑、邻接、查询 |
-| `TerrainTags` | Runtime | Core/GameplayTags | GameplayTag 静态定义 + DataAsset 资产类型 |
-| `WorldGen` | Runtime | Grid/TerrainTags | 程序化地理：板块/高程/温湿度/生物群系 |
-| `GridRender` | Runtime | Grid/TerrainTags/RHI/RenderCore | 球面 ProceduralMesh + SDF 材质参数注入 |
-| `Gameplay` | Runtime | Grid/TerrainTags/GAS | Unit/Building/Faction/Turn 数据模型 |
-| `GameplaySystem` | Runtime | Gameplay/Grid | 移动、寻路、围吃判定、战斗、占领 |
-| `GameCore` | Runtime | Gameplay/WorldGen/GridRender | GameMode/GameState/PlayerController/Pawn |
-| `AI` | Runtime | Gameplay/GameplaySystem | 启发式 AI 玩家 |
-| `UI` | Runtime | GameCore/Gameplay/UMG/Slate | HUD、回合面板、单位面板 |
-| `SaveLoad` | Runtime | GameCore/Gameplay | USaveGame 存档 |
-| `TerraCivilizationEditor`（可选） | Editor | Gameplay/UnrealEd | 自定义资产、Tag 配置面板 |
+| 模块 | 类型 | 依赖（Build.cs） | 职责 | 主稿 |
+|---|---|---|---|---|
+| `Grid`（已存在） | Runtime | Core/CoreUObject/Engine | 球面拓扑、邻接、查询 | （本稿 §2） |
+| `TerrainTags` | Runtime | Core/GameplayTags | GameplayTag 静态定义 + DataAsset 资产类型 | （本稿 §3） |
+| `WorldGen` | Runtime | Grid/TerrainTags | 程序化地理：板块/高程/温湿度/生物群系/河流/基地 | [WorldGenDesign.md](WorldGenDesign.md) |
+| `GridRender` | Runtime | Grid/TerrainTags/WorldGen/RHI/RenderCore | 球面 ProceduralMesh + SDF 材质参数注入；R8 起读 `FCellGeoData → LayerIndex` 灌 LUT | [SphericalSDFTerrainDesign.md](SphericalSDFTerrainDesign.md) |
+| `Gameplay` | Runtime | Grid/TerrainTags/WorldGen/GAS | Unit/Building/Faction/Turn 数据模型；只读 `FCellGeoData.TerrainTag/OwnerId/bIsPentagon` | （本稿 §6） |
+| `GameplaySystem` | Runtime | Gameplay/Grid | 移动、寻路、围吃判定、战斗、占领 | （本稿 §7） |
+| `GameCore` | Runtime | Gameplay/WorldGen/GridRender | GameMode/GameState/PlayerController/Pawn | （本稿 §5） |
+| `AI` | Runtime | Gameplay/GameplaySystem | 启发式 AI 玩家 | （本稿 §8） |
+| `UI` | Runtime | GameCore/Gameplay/UMG/Slate | HUD、回合面板、单位面板 | （本稿 §9） |
+| `SaveLoad` | Runtime | GameCore/Gameplay | USaveGame 存档；仅序列化 `RandomSeed + SubdivisionLevel + FWorldGenSettings` | （本稿 §11） |
+| `TerraCivilizationEditor`（可选） | Editor | Gameplay/UnrealEd | 自定义资产、Tag 配置面板 | — |
+
+> **依赖项更新说明**（vs WorldGen 独立化之前）：
+> - `GridRender` 依赖列追加 `WorldGen`：R8 起 `RebuildCellAttrLUT_()` 需读取 `FCellGeoData[].TerrainTag` 通过 `UTerrainDefinition` 查 LayerIndex；R7 之前是 Knuth 哈希 placeholder，无此依赖。
+> - `Gameplay` 依赖列追加 `WorldGen`：消费 `bIsPentagon`、`OwnerId`、`TerrainTag` 等字段。
+> - `WorldGen` 依赖列**保持不变**（仅 `Grid/TerrainTags`）：WorldGen 是上游模块，不依赖任何下游——这是 [WorldGenDesign.md §14.3](WorldGenDesign.md#143-跨模块调用时序) 的硬承诺。
 
 ---
 
@@ -266,96 +284,70 @@ public:
 
 ## 4. WorldGen 模块（程序化地理）
 
-### 4.1 设计思路（自然地理流水线）
+> ⚠ **WorldGen 模块已拥有独立主设计稿**——详见 [WorldGenDesign.md](WorldGenDesign.md)。本节仅保留**类签名骨架**供全模块拓扑速查；设计思路、算法详解、Whittaker 表、19-Layer 映射、板块边界判定、河流追踪等**全部迁移至主稿**。W-step 子阶段路线图也仅在主稿 §11 中维护。
 
-```mermaid
-flowchart LR
-    A[正二十面体细分网格] --> B[1.板块构造<br/>Voronoi种子+漂移向量]
-    B --> C[2.高程场<br/>板块边界抬升/俯冲]
-    C --> D[3.海陆判定<br/>海平面阈值]
-    D --> E[4.湿度场<br/>风带+海距+山脉雨影]
-    E --> F[5.温度场<br/>纬度+高程]
-    F --> G[6.生物群系<br/>Whittaker双轴查表]
-    G --> H[7.河流/湖泊<br/>降水汇流]
-    H --> I[8.基地分配<br/>12五边形→12势力基地]
-```
+### 4.1 设计思路
 
-### 4.2 关键类
+WorldGen 以**自然地理流水线**（板块构造→高程场→海陆→湿度→温度→生物群系→河流→基地）产生 `TArray<FCellGeoData>`，作为上游模块输出供 GridRender / Gameplay / SaveLoad 只读消费。流水线 8 步详细设计见 [WorldGenDesign.md §5](WorldGenDesign.md#5-流水线总览-8-步)。
+
+### 4.2 关键类（签名骨架）
 
 ```cpp
-// 程序化生成参数
+// 程序化生成参数（详细字段见 WorldGenDesign.md §4.1）
 USTRUCT(BlueprintType)
 struct WORLDGEN_API FWorldGenSettings {
     GENERATED_BODY()
     UPROPERTY(EditAnywhere) int32 RandomSeed = 0;
     UPROPERTY(EditAnywhere) int32 PlateCount = 12;
-    UPROPERTY(EditAnywhere) float SeaLevel = 0.5f;
-    UPROPERTY(EditAnywhere) float MountainBoundaryStrength = 1.0f;
-    UPROPERTY(EditAnywhere) float MoistureScale = 1.0f;
-    UPROPERTY(EditAnywhere) float TemperatureBias = 0.0f;
-    UPROPERTY(EditAnywhere) FGameplayTagContainer ForcedBaseTraits; // 12个基地的Trait
+    UPROPERTY(EditAnywhere) float SeaLevel = 0.f;
+    UPROPERTY(EditAnywhere) float MountainThreshold = 0.5f;
+    UPROPERTY(EditAnywhere) float MountainBoundaryStrength = 1.f;
+    UPROPERTY(EditAnywhere) float MoistureScale = 1.f;
+    UPROPERTY(EditAnywhere) float TemperatureBias = 0.f;
+    UPROPERTY(EditAnywhere) TArray<FGameplayTagContainer> ForcedBaseTraits;
+    UPROPERTY(EditAnywhere) TSoftObjectPtr<class UBiomeTable> BiomeTable;
+    // …其余参数见主稿
 };
 
-// 生成结果（每个Cell一份）
+// 生成结果（每Cell一份；完整字段表见 WorldGenDesign.md §4.2 / §3.3）
+USTRUCT(BlueprintType)
 struct WORLDGEN_API FCellGeoData {
-    int32 CellId;
-    int32 PlateId;
-    float Elevation;     // [-1, 1]
-    float Moisture;      // [0, 1]
-    float Temperature;   // [-1, 1]
-    bool  bIsLand;
-    bool  bIsCoast;
-    bool  bIsMountain;
-    bool  bIsRiver;
-    FGameplayTag TerrainTag;       // 最终地形分类
-    FGameplayTagContainer Resources; // Resource.*
-    int32 BaseFactionId = INDEX_NONE; // 五边形=势力基地，其余-1
+    GENERATED_BODY()
+    UPROPERTY() int32 CellId         = INDEX_NONE;
+    UPROPERTY() int32 PlateId        = INDEX_NONE;
+    UPROPERTY() float Elevation      = 0.f;
+    UPROPERTY() float Moisture       = 0.5f;
+    UPROPERTY() float Temperature    = 0.f;
+    UPROPERTY() uint8 bIsLand : 1, bIsCoast : 1, bIsMountain : 1, bIsRiver : 1, bIsLake : 1, bIsPentagon : 1;
+    UPROPERTY() FGameplayTag           TerrainTag;
+    UPROPERTY() FGameplayTagContainer  Resources;
+    UPROPERTY() int32 BaseFactionId = INDEX_NONE;
+    UPROPERTY() int32 OwnerId       = INDEX_NONE;
+    UPROPERTY() int32 FlowTo        = INDEX_NONE;
 };
 
-// 生成器主类
+// 生成器主类（详细实现、中间缓冲、算法伪代码见主稿§13）
 class WORLDGEN_API FWorldGenerator {
 public:
     explicit FWorldGenerator(const FSphereTopology* InTopology, const FWorldGenSettings& InSettings);
-
     void Generate();
-    const TArray<FCellGeoData>& GetCellData() const { return CellData; }
-    const TArray<int32>& GetBaseCellIds() const { return BaseCellIds; }
-
+    const TArray<FCellGeoData>& GetCellData() const;
+    const TArray<int32>& GetBaseCellIds() const;
 private:
-    // Pipeline steps
-    void Step_PartitionPlates();        // 1
-    void Step_ComputeElevation();       // 2
-    void Step_DetermineLandSea();       // 3
-    void Step_SimulateMoisture();       // 4
-    void Step_ComputeTemperature();     // 5
-    void Step_ClassifyBiomes();         // 6
-    void Step_TraceRivers();            // 7
-    void Step_AssignBaseCells();        // 8
-
-private:
-    const FSphereTopology* Topology;
-    FWorldGenSettings Settings;
-    FRandomStream Rng;
-    TArray<FCellGeoData> CellData;
-    TArray<int32> BaseCellIds;          // 12 个五边形
-    TArray<FPlateInfo> Plates;
-};
-
-// 板块信息
-struct FPlateInfo {
-    int32 SeedCellId;
-    FVector DriftAxis;       // 球面切平面单位向量
-    float DriftSpeed;
-    bool bIsOceanic;
+    void Step_PartitionPlates();
+    void Step_ComputeElevation();
+    void Step_DetermineLandSea();
+    void Step_SimulateMoisture();
+    void Step_ComputeTemperature();
+    void Step_ClassifyBiomes();
+    void Step_TraceRivers();
+    void Step_AssignBaseCells();
 };
 ```
 
-### 4.3 关键算法
-- **板块划分**：在球面随机撒 N 个种子 Cell，BFS 多源最短路（按 Cell-Cell 球面距离）→ Voronoi。
-- **板块边界 → 山脉/海沟**：复用 `FCellEdge::bIsPlateBoundary / BoundaryStrength`，按相邻板块漂移点积分类（汇聚=山，离散=裂谷）。
-- **湿度**：以行星风带（按纬度带交替）+ 海距衰减 + 越过山脉的雨影衰减。
-- **生物群系**：使用 Whittaker 图（温度 × 湿度 → Tag），可配 `UDataTable<FBiomeRow>`。
-- **基地分配**：直接读取 `FSphereTopology` 中 `bIsPentagon=true` 的 12 个 Cell（在 Step_AssignBaseCells 中确保它们陆地化、缓冲一圈友好地形）。
+### 4.3 详细设计
+
+板块构造算法、边界类型判定、湿度雨影、Whittaker 双轴表、D6/D5 河流追踪、五边形势力基地分配等详细算法与伪代码均在 [WorldGenDesign.md](WorldGenDesign.md) §2（理论基础）§ §5（流水线）§ §7（关键算法）§ §13（代码骨架）中维护。子阶段路线图 W1~W8 见主稿 §11 W-step Roadmap。
 
 ---
 
