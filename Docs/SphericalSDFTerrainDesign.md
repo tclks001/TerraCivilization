@@ -156,7 +156,9 @@ $$
 
 **R2 验收推荐用路径 B（argmax 硬边）**，因为它把抽象的"5/6 个 1/3 角块拼成 hex/pent"做成了**肉眼可见**的事实，从根本上排除路径 A 容易引发的"hex 占 5/6 三角形 + 过渡三角形"误读。详见 [R2_TopologyDebugMaterial.md](R2_TopologyDebugMaterial.md)。
 
-> ⚠ **路径 B 的折线硬边只是 R2/R3 的过渡形态**：`argmax(λ)` 等位线 = 外心-边中点的三段折线，在每条 mesh 边的中点处会出现一次可见折角（详见 [R4_VoronoiBoundary.md §1.2](R4_VoronoiBoundary.md#12-几何根因为什么-147-解决不了它)）。**R4 起判别准则升级为球面 Voronoi `argmax(dot(dir, V_i))`**，等位线变成真正的测地线大圆弧，hex/pent 边在所有位置都光滑无折角（详见 §11.3）。所以本节"argmax 硬边"的"边"在 R2/R3 是折线、在 R4+ 是测地线——两者拓扑等价（都是同一组 cell 边界），仅几何路径不同。
+> ⚠ **路径 B 的折线硬边只是 R2/R3 的过渡形态**：`argmax(λ)` 等位线 = 外心-边中点的三段折线，在每条 mesh 边的中点处会出现一次可见折角（详见 [R4_VoronoiBoundary.md §1.2](R4_VoronoiBoundary.md#12-几何根因为什么-147-解决不了它)）。**R4 起判别准则升级为球面 Voronoi `argmax(dot(dir, V_i))`**，等位线变成真正的测地线大圆弧，hex/pent 边在所有位置都光滑无折角（详见 [R4_VoronoiBoundary.md](R4_VoronoiBoundary.md)）。
+>
+> 所以本节"argmax 硬边"的"边"在 R2/R3 是折线、在 R4+ 是测地线——两者拓扑等价（都是同一组 cell 边界），仅几何路径不同。
 
 ### 2.2 重心坐标即 SDF
 
@@ -850,10 +852,10 @@ CPU 侧：
 | **R1** | ✅ 已完成 | 用 `UProceduralMeshComponent` 把 `FSphereTopology::Cells` + `Corners.CellIds` 渲出来（每个三角形 3 个独立顶点），材质纯白 | 看到一颗光滑球，能旋转 |
 | **R2** | ✅ 已完成 | 把每个顶点的 `(TriCellId0, TriCellId1, TriCellId2)` 与 OneHot 写到 UV1/UV2/UV3；材质用 PS 端 `argmax(λ)` 选 CellId、`hash(c_argmax)` 输出颜色（**硬边路径**，详见 [§2.1.2](#212-视觉错觉防御13-角块的判别准则用于-r2r3-验收)） | 球面被 642 个纯色 hex/pent 多边形完整密铺、12 个 pent 可见、hex/pent 之间是硬边、三角形几何边界与 hex 边界完全分离（详见 [R2_TopologyDebugMaterial.md](R2_TopologyDebugMaterial.md)） |
 | **R3** | ✅ 已完成 | 把 `argmax → hash(c)` 改为 `argmax → LUT.Load(c).r * 255 → hash(layer)`；保留 §6.2 的 `λᵢ` 加权混合作为对照写法（详见 [R3_CellAttrLUTMaterial.md](R3_CellAttrLUTMaterial.md) 附录 A） | 球面被多种色块密铺，每色块内部完全均匀；不同 layer 之间硬边、同 layer 完全融合；调小 `NumLayersHint` 看到大片相邻 hex 颜色合并；Output Log 输出 `Rebuilt (R3: ...) LUT=OK` |
-| **R4** | 🛠 cpp 完成（待材质验收） | **基于外心垂面的三角分割**——把判别准则从 `argmax(λ)`（外心→边中点折线边界）改为 `argmax(dot(dir, V_i))`（球面 Voronoi / 真正测地线 hex 边）。cpp 端新增 1×NumCells、PF_A32B32G32R32F 的 `CellDirLUT`（RGB = `UnitCenter`、A = `bIsPentagon`），通过 MID 注入 PS；`PlanetCenter` 也走 MID Vector 参数。PS 端用 R3 已解码的 c0/c1/c2 三次 `Texture2D.Load` 取得三个 cell 的中心方向，计算 `dot(dir, V_i)` 取 argmax。**消除 R3 hex/pent 边在 mesh 边中点处的可见折角**（详见 [R4_VoronoiBoundary.md](R4_VoronoiBoundary.md)） | 球面 hex/pent 边视觉上是平滑的测地线大圆弧，**任何相邻 cell 之间的边没有折点**；从近距离 / 高 sub 下侧视检查：图像中 hex 边的曲率连续；其他效果（NumLayersHint 影响、LUT 注入）保持 R3 一致 |
-| **R5** | 🛠 cpp 完成（待材质验收） | 在 R4 球面 Voronoi 距离空间做软边——定义 $\delta_i = \theta_i - \min_{j\neq i}\theta_j$（到 Voronoi 边的有符号绝对弧度距离，$\theta_i = \arccos(\hat{d}\cdot V_i)$），权重 $w_i = \text{smoothstep}(\text{EdgeWidth}/2, -\text{EdgeWidth}/2, \delta_i)$。`EdgeWidth = 0` 退化为 R4 硬边；`EdgeWidth > 0` 时过渡带是测地线大圆弧两侧的等距弧度带；颜色三层独立 hash 加权。`EdgeWidth` 单位为**绝对弧度**（跨 sub 语义不变）（详见 [R5_SharpenSoftEdge.md](R5_SharpenSoftEdge.md)） | `EdgeWidth = 0` 视觉与 R4 完全一致；`EdgeWidth = 0.05`（约 2.86°）看到 hex/pent 边变成等宽测地线软边；`EdgeWidth = 0.20` 看到大幅柔软渐变；过渡带在 mesh 边中点处与硬边路径几何严格对齐（**无相位错位**） |
-| **R6** | 🛠 cpp 完成 | 在 R5 球面距离空间叠加 per-cell 3D 噪声扰动——$\tilde\delta_i = \delta_i + n_i(\hat{d}) \cdot \text{NoiseAmplitude}$，软边权重沿用 R5 公式但用 $\tilde\delta_i$ 替代 $\delta_i$。`NoiseAmplitude` 单位为**绝对弧度**（与 EdgeWidth 同制），`NoiseScale` 单位为每弧度周期数；`NoiseAmplitude = 0` 退化为 R5；与 EdgeWidth **正交**——可独立控制"软/硬"和"直/蜿蜒"两个视觉维度（详见 [R6_BoundaryNoise.md](R6_BoundaryNoise.md)） | `NoiseAmplitude = 0` 视觉与 R5 一致；`NoiseAmplitude = 0.05, NoiseScale = 10` 看到 hex/pent 边变成蜿蜒曲线但仍可识别原 cell 形状；跨 mesh 边时 cell 边形状连续无缝；`EdgeWidth = 0 + NoiseAmplitude > 0` 看到硬边蜿蜒；`EdgeWidth > 0 + NoiseAmplitude > 0` 看到软边蜿蜒 |
-| **R7** | 🛠 cpp 已落地（待资产 + 材质验收）| 把 R6 输出里的三层 `hash(layer_i+1)` 哈希色换为 `SampleTriplanar(TerrainAlbedoArray, layer_i, WorldPos, dir)` 真实地表采样；R4-R6 的 δ / w / dirP 计算链路全部保留。需新建 1–2 张 `Texture2DArray`（`TerrainAlbedoArray` + 可选 `TerrainNormalArray`），slice 下标从 `CellAttrLUT.r` 读取。面法 $\hat{n}$ 必须用**未扰动的 dir** 而非 R6 dirP（详见 [R7_TerrainTriplanar.md](R7_TerrainTriplanar.md)） | 调小 NumLayersHint（如 4）后能看到同色块上三个 Triplanar 采样区块（yz / xz / xy 三面混合未出接缝）；调大 NumLayersHint=16 后 cell 内部是草/沙/雪/岩交错的马赛克拼接，cell 边处蜿蜒软过渡（R6） |
+| **R4** | ✅ 已完成 | **基于外心垂面的三角分割**——把判别准则从 `argmax(λ)`（外心→边中点折线边界）改为 `argmax(dot(dir, V_i))`（球面 Voronoi / 真正测地线 hex 边）。cpp 端新增 1×NumCells、PF_A32B32G32R32F 的 `CellDirLUT`（RGB = `UnitCenter`、A = `bIsPentagon`），通过 MID 注入 PS；`PlanetCenter` 也走 MID Vector 参数。PS 端用 R3 已解码的 c0/c1/c2 三次 `Texture2D.Load` 取得三个 cell 的中心方向，计算 `dot(dir, V_i)` 取 argmax。**消除 R3 hex/pent 边在 mesh 边中点处的可见折角**（详见 [R4_VoronoiBoundary.md](R4_VoronoiBoundary.md)） | 球面 hex/pent 边视觉上是平滑的测地线大圆弧，**任何相邻 cell 之间的边没有折点**；从近距离 / 高 sub 下侧视检查：图像中 hex 边的曲率连续；其他效果（NumLayersHint 影响、LUT 注入）保持 R3 一致 |
+| **R5** | ✅ 已完成 | 在 R4 球面 Voronoi 距离空间做软边——定义 $\delta_i = \theta_i - \min_{j\neq i}\theta_j$（到 Voronoi 边的有符号绝对弧度距离，$\theta_i = \arccos(\hat{d}\cdot V_i)$），权重 $w_i = \text{smoothstep}(\text{EdgeWidth}/2, -\text{EdgeWidth}/2, \delta_i)$。`EdgeWidth = 0` 退化为 R4 硬边；`EdgeWidth > 0` 时过渡带是测地线大圆弧两侧的等距弧度带；颜色三层独立 hash 加权。`EdgeWidth` 单位为**绝对弧度**（跨 sub 语义不变）（详见 [R5_SharpenSoftEdge.md](R5_SharpenSoftEdge.md)） | `EdgeWidth = 0` 视觉与 R4 完全一致；`EdgeWidth = 0.05`（约 2.86°）看到 hex/pent 边变成等宽测地线软边；`EdgeWidth = 0.20` 看到大幅柔软渐变；过渡带在 mesh 边中点处与硬边路径几何严格对齐（**无相位错位**） |
+| **R6** | ✅ 已完成 | 在 R5 球面距离空间叠加 per-cell 3D 噪声扰动——$\tilde\delta_i = \delta_i + n_i(\hat{d}) \cdot \text{NoiseAmplitude}$，软边权重沿用 R5 公式但用 $\tilde\delta_i$ 替代 $\delta_i$。`NoiseAmplitude` 单位为**绝对弧度**（与 EdgeWidth 同制），`NoiseScale` 单位为每弧度周期数；`NoiseAmplitude = 0` 退化为 R5；与 EdgeWidth **正交**——可独立控制"软/硬"和"直/蜿蜒"两个视觉维度（详见 [R6_BoundaryNoise.md](R6_BoundaryNoise.md)） | `NoiseAmplitude = 0` 视觉与 R5 一致；`NoiseAmplitude = 0.05, NoiseScale = 10` 看到 hex/pent 边变成蜿蜒曲线但仍可识别原 cell 形状；跨 mesh 边时 cell 边形状连续无缝；`EdgeWidth = 0 + NoiseAmplitude > 0` 看到硬边蜿蜒；`EdgeWidth > 0 + NoiseAmplitude > 0` 看到软边蜿蜒 |
+| **R7** | ✅ 已完成 | 把 R6 输出里的三层 `hash(layer_i+1)` 哈希色换为 `SampleTriplanar(TerrainAlbedoArray, layer_i, WorldPos, dir)` 真实地表采样；R4-R6 的 δ / w / dirP 计算链路全部保留。需新建 1–2 张 `Texture2DArray`（`TerrainAlbedoArray` + 可选 `TerrainNormalArray`），slice 下标从 `CellAttrLUT.r` 读取。面法 $\hat{n}$ 必须用**未扰动的 dir** 而非 R6 dirP（详见 [R7_TerrainTriplanar.md](R7_TerrainTriplanar.md)） | 调小 NumLayersHint（如 4）后能看到同色块上三个 Triplanar 采样区块（yz / xz / xy 三面混合未出接缝）；调大 NumLayersHint=16 后 cell 内部是草/沙/雪/岩交错的马赛克拼接，cell 边处蜿蜒软过渡（R6） |
 | **R8** | ⏳ 待开始 | 接入 `WorldGen` 的 `FCellGeoData → LayerIndex`，跑出第一张可玩星球 | 12 五边形可见、海陆分布 |
 | **R9** | ⏳ 待开始 | 加 Decor / Owner / Fog 三套独立 LUT | 政治版图 + 战争迷雾上线 |
 | **R10** | ⏳ 待开始 | LOD 优化：远距离用 R4（硬直边、无噪声）、近距离用 R6（软蜿蜒边） | 远景帧时间下降 |
@@ -865,112 +867,15 @@ CPU 侧：
 
 ### 11.1 当前进度记录
 
-- **R1（✅ 2026-06）**：`APlanetTopologyDebugMesh` 已将 sub=3 的 1280 个 primal 三角形（642 个 Cell 顶点）完整渲出来；`OnConstruction` 自动 Rebuild、编辑器视口即时刷新。验证了拓扑构建（`FSphereTopology` 数据正确、`Cells.UnitCenter` × `Corner.CellIds` 索引装填正确、12 个 pentagon 位置与正二十面体顶点对齐）。修复了 `FSphereTopology::Build()` 二次累加导致的 sub=3 → 41604 Cells 爆炸问题。
-- **R2（✅ 2026-06）**：每个三角形展开为 3 个独立顶点，UV1/UV2/UV3 + VertexColor 全部装填到位（详见 [PlanetTopologyDebugMesh.cpp](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp) 顶部大段注释）。**R2 验收路径选定为 PS 端 argmax(λ) 硬边着色**——这是排除"VertexColor 直显路径下 5/6 个三角形围中心顶点产生『hex 占完整 5/6 三角形 + 过渡三角形』视觉错觉"的唯一办法（详见 [§2.1.2](#212-视觉错觉防御13-角块的判别准则用于-r2r3-验收)）。argmax 域恰好与 §14.7 外心-边中点连线划出的 1/3 角块吻合，因此视觉效果直接对应"5/6 个 1/3 角块拼成 hex/pent"的拓扑事实，肉眼可数 hex/pent 边数、可见三角形几何边界横跨 hex 内部。
-- **R3（✅ 2026-06）**：在 R2 基础上加入 `CellAttrLUT`（1×NumCells、PF_B8G8R8A8、Filter=Nearest、SRGB=false 的动态纹理），R 通道存 LayerIndex（Knuth 哈希 placeholder）。`Rebuild()` 末尾把外部 Material 包装为 MID，注入 `CellAttrLUT` Texture Object 参数与 `NumLayersHint`/`NumCells` 标量参数。PS 端着色公式从 `hash(chosen + 1)` 升级为 `hash(LUT.Load(chosen).r * 255 + 1)`——保留 R2 的 argmax 硬边切分，仅多一次 `Texture2D.Load(int3)`。验收成功的关键证据：调小 `NumLayersHint` 后大片相邻 hex 立刻融合成同色，证明 LUT 真实驱动着色（而非 CellId 自身哈希）。详见 [R3_CellAttrLUTMaterial.md](R3_CellAttrLUTMaterial.md)。
+- **R1（✅ 2026-06）**：`APlanetTopologyDebugMesh` + `UProceduralMeshComponent` 渲出 sub=3 的 1280 个 primal 三角形（642 cells，12 pentagon 位置与正二十面体顶点对齐）；`OnConstruction` 自动 Rebuild、视口即时刷新。修复了 `FSphereTopology::Build()` 二次累加导致 sub=3 → 41604 cells 的爆炸 bug。
+- **R2（✅ 2026-06）**：每个三角形展开为 3 个独立顶点，`UV0/UV1/UV2 = (Hi,Lo)` 装填三个 cell id，`UV3.xy = OneHot` 重心权重；PS 端走 `argmax(λ)` 硬边切分（1/3 角块判别，详见 §2.1.2）。**关键踩坑**：fp16 UV 通道导致 CellId 在 sub≥4 时退化——已采用 8-bit Hi/Lo 拆分编码（详见 [R2_TopologyDebugMaterial.md](R2_TopologyDebugMaterial.md) §5）。
+- **R3（✅ 2026-06）**：新增 `CellAttrLUT`（1×NumCells、BGRA8、Filter=Nearest、SRGB=false），R 通道存 LayerIndex（Knuth 哈希 placeholder）；`Rebuild()` 末尾包装 MID 注入 `CellAttrLUT` + `NumLayersHint`/`NumCells`，PS 端着色升级为 `hash(LUT.Load(chosen).r*255 + 1)`。**关键踩坑**：材质必须挂在 Actor 的 `PlanetTopology > Material` 槽位（不能挂在 `渲染 > 材质 > 元素 0`，否则 MID 不创建）；验证 Custom Code 真值只能用 cpp 反射、不可用 `.uasset` 二进制 dump（详见 [R3_CellAttrLUTMaterial.md](R3_CellAttrLUTMaterial.md) §5）。
+- **R4（✅ 2026-06）**：PS 判别准则从 `argmax(λ)` 改为球面 Voronoi `argmax(dot(dir, V_i))`，等位线退化为大圆弧，**消除 hex 边在 mesh 边中点的折角**。新增 `CellDirLUT`（1×NumCells、RGBA32F、`(UnitCenter.xyz, isPentagon)`）和 `PlanetCenter` MID Vector 参数注入；R4 的 PS 核心 HLSL 在 R11 PTG 路线可零改动复用（仅 c0/c1/c2 来源换成 GPU `FindNearestCell`）。详见 [R4_VoronoiBoundary.md](R4_VoronoiBoundary.md)。
+- **R5（✅ 2026-06）**：在 R4 dot 距离空间做球面软边——定义 `δ_i = arccos(d̂·V_i) - min_{j≠i} arccos(d̂·V_j)`（带符号弧度距离），用 `smoothstep(-EdgeWidth/2, +EdgeWidth/2, -δ_i)` 给每个 cell 出权重，三层颜色独立加权混合；`EdgeWidth = 0` 时退化为 R4 硬边，`EdgeWidth > 0` 时过渡带为大圆弧两侧等距弧度带。详见 [R5_SharpenSoftEdge.md](R5_SharpenSoftEdge.md)。
+- **R6（✅ 2026-06）**：在 R5 之后**全局连续 3D 噪声偏移（方案 B）**——对 PS 端 `d̂` 做切向小角度扰动 `d̂' = normalize(d̂ + NoiseAmplitude·n3D(NoiseScale·d̂))`，再走 R5 全流程。彻底避免 per-cell 噪声的接缝/重叠；`NoiseAmplitude` 弧度量级、`NoiseScale` 控制空间频率。详见 [R6_BoundaryNoise.md](R6_BoundaryNoise.md)。
+- **R7（✅ 2026-06）**：把 R6 输出里的三层 `hash(layer_i+1)` 哈希色换为 `SampleTriplanar(TerrainAlbedoArray, layer_i, WorldPos, Normal)`——三平面世界空间投影、`pow(|N|, TriplanarSharpness)` 加权融合、`TileScale` 控制 tile 尺寸。**关键踩坑**：`Texture2DArray` 必须挂在 Custom 节点 `Inputs` 列表的 **位置 A（Texture Object Parameter）**，不能挂在材质实例参数面板的 `TerrainAlbedoArray` 字段（否则 fallback 到 `GBlackTexture`）。详见 [R7_TerrainTriplanar.md](R7_TerrainTriplanar.md)。
 
-### 11.2 R3 落地总结（已完成）
-
-R3 在 R2 argmax 硬边路径上**只增加一行 `LUT.Load`**，结构非常自然：
-
-```hlsl
-// R2 末尾
-return saturate(hash(chosen + 1) + 0.25);
-```
-
-```hlsl
-// R3 末尾（多一次 LUT.Load）
-int layer = (int)(LUT.Load(int3(chosen, 0, 0)).r * 255.0 + 0.5);
-return saturate(hash(layer + 1) + 0.25);
-```
-
-C++ 端 `RebuildCellAttrLUT_(NumCells)` 已实现完整：用 `UTexture2D::CreateTransient` 创建 1×N 的 BGRA8 纹理，`PlatformData->Mips[0].BulkData.Lock(LOCK_READ_WRITE)` 写入 LayerIndex（Knuth 哈希 placeholder），`UpdateResource()` 同步上传。`Rebuild()` 末尾用 `UMaterialInstanceDynamic::Create` + `SetTextureParameterValue("CellAttrLUT", LUT)` 绑参数。完整代码见 [PlanetTopologyDebugMesh.cpp](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp)；材质搭建详见 [R3_CellAttrLUTMaterial.md](R3_CellAttrLUTMaterial.md)。
-
-**R3 阶段不引入"λ 加权三方混合"**——它会冲销 R2 验证过的 1/3 角块切分，倒退成"5/6 三角形围一个色块"的视觉错觉密铺，与 §2.1.2 的判别准则相违。如确实需要软边过渡，会在 R5 通过球面 Voronoi 距离空间的 `Sharpen(δ, EdgeWidth)` 控制——`EdgeWidth = 0` 时退化为 R4 的硬边、`EdgeWidth > 0` 时过渡带是测地线大圆弧两侧的等距弧度带（详见 §6.3.1 与 [R5_SharpenSoftEdge.md](R5_SharpenSoftEdge.md)）。R3 文档附录 A 保留了 λ 加权写法作对照参考。
-
-#### 11.2.1 fp16 精度陷阱与 8-bit 拆分编码（实施期填的关键坑）
-
-最初的实现把 CellId 直接 `(float)CellId` 写入 UV1.x、UV1.y、UV2.x，PS 端用 `(int)(UV.x + 0.5)` round 还原。**实测发现 chosen 的取值范围被压缩到只有几档**——少数 hex 显示彩色、大部分 hex 是同一种粉色（layer=0）。
-
-**根因**：UE 的 [`FStaticMeshVertexBuffer`](C:\Program Files\Epic Games\UE_5.8\Engine\Source\Runtime\Engine\Private\Rendering\StaticMeshVertexBuffer.cpp) 默认 `bUseFullPrecisionUVs = false`，UV 通道在 GPU 顶点缓冲里是 **fp16（PF_G16R16F）**。fp16 的精度限制：
-- `[0, 1024]` 范围步长 ≤ 0.5
-- `[0, 2048]` 范围步长 ≤ 1
-- 加上"透视校正插值"在 fp16 下的累加误差，PS 端 round 大 CellId 时会跨越边界
-- 结果是多个 CellId 被错误映射到同一个 fp16 值（chosen 退化）
-
-PMC 的 `InitFromDynamicVertex` 没有暴露 fp32 UV 的运行时开关，且改源码侵入性大。
-
-**解决方案**：把 CellId（≤ 65535）拆成 (Hi, Lo) 两个 8-bit 字段：
-- `Hi = CellId / 256 ∈ [0, 255]`
-- `Lo = CellId % 256 ∈ [0, 255]`
-- 两者都在 `[0, 256]` 内，fp16 步长 ≤ 1/16，插值误差远小于 0.5
-- PS 端解码：`CellId = round(Hi) * 256 + round(Lo)` 完美还原
-
-最终 UV 布局（cpp 端 + 材质端 §3.3 共同遵守）：
-- `UV0.xy = (HiC, LoC)` ← Cell C 拆分
-- `UV1.xy = (HiA, LoA)` ← Cell A 拆分
-- `UV2.xy = (HiB, LoB)` ← Cell B 拆分
-- `UV3.xy = (OneHot.x, OneHot.y)` ← 重心权重
-
-此编码可支持 sub ≤ 6（NumCells = 40962 < 65536），与设计稿全程兼容。
-
-#### 11.2.2 材质必须挂在 Actor 的 `PlanetTopology > Material` 槽位（极易踩坑）
-
-**绝对不要**把材质挂在 Actor Details 面板的 **`渲染 > 材质 > 元素 0`** 槽位（即 `PrimitiveComponent::OverrideMaterials[0]`）。
-
-[APlanetTopologyDebugMesh::Rebuild()](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp) 末尾的逻辑是：
-1. 读取 `Material` 属性（`PlanetTopology > Material` 槽位）
-2. 用它包装一个 `UMaterialInstanceDynamic`（MID）
-3. 把 `CellAttrLUT` Texture Object 参数注入 MID
-4. 调 `MeshComp->SetMaterial(0, MID)` 把 MID 设为渲染槽位 0 的材质
-
-如果你直接在 `渲染 > 材质 > 元素 0` 槽位指定一个普通材质：
-- ❌ Rebuild 时 `Material` 属性是空 → MID 不会被创建 → CellAttrLUT 永远不会被注入
-- ❌ 材质里的 `CellAttrLUT` 参数因为是 Texture Object Parameter 没有 default texture → 编译时被 UE 替换成 `GBlackTexture`（1×1 黑色 fallback）
-- ❌ `LUT.Load(int3(chosen, 0, 0))` 永远读到 (0,0,0,0) → 所有 cell 的 layer 都被读为 0 → 整个球只有一种颜色（layer=0 的哈希粉色）
-- ❌ 改 `NumLayersHint` 完全没反应（因为 LUT 根本没在跑）
-
-**两条槽位的对照**：
-
-| 槽位 | 对应属性 | Rebuild 时的处理 | 是否走 LUT 注入 |
-| --- | --- | --- | --- |
-| `PlanetTopology > Material`（**正确**） | `APlanetTopologyDebugMesh::Material` | 包装 MID + 注入 `CellAttrLUT` 参数 + SetMaterial | ✅ |
-| `渲染 > 材质 > 元素 0`（**错误**） | `MeshComp->OverrideMaterials[0]` | 直接覆盖渲染槽位，绕过 cpp 的 MID 包装逻辑 | ❌ |
-
-**视觉症状（误挂错槽位时的特征）**：
-- 球面整体一种粉色 + 极少数彩色 hex（彩色 hex 来自 cpp VertexColor 的"漏色"，但这条路径在 R3 主路径下被 Custom HLSL 输出 Emissive 覆盖，所以正常情况看不到）
-- 改 NumLayersHint 颜色不变（因为 LUT 根本没接进去）
-- Output Log 仍然有 `LUT=OK NumLayersHint=N` 字样（cpp 端 LUT 创建成功，但材质完全没拿到）
-
-**修复**：把材质从 `元素 0` 卸下，挂到 `PlanetTopology > Material`。
-
-#### 11.2.3 `.uasset` 二进制 dump 工具对 UE 5.x 材质不可用
-
-实施过程中我们曾用 PowerShell 直接扫描 [.uasset](../Content/Materials/M_TopologyDebug_R3.uasset) 文件的 ASCII / UTF-16LE 字节流，试图验证 Custom 节点的 HLSL `Code` 字段是否真的保存。**这条路径不可靠**：
-
-- UE 5 把 `UMaterialExpressionCustom::Code` 等 EditorOnly 字段封装到独立的 **`EditorOnlyData payload`** 段
-- 该 payload 段在 `.uasset` 末尾以 UE 自定义的二进制格式存放（可能含压缩/编码），不是直接的 ASCII / UTF-16 文本
-- 即便 Code 字段保存了 681 字节真实 HLSL，**外部字节流扫描看不到任何关键字**（`int c0`, `Load(`, `chosen` 等出现次数全是 0）
-
-实测证伪：
-- cpp 端反射 `UMaterialExpressionCustom::Code` 打印到日志，`Code.Length = 681`，内容完整正确
-- 同时 PowerShell 扫描相同 `.uasset` 文件，所有 HLSL 关键字 0 次命中
-
-**所以——验证材质 Custom 节点 Code 真实值只有一种可靠手段**：在 cpp 端走反射 / `UMaterial::GetExpressions()` → `Cast<UMaterialExpressionCustom>` → 读 `Code` / `Inputs[].InputName` / `Inputs[].Input.GetTracedInput().Expression`，把这些字段打印到 Output Log。
-
-[APlanetTopologyDebugMesh::Rebuild()](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp) 末尾保留了一段 `WITH_EDITORONLY_DATA` 诊断代码，每次 Rebuild 都会枚举材质里所有 Custom 节点并打印 Code、Inputs、连线状态，作为调试 R3+ 材质问题的标准排查手段。
-
-### 11.3 R4 阶段说明：基于外心垂面的三角分割（消除 hex 边折角）
-
-R3 验收发现：每条 cell 边在它所跨过的 mesh 边的中点处出现一次明显的折角，使本应 6 边形的 hex 视觉上变成"12 边形"。**根因**：R3 用的 `argmax(λ)` 等位线 = "外心 → 边中点的折线"，相邻两个三角形的外心一般不重合 → 在 mesh 边中点处两段方向不同的弧线相交，必然出现折角。这是几何固有问题，[§14.7](#147-球面重心坐标与外心折角修正核心几何不变量) 的 `SphericalBarycentric` 只能保证权重场 C⁰ 连续，不能保证 argmax(λ) 等位线 C¹ 光滑——只能换"判别准则"。
-
-**R4 方案**：把 PS 端判别准则从 `argmax(λ)` 改为球面 Voronoi `argmax(dot(dir, V_i))`。等位线 $\hat{d}\cdot V_A = \hat{d}\cdot V_B$ = 一个平面与单位球的交大圆 = **球面测地线**，在 mesh 边上完全由 $V_A, V_B$ 决定（与 $V_C$ 无关），所以两侧三角形给出的 cell 边在 mesh 边上完全重合 → **无折角**。
-
-**实施约束（与 R11 PTG 路线同构）**：PTG mesh 的 PS 端拿不到"per-triangle 三个 cell 中心"的顶点属性，所有 cell 级数据必须从全局纹理 Load。所以 R4 必须采用**纹理化方案**——新增 `CellDirLUT`（1×NumCells、R32G32B32A32_FLOAT，`(UnitCenter.xyz, isPentagon)`），PS 端用 R3 已解码的 c0/c1/c2 三次 `Texture2D.Load` 取方向；不得引入 RealtimeMeshComponent / 自定义顶点工厂等"只对 R4 有效、对 R11 无贡献"的临时方案。`PlanetCenter` 也走 MID Vector 参数注入，PS 端 `dir = normalize(WorldPos - PlanetCenter)`。R4 的 PS 核心 HLSL 在 R11 可零改动复用，仅 c0/c1/c2 来源从"UV 还原"换成"GPU FindNearestCell"。
-
-**Material 参数命名规范（R4 起锁定，R11 沿用）**：所有 cell 级数据通过 MID 注入——`CellAttrLUT`（R3）、`CellDirLUT`（R4 新增）、`PlanetCenter`（R4 新增）、`NumLayersHint`/`NumCells`（R3）、`CellHeightLUT`（R12）、`CellHighlightLUT`（R13）。所有 LUT 纹理统一 `Filter=Nearest`、`SRGB=false`、`Width=NumCells`、`Height=1`；cpp 端逐一注入并把状态打到 Output Log。
-
-完整病因分析、几何证明、cpp 端 `BuildCellDirLUT_` 实现、材质 Custom 节点接线、HLSL 完整代码、验收清单、R3→R4 视觉对比、排错表、与 §14.7 SphericalBarycentric 的关系详见 [R4_VoronoiBoundary.md](R4_VoronoiBoundary.md)。
+**下一阶段**：R7 已完成所有"渲染管线"层面的能力建设（拓扑→着色→软边→噪声→真实地表）。R8 起接入 `WorldGen` 的 `FCellGeoData → LayerIndex`（替换 R3 的 Knuth 哈希 placeholder），跑出第一张可玩星球；R8 详稿待创建。后续 R9~R13 见 §11 Roadmap 表。
 
 ---
 
@@ -979,10 +884,10 @@ R3 验收发现：每条 cell 边在它所跨过的 mesh 边的中点处出现�
 | 风险 | 触发场景 | 对策 |
 | --- | --- | --- |
 | **顶点数膨胀 3 倍** | sub ≥ 5 时 ~60k 顶点 | 仍远低于 UE 顶点上限；如真有压力可上 §4.3 方案 B（GS / SV_VertexID） |
-| **CellId 在 fp16 UV 通道下精度损失** | sub ≥ 4（NumCells ≥ 162），透视校正插值导致大 CellId 错乱映射 | 已实施 8-bit 拆分编码（Hi/Lo 各 ≤ 256，fp16 精确）；可支持 sub ≤ 6（详见 §11.2.1） |
-| **材质挂错槽位**（`渲染 > 材质 > 元素 0` 而非 `PlanetTopology > Material`） | 用户在 Actor Details 面板手工挂材质 | MID 不会被创建、CellAttrLUT 参数永远不被注入；视觉症状：整球粉色、改 NumLayersHint 无反应（详见 §11.2.2） |
-| **`.uasset` 二进制 dump 看不到 HLSL Code** | 调试 Custom 节点时尝试用 PowerShell/grep 扫描 .uasset | UE 5 把 `Code` 封装在 EditorOnlyData payload 段，外部扫描看不到；只能用 cpp 反射 `UMaterialExpressionCustom::Code` 打印（详见 §11.2.3） |
-| **R3 的 hex 边在 mesh 边中点折角** | argmax(λ) 等位线 = 外心-边中点折线，相邻三角形外心一般不重合 | R4 把判别准则改为球面 Voronoi（`argmax(dot(dir, V_i))`），等位线为大圆弧（详见 §11.3） |
+| **CellId 在 fp16 UV 通道下精度损失** | sub ≥ 4（NumCells ≥ 162），透视校正插值导致大 CellId 错乱映射 | 已实施 8-bit 拆分编码（Hi/Lo 各 ≤ 256，fp16 精确）；可支持 sub ≤ 6（详见 [R2_TopologyDebugMaterial.md](R2_TopologyDebugMaterial.md) §5） |
+| **材质挂错槽位**（`渲染 > 材质 > 元素 0` 而非 `PlanetTopology > Material`） | 用户在 Actor Details 面板手工挂材质 | MID 不会被创建、CellAttrLUT 参数永远不被注入；视觉症状：整球粉色、改 NumLayersHint 无反应（详见 [R3_CellAttrLUTMaterial.md](R3_CellAttrLUTMaterial.md) §5） |
+| **`.uasset` 二进制 dump 看不到 HLSL Code** | 调试 Custom 节点时尝试用 PowerShell/grep 扫描 .uasset | UE 5 把 `Code` 封装在 EditorOnlyData payload 段，外部扫描看不到；只能用 cpp 反射 `UMaterialExpressionCustom::Code` 打印（详见 [AgentWorkflow.md](AgentWorkflow.md) §3） |
+| **R3 的 hex 边在 mesh 边中点折角** | argmax(λ) 等位线 = 外心-边中点折线，相邻三角形外心一般不重合 | R4 把判别准则改为球面 Voronoi（`argmax(dot(dir, V_i))`），等位线为大圆弧（详见 [R4_VoronoiBoundary.md](R4_VoronoiBoundary.md)） |
 | **三角形顶点 OneHot 经过插值非线性** | 视口处于 Mip 边界 | 永远在 \"primary mesh 同分辨率\" 渲染，Mip 不影响顶点插值 |
 | **重心权重在退化三角形上发散** | 接近极地畸形三角形 | 正二十面体细分天然没有退化三角形，最差宽高比 < 2:1 |
 | **边界噪声太强导致 Cell 之间"互锁"伪影** | `NoiseAmplitude > TriRadius`（sub=3 时 ≈ 0.18 弧度） | 在材质里限制 `NoiseAmplitude ∈ [0, 0.1]` 弧度（详见 §6.4.1） |
@@ -1096,6 +1001,9 @@ void UGlobeMeshComponent::BuildFromTopology(const FSphereTopology& Topo)
     }
 }
 ```
+
+> **顶点数**：sub=4 时 `NTri = 20·4^4 = 5120` → 顶点 15360；sub=5 时 NTri=20480、顶点 61440。每顶点 ~64 字节 → 4 MB 内存，完全无压力。
+> **去重 vs 不去重**：方案 A 不在三角形之间共享顶点，是为了让 OneHot 与 CellId 在每个三角形里独立。这种"去除共享"在 procedural mesh 上是常规做法，没有额外渲染开销（GPU 层面 vertex cache 的命中率略降，但对球面这种简单几何无所谓）。
 
 ### 13.3 像素阶段 Custom HLSL 节点（精简）
 
