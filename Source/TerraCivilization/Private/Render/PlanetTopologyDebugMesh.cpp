@@ -18,6 +18,11 @@
 #include "TextureResource.h"
 #include "WorldGenerator.h"
 
+// W4 引入：从 UTerrainSet 查 UTerrainDefinition->LayerIndex，写入 LUT.R。
+#include "TerrainSet.h"
+#include "TerrainDefinition.h"
+#include "GameplayTagContainer.h"
+
 DEFINE_LOG_CATEGORY_STATIC(LogPlanetTopologyDebugMesh, Log, All);
 
 APlanetTopologyDebugMesh::APlanetTopologyDebugMesh()
@@ -250,6 +255,13 @@ void APlanetTopologyDebugMesh::Rebuild()
     //
     //   NumLayersHint 改变会同时影响 (A) 和 (B)，因此两条路径视觉上等价（仅"硬边"和"软边"
     //   的区别）。如果 (B) 视觉异常但 (A) 正常 → 一定是 Custom HLSL 节点配置错误。
+    //
+    //   ⚠ W2 兼容性说明（2026-06）：W2 起 RebuildCellAttrLUT_ 中 R 通道写入逻辑已切换为
+    //   "DebugView=None: bIsLand?4:0 / DebugView=PlateId: 板块哈希"，与此处的 Knuth 哈希
+    //   *不再一致*。两条路径的"等价性"承诺被有意打破——保持本路径用 Knuth 哈希是为了：
+    //     · R7 Triplanar 视觉链路（路径 B 主用）由 LUT 驱动，不依赖 VertexColor → 视觉零回归
+    //     · 极简 VertexColor 材质（路径 A 备用）继续显示伪随机色块，便于检视拓扑
+    //   若 W3+ 需要让二者重新对齐，可把这段循环也改为按 Generator->GetCellData() 取值。
     // ------------------------------------------------------------------
     constexpr uint32 KnuthHash    = 2654435761u;
     const int32      LayerModCpp  = FMath::Clamp(NumLayersHint, 1, 256);
@@ -446,6 +458,15 @@ void APlanetTopologyDebugMesh::Rebuild()
         /*bCreateCollision=*/false);
 
     // 4) R3：构建 1×NumCells 的 CellAttrLUT，把每 Cell 的 LayerIndex 写入 R 通道。
+    //    ★ W2 起：在调用 RebuildCellAttrLUT_ 之前先跑 WorldGen 流水线，
+    //      LUT 写入时按 Generator->GetCellData()[i].bIsLand 取值（DebugView=None 默认两色）。
+    //      Generator 提升为成员持有，Reset → MakeUnique → Generate 顺序见 Docs/W2_PlatesAndLandSea.md §6 #11。
+    {
+        Generator.Reset();
+        Generator = MakeUnique<FWorldGenerator>(Topology.Get(), WorldGenSettings);
+        Generator->Generate();
+    }
+
     RebuildCellAttrLUT_(NumCells);
 
     // 4.5) R4：构建 1×NumCells 的 CellDirLUT，把每 Cell 的 UnitCenter 写入 RGB 通道。
@@ -668,17 +689,12 @@ void APlanetTopologyDebugMesh::Rebuild()
         TriplanarSharpness,
         NumLayersHint);
 
-    // ===== W1: WorldGen 骨架接入 =====
-    // 目的：调通 Source/WorldGen 模块；运行时跑一次空 Generate() 验证模块加载与日志通道。
-    // W1 阶段 Generate() 不修改任何渲染数据；R7 视觉效果保持不变。
-    // W2 起：把 Generator 持有为 TUniquePtr 成员，并把 GeoData 喂给 LUT。
-    // 详见 Docs/W1_ModuleSkeleton.md §4.1.2。
-    if (Topology.IsValid())
-    {
-        FWorldGenerator TmpGen(Topology.Get(), WorldGenSettings);
-        TmpGen.Generate();
-        // W1 不消费 TmpGen.GetCellData()；构造析构即弃。
-    }
+    // ===== W2: WorldGen 板块构造 + 海陆分离 =====
+    // W2 已在 RebuildCellAttrLUT_(NumCells) 之前完成 Generator 重建与 Generate()，
+    // CellAttrLUT 已经按 Generator->GetCellData()[i].bIsLand 写入（DebugView=None 默认两色）；
+    // 这里末尾不再重复运行——保留代码块占位，方便 W3+ 在此追加流水线后处理（如
+    // 反射诊断、AssetTagSync 等不影响 LUT 的副效应）。
+    // 详见 Docs/W2_PlatesAndLandSea.md §4。
 }
 
 // =====================================================================
@@ -759,10 +775,98 @@ void APlanetTopologyDebugMesh::RebuildCellAttrLUT_(int32 NumCells)
     // Knuth 整数哈希常数（黄金分割比 × 2^32）：保证相邻 CellId 也能落到不同 layer。
     constexpr uint32 KnuthHash = 2654435761u;
 
+    // ★ W4：预构建 Tag → UTerrainDefinition 反查表，供 Biome / None 默认分支按 Def->LayerIndex 写 LUT.R。
+    //   - Step_ClassifyBiomes 已把各 cell 的 TerrainTag 写入 CellData[]；
+    //   - 本函数仅需查一次 LayerIndex 写入 R 通道。
+    //   - 详见 Docs/W4_BiomeClassification.md §A.10。
+    TMap<FGameplayTag, UTerrainDefinition*> TagToDefMap;
+    if (UTerrainSet* TSet = WorldGenSettings.TerrainSet.LoadSynchronous())
+    {
+        TSet->LoadSynchronous();
+        const TArray<UTerrainDefinition*>& Defs = TSet->GetLoadedDefs();
+        TagToDefMap.Reserve(Defs.Num());
+        for (UTerrainDefinition* Def : Defs)
+        {
+            if (Def && Def->TerrainTag.IsValid())
+            {
+                TagToDefMap.Add(Def->TerrainTag, Def);
+            }
+        }
+    }
+
+    // 小 Lambda：根据 CD 按 DebugView 计算 Layer（身体 + 诊断复用同一份逻辑，避免剧本偏移）。
+    auto ComputeLayerForCell = [&](const FCellGeoData& CD) -> uint8
+    {
+        switch (DebugView)
+        {
+            case EWorldGenDebugView::PlateId:
+            {
+                const uint32 Pid    = (uint32)FMath::Max(0, CD.PlateId);
+                const uint32 Hashed = (Pid * KnuthHash) >> 24;
+                return (uint8)(Hashed % 19u);
+            }
+            case EWorldGenDebugView::Elevation:
+            {
+                const float Norm = FMath::Clamp((CD.Elevation + 1.0f) * 0.5f, 0.0f, 1.0f);
+                return (uint8)FMath::FloorToInt(Norm * 18.0f);
+            }
+            case EWorldGenDebugView::Moisture:
+            {
+                return (uint8)FMath::FloorToInt(FMath::Clamp(CD.Moisture, 0.0f, 1.0f) * 18.0f);
+            }
+            case EWorldGenDebugView::Temperature:
+            {
+                const float Norm = FMath::Clamp((CD.Temperature + 1.0f) * 0.5f, 0.0f, 1.0f);
+                return (uint8)FMath::FloorToInt(Norm * 18.0f);
+            }
+            case EWorldGenDebugView::Mountain:
+            {
+                return CD.bIsMountain ? (uint8)11 : (CD.bIsLand ? (uint8)4 : (uint8)0);
+            }
+            case EWorldGenDebugView::LandSea:
+            {
+                return CD.bIsLand ? (uint8)4 : (uint8)0;
+            }
+            case EWorldGenDebugView::Biome:
+            case EWorldGenDebugView::None:
+            default:
+            {
+                // ★ W4：默认视图 = Biome 真实分类。
+                // CD.TerrainTag 未设（None）或 Tag 不在表中（TerrainSet 未挂） → fallback LayerIndex 0。
+                if (UTerrainDefinition* const* Found = TagToDefMap.Find(CD.TerrainTag))
+                {
+                    if (*Found)
+                    {
+                        return (uint8)FMath::Clamp((*Found)->LayerIndex, 0, 255);
+                    }
+                }
+                return (uint8)0;
+            }
+        }
+    };
+
+    // ★ W2：从 WorldGen 取每 Cell 的板块/海陆数据；按 DebugView 切换 R 通道写入逻辑。
+    //   - W4 上起：默认视图 升级为 Biome（Def->LayerIndex），LandSea 仍作为独立选项供回归。
+    //   - PlateId / Elevation / Moisture / Temperature / Mountain 沿用 W2/W3 语义。
+    //   详见 Docs/W4_BiomeClassification.md §A.10 / Docs/W2_PlatesAndLandSea.md §A.3。
+    const TArray<FCellGeoData>* CellsPtr =
+        (Generator.IsValid() && Generator->GetCellData().Num() == NumCells)
+            ? &Generator->GetCellData()
+            : nullptr;
+
     for (int32 CellId = 0; CellId < NumCells; ++CellId)
     {
-        const uint32 Hashed = (uint32)CellId * KnuthHash;
-        const uint8  Layer  = (uint8)(Hashed % (uint32)LayerMod);
+        uint8 Layer = 0;
+        if (CellsPtr)
+        {
+            Layer = ComputeLayerForCell((*CellsPtr)[CellId]);
+        }
+        else
+        {
+            // Fallback：W2 之前的 Knuth 哈希 placeholder（防止 Generator 失效时 LUT 全 0）
+            const uint32 Hashed = (uint32)CellId * KnuthHash;
+            Layer = (uint8)(Hashed % (uint32)LayerMod);
+        }
 
         // BGRA 顺序写入。R 通道存 Layer，其余先填 0（R8 阶段会启用）。
         const int32 Offset = CellId * 4;
@@ -778,6 +882,7 @@ void APlanetTopologyDebugMesh::RebuildCellAttrLUT_(int32 NumCells)
     // Re-Lock 只读，dump 前 16 个 cell 的 (B,G,R,A) 四个字节，验证 R 通道存的就是 LayerIndex。
     // 如果这里打印的 R 列与上面 for-loop 计算的 Layer 不一致，
     // 说明 PF_B8G8R8A8 的内存字节顺序与我假设的不同，需要调整 Offset+0..3 的赋值方式。
+    // ★ W2：Expected 算法跟随 R 通道写入逻辑分支同步，便于在 PIE 排错时一眼判断写入正确性。
     {
         const uint8* Verify = static_cast<const uint8*>(Bulk.LockReadOnly());
         if (Verify)
@@ -786,8 +891,17 @@ void APlanetTopologyDebugMesh::RebuildCellAttrLUT_(int32 NumCells)
             FString Dump;
             for (int32 i = 0; i < NumDump; ++i)
             {
-                const uint32 Hashed   = (uint32)i * KnuthHash;
-                const uint8  Expected = (uint8)(Hashed % (uint32)LayerMod);
+                uint8 Expected = 0;
+                if (CellsPtr)
+                {
+                    // ★ W4：复用上面的 ComputeLayerForCell lambda，避免主写入与诊断逻辑剧本偏移。
+                    Expected = ComputeLayerForCell((*CellsPtr)[i]);
+                }
+                else
+                {
+                    const uint32 Hashed = (uint32)i * KnuthHash;
+                    Expected = (uint8)(Hashed % (uint32)LayerMod);
+                }
                 Dump += FString::Printf(TEXT("  Cell%-3d: B=%3u G=%3u R=%3u A=%3u (expected layer=%u)\n"),
                     i,
                     Verify[i * 4 + 0],
@@ -796,9 +910,18 @@ void APlanetTopologyDebugMesh::RebuildCellAttrLUT_(int32 NumCells)
                     Verify[i * 4 + 3],
                     Expected);
             }
+            const TCHAR* DebugViewName =
+                (DebugView == EWorldGenDebugView::PlateId)     ? TEXT("PlateId")
+              : (DebugView == EWorldGenDebugView::LandSea)     ? TEXT("LandSea")
+              : (DebugView == EWorldGenDebugView::Elevation)   ? TEXT("Elevation")
+              : (DebugView == EWorldGenDebugView::Moisture)    ? TEXT("Moisture")
+              : (DebugView == EWorldGenDebugView::Temperature) ? TEXT("Temperature")
+              : (DebugView == EWorldGenDebugView::Mountain)    ? TEXT("Mountain")
+              : (DebugView == EWorldGenDebugView::Biome)       ? TEXT("Biome")
+              :                                                  TEXT("None");
             UE_LOG(LogPlanetTopologyDebugMesh, Log,
-                TEXT("[PlanetTopologyDebugMesh] CellAttrLUT first %d cells (NumCells=%d, NumLayersHint=%d, LayerMod=%d):\n%s"),
-                NumDump, NumCells, NumLayersHint, LayerMod, *Dump);
+                TEXT("[PlanetTopologyDebugMesh] CellAttrLUT first %d cells (NumCells=%d, DebugView=%s, NumLayersHint=%d, LayerMod=%d):\n%s"),
+                NumDump, NumCells, DebugViewName, NumLayersHint, LayerMod, *Dump);
             Bulk.Unlock();
         }
         else

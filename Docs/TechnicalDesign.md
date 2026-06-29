@@ -77,7 +77,7 @@ graph TD
 | `Grid`（已存在） | Runtime | Core/CoreUObject/Engine | 球面拓扑、邻接、查询 | （本稿 §2） |
 | `TerrainTags` | Runtime | Core/GameplayTags | GameplayTag 静态定义 + DataAsset 资产类型 | （本稿 §3） |
 | `WorldGen` | Runtime | Grid/TerrainTags | 程序化地理：板块/高程/温湿度/生物群系/河流/基地 | [WorldGenDesign.md](WorldGenDesign.md) |
-| `GridRender` | Runtime | Grid/TerrainTags/WorldGen/RHI/RenderCore | 球面 ProceduralMesh + SDF 材质参数注入；R8 起读 `FCellGeoData → LayerIndex` 灌 LUT | [SphericalSDFTerrainDesign.md](SphericalSDFTerrainDesign.md) |
+| `GridRender` | Runtime | Grid/TerrainTags/WorldGen/RHI/RenderCore | 球面 ProceduralMesh + SDF 材质参数注入；R8 起使用参数化 Tint（3-base + 4 通道 LUT），R8.5 起切到自研球面网格并消费 `FCellGeoData.Elevation` 做径向位移；W4 联调后读 `FCellGeoData → LayerIndex` 火 LUT | [SphericalSDFTerrainDesign.md](SphericalSDFTerrainDesign.md) |
 | `Gameplay` | Runtime | Grid/TerrainTags/WorldGen/GAS | Unit/Building/Faction/Turn 数据模型；只读 `FCellGeoData.TerrainTag/OwnerId/bIsPentagon` | （本稿 §6） |
 | `GameplaySystem` | Runtime | Gameplay/Grid | 移动、寻路、围吃判定、战斗、占领 | （本稿 §7） |
 | `GameCore` | Runtime | Gameplay/WorldGen/GridRender | GameMode/GameState/PlayerController/Pawn | （本稿 §5） |
@@ -87,7 +87,7 @@ graph TD
 | `TerraCivilizationEditor`（可选） | Editor | Gameplay/UnrealEd | 自定义资产、Tag 配置面板 | — |
 
 > **依赖项更新说明**（vs WorldGen 独立化之前）：
-> - `GridRender` 依赖列追加 `WorldGen`：R8 起 `RebuildCellAttrLUT_()` 需读取 `FCellGeoData[].TerrainTag` 通过 `UTerrainDefinition` 查 LayerIndex；R7 之前是 Knuth 哈希 placeholder，无此依赖。
+> - `GridRender` 依赖列追加 `WorldGen`：R8.5 自研球面网格需消费 `FCellGeoData[].Elevation` 做径向位移；W4 联调后 `RebuildCellAttrLUT_()` 进一步读取 `FCellGeoData[].TerrainTag` 通过 `UTerrainDefinition` 查 `LayerIndex` + `FTerrainMaterialParams`。R8 阶段仍以 R3 Knuth 哈希 placeholder 驱动 BaseTexIdx，并不读 `FCellGeoData`。
 > - `Gameplay` 依赖列追加 `WorldGen`：消费 `bIsPentagon`、`OwnerId`、`TerrainTag` 等字段。
 > - `WorldGen` 依赖列**保持不变**（仅 `Grid/TerrainTags`）：WorldGen 是上游模块，不依赖任何下游——这是 [WorldGenDesign.md §14.3](WorldGenDesign.md#143-跨模块调用时序) 的硬承诺。
 

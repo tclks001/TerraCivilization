@@ -1,5 +1,7 @@
 ﻿# W1：WorldGen 模块骨架（Source/WorldGen 新建 + 空 Generate 跑通）
 
+> **状态**：✅ **已验收（2026-06）**——用户在 PIE 中确认 Output Log 命中 `[WorldGen] Skeleton OK, 642 cells, no-op generate`、R7 视觉像素级零回归、Editor `WorldGen` 折叠组可见可编辑；11 项验收清单全部通过。本稿**封档为参考**，后续 W-step 的"骨架对照基线"。
+>
 > **本文档定位**：W1 阶段的独立详细设计稿——提供从"零模块"到"`[WorldGen] Skeleton OK, 642 cells, no-op generate` 输出"的全套落地清单。
 >
 > 阅读对象：实现 W1 的 AI Agent 或人工开发者；要求一次性完成、编译 0 警 0 错、Output Log 命中目标日志。
@@ -141,16 +143,20 @@ Source/WorldGen/
 | `ElevationNoiseAmplitude` | `float` | 0.3 | [0, ∞) | W3 | 高程 fbm 振幅 |
 | `ElevationNoiseFrequency` | `float` | 2.0 | [0, ∞) | W3 | fbm 频率 |
 | `MoistureScale` | `float` | 1.0 | [0, 1] | W3 | 湿度场最大值 |
-| `MoistureCoastalFalloff` | `float` | 0.05 | [0, ∞) | W3 | 海距衰减 |
-| `RainShadowFactor` | `float` | 0.3 | [0, 1] | W3 | 雨影衰减 |
+| `MoistureCoastalFalloff` | `float` | 0.15 ⚡W3.5 | [0, ∞) | W3 | 上风 SSSP 累积距离衰减 |
+| `RainShadowFactor` | `float` | 0.3 ⚠废弃 | [0, 1] | W3 | 原雨影衰减；W3.5 后雨影已内嵌到 SSSP 边权、字段保留但 W3 不读 |
 | `TemperatureBias` | `float` | 0.0 | [-1, 1] | W3 | 全局温度偏移 |
 | `TemperatureLapseRate` | `float` | 0.3 | [0, ∞) | W3 | 海拔温度递减率 |
+| `AlphaElevation` ⚡W3.5 | `float` | 4.0 | [0, 10] | W3 | 上风 SSSP 高地加权（内嵌雨影）|
+| `AlphaCoast` ⚡W3.5 | `float` | 0.5 | [0, 1] | W3 | 上风 SSSP 海岸边权减免 |
 | `RiverDischargeThreshold` | `float` | 5.0 | [0, ∞) | W5 | 河流流量阈值 |
 | `LakeDischargeThreshold` | `float` | 20.0 | [0, ∞) | W5 | 湖泊流量阈值 |
 | `ForcedBaseTraits` | `TArray<FGameplayTagContainer>` | empty | — | W6 | 12 基地 Trait |
 | `BiomeTable` | `TSoftObjectPtr<UBiomeTable>` | nullptr | — | W7 | DataAsset 化 |
 
-> 字段总数 **18**——比主稿 §11 概数"13 字段"略多，因为参数表把 W2~W7 全 step 参数都预先就位。**W1 一律不读这些字段**（仅持有），但暴露 UPROPERTY 让 Editor 可调，避免 W2~W7 反复加字段触发 `FWorldGenSettings` 版本失配。
+> 字段总数 **18**（W1 验收时） · **20**（W3.5 修订后）——比主稿 §11 概数"13 字段"略多，因为参数表把 W2~W7 全 step 参数都预先就位。**W1 一律不读这些字段**（仅持有），但暴露 UPROPERTY 让 Editor 可调，避免 W2~W7 反复加字段触发 `FWorldGenSettings` 版本失配。
+>
+> **⚠ W3.5 破例（2026-06-28）**：原计划 W1 锁定后不再改 `FWorldGenSettings` 任何字段；但 W3 PIE 实测发现“各向同性海距 BFS + 独立雨影”方案下湿度梯度平缓、无东西岸差异。W3.5 修订为上风向 SSSP + 高程加权边权后，**新增** `AlphaElevation`(4.0) + `AlphaCoast`(0.5)；**调整默认** `MoistureCoastalFalloff: 0.05 → 0.15`；**废弃**（字段保留） `RainShadowFactor`。完整说明见 [W3_ScalarFields.md §0.2 / §4.0](W3_ScalarFields.md)。字段名 / 仅主加不减，W1 负责的“反反复复加字段触发版本失配”纪律仍未被破坏。
 
 > 注：`UBiomeTable` 在 W7 才定义；W1 用 `TSoftObjectPtr<class UBiomeTable>` 前向声明软引用，**不**触发模块依赖。
 
@@ -683,11 +689,11 @@ struct WORLDGEN_API FWorldGenSettings
     UPROPERTY(EditAnywhere, Category = "WorldGen|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float MoistureScale = 1.0f;
 
-    /** 海距湿度衰减系数（每 cell 衰减）。 */
+    /** 海距湿度衰减系数。上风向 SSSP 中按累积距离衰减；W3.5 默认 0.15。 */
     UPROPERTY(EditAnywhere, Category = "WorldGen|Climate", meta = (ClampMin = "0.0"))
-    float MoistureCoastalFalloff = 0.05f;
+    float MoistureCoastalFalloff = 0.15f;
 
-    /** 雨影衰减系数（越过山脉后湿度乘以此值）。 */
+    /** [W3.5 deprecated] 原雨影衰减系数。雨影已内嵌到上风向 SSSP 边权中，本字段保留但 W3 不读；W4+ 可能重启用。 */
     UPROPERTY(EditAnywhere, Category = "WorldGen|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float RainShadowFactor = 0.3f;
 
@@ -698,6 +704,14 @@ struct WORLDGEN_API FWorldGenSettings
     /** 海拔每升高 0.1 单位，温度下降的量。 */
     UPROPERTY(EditAnywhere, Category = "WorldGen|Climate", meta = (ClampMin = "0.0"))
     float TemperatureLapseRate = 0.3f;
+
+    /** [W3.5 新增] 高程衰减加权系数。上风向 SSSP 中高地 cell 边权 = 1 + AlphaElevation × max(0, Elev - SeaLevel)；默认 4.0。 */
+    UPROPERTY(EditAnywhere, Category = "WorldGen|Climate", meta = (ClampMin = "0.0", ClampMax = "10.0"))
+    float AlphaElevation = 4.0f;
+
+    /** [W3.5 新增] 海岸边权减免系数。上风向 SSSP 中海岸 cell 为上风邻居时边权 = 1 - AlphaCoast；默认 0.5。 */
+    UPROPERTY(EditAnywhere, Category = "WorldGen|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float AlphaCoast = 0.5f;
 
     // ───────────── Rivers (W5) ─────────────
 

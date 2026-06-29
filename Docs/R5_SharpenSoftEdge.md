@@ -3,6 +3,8 @@
 > 本文档是 [SphericalSDFTerrainDesign.md §6.3.1](SphericalSDFTerrainDesign.md#631-r5-落地方案基于球面角距离的绝对弧度软边路径-b) 的独立落地文档，与 [R2_TopologyDebugMaterial.md](R2_TopologyDebugMaterial.md) / [R3_CellAttrLUTMaterial.md](R3_CellAttrLUTMaterial.md) / [R4_VoronoiBoundary.md](R4_VoronoiBoundary.md) 风格一致。
 >
 > 阅读本文档前必须先理解 [R4_VoronoiBoundary.md](R4_VoronoiBoundary.md) §2 的"球面 Voronoi 判别"——R5 直接构筑在 R4 的 dot 距离架构之上，新增的只是"过渡带宽度"。
+>
+> ⚠ **路线调整说明（2026-06-29）**：本文档中"R11 PTG 路线零修改复用"等表述**已过期**——原 R11 PTG 路线已废弃，新生产路线是 [SDF 主稿 §16](SphericalSDFTerrainDesign.md#16-自研球面网格生产路线) 的"R8.5 自研球面网格"。R5 PS HLSL **仍然零改动**搬运到 R8.5，区别仅在 c0/c1/c2 来源（cpp 预计算灌顶点而非 GPU FindNearestCell）；EdgeWidth 跨 sub 等级语义不变同样适用于自研球面网格。
 
 ---
 

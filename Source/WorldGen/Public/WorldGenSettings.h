@@ -7,8 +7,11 @@
 #include "Engine/DataAsset.h"
 #include "WorldGenSettings.generated.h"
 
-// W7 阶段会引入具体的 UBiomeTable : public UDataAsset；W1~W6 阶段 BiomeTable 字段类型先用基类 UDataAsset 占位，
-// 避免提前创建 UBiomeTable 文件污染骨架。W7 落地时把 TSoftObjectPtr<UDataAsset> 升级为 TSoftObjectPtr<UBiomeTable>。
+// W4 起：原 W7 计划取消，改为 UTerrainSet（DataAsset，持一组 UTerrainDefinition*）。
+// UTerrainDefinition 自身携带 ClimateRules[]——分类规则属于地形定义本身，
+// 设计师可在编辑器内调；详见 Docs/W4_BiomeClassification.md §2.1。
+// 17 个 Terrain.* GameplayTag 走 Config/Tags/Terrain.ini 集中注册（不走 cpp FNativeGameplayTag、
+// cpp 不消费具体 Tag 名）。
 
 /**
  * FWorldGenSettings
@@ -70,13 +73,25 @@ struct WORLDGEN_API FWorldGenSettings
     UPROPERTY(EditAnywhere, Category = "WorldGen|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float MoistureScale = 1.0f;
 
-    /** 海距湿度衰减系数（每 cell 衰减）。 */
+    /** 海距湿度衰减系数。上风向 SSSP 中按累积距离衰减；Moist = MoistureScale * exp(-MoistureCoastalFalloff * AccumDist)。
+     *  W3.5 默认 0.15；调大→梯度更陶、调小→梯度更平。 */
     UPROPERTY(EditAnywhere, Category = "WorldGen|Climate", meta = (ClampMin = "0.0"))
-    float MoistureCoastalFalloff = 0.05f;
+    float MoistureCoastalFalloff = 0.15f;
 
-    /** 雨影衰减系数（越过山脉后湿度乘以此值）。 */
+    /** [W3.5 deprecated] 原雨影衰减系数。雨影已内嵌到上风向 SSSP 边权中（AlphaElevation），本字段保留但 W3 不读；W4+ 可能重启用。 */
     UPROPERTY(EditAnywhere, Category = "WorldGen|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float RainShadowFactor = 0.3f;
+
+    /** [W3.5 新增] 高程衰减加权系数。上风向 SSSP 中高地 cell 边权 = 1 + AlphaElevation × max(0, Elev - SeaLevel)。
+     *  默认 4.0：Elev=1、SeaLevel=0 时山脉 cell 边权 = 5（= 5 个平地 cell）。
+     *  调低→雨影减弱；调高→雨影加强、高原也变干。 */
+    UPROPERTY(EditAnywhere, Category = "WorldGen|Climate", meta = (ClampMin = "0.0", ClampMax = "10.0"))
+    float AlphaElevation = 4.0f;
+
+    /** [W3.5 新增] 海岸边权减免系数。上风向 SSSP 中海岸 cell 为上风邻居时边权 = 1 - AlphaCoast。
+     *  默认 0.5：海岸为上风邻居时边权 = 0.5（海岸推进湿气更高效）。上限 1.0 避免边权 ≤ 0。 */
+    UPROPERTY(EditAnywhere, Category = "WorldGen|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float AlphaCoast = 0.5f;
 
     /** 全局温度偏移（暖期 = +0.2，冰期 = -0.3）。 */
     UPROPERTY(EditAnywhere, Category = "WorldGen|Climate", meta = (ClampMin = "-1.0", ClampMax = "1.0"))
@@ -102,12 +117,22 @@ struct WORLDGEN_API FWorldGenSettings
     UPROPERTY(EditAnywhere, Category = "WorldGen|Bases")
     TArray<FGameplayTagContainer> ForcedBaseTraits;
 
-    // ───────────── Biomes (W4 / W7) ─────────────
+    // ───────────── Biomes (W4) ─────────────
 
     /**
-     * 生物群系查表（W7 启用 DataAsset 化）；W4 阶段先用 cpp 硬编码默认 5x5 表。
-     * W1~W6 类型为基类 UDataAsset；W7 阶段定义 UBiomeTable : public UDataAsset 后升级为 TSoftObjectPtr<UBiomeTable>。
+     * W4 起：UTerrainSet（DataAsset）持有 17~19 个 UTerrainDefinition* 引用；每个 Def
+     * 自带 ClimateRules[] 规则、LayerIndex、玩法属性。Step_ClassifyBiomes 不知道
+     * Tag/Layer 语义，仅递归调用 Def->ScoreFor(Sample) 取 argmax。
+     * 详见 Docs/W4_BiomeClassification.md §2.1。
      */
     UPROPERTY(EditAnywhere, Category = "WorldGen|Biomes")
-    TSoftObjectPtr<UDataAsset> BiomeTable;
+    TSoftObjectPtr<class UTerrainSet> TerrainSet;
+
+    /**
+     * 覆盖盲区 fallback 时使用的 Tag（一般指向 Terrain.Plain.Grass）。
+     * 设计师在编辑器面板挂上 Tag；cpp 端不出现具体 Tag 字符串。
+     * 详见 Docs/W4_BiomeClassification.md §2.3 / §3.2。
+     */
+    UPROPERTY(EditAnywhere, Category = "WorldGen|Biomes")
+    FGameplayTag SentinelTerrainTag;
 };

@@ -24,28 +24,32 @@
 > | 读什么 | 仅 `FSphereTopology`（拓扑只读） | `FCellGeoData[].LayerIndex` → `Texture2DArray` slice |
 > | 改了不刷另一侧 | ✅ 算法/参数/Whittaker 表全部独立调整，渲染端无需改动 | ✅ HLSL/材质/Triplanar 全部独立调整，WorldGen 无需改动 |
 >
-> **核心承诺**：从 W4（生物群系分类）完成那一刻起，SDF 渲染端只需把"R3 阶段的 Knuth 哈希 placeholder"换成"`Def->LayerIndex` 读取"——一行 cpp 改动；其余 SDF 阶段（R5/R6/R7）的工作量与 WorldGen 完全无关。
+> **核心承诺（2026-06-29 修订）**：从 W4 完成那一刻起 SDF 渲染端**已具备**把 BaseTexIdx 从 Knuth placeholder 切换为 `Def->LayerIndex` 真实查表的能力——但实际切换时机**推迟到 R8.5 联调阶段**（因为 R8 + R8.5 阶段需要先用 placeholder 观察 17 种地形配方与径向位移 + 水面层的视觉协调）。R8/R8.5/R9 SDF 端的核心算法（4 通道 LUT、参数化 tint、自研网格几何）的工作量与 WorldGen 完全无关。
 >
-> **跨期同构性**：与 SDF 主稿 §14 PTG 路线一致，本稿数据结构与算法**对 IsoSphere（R1\~R10）与 PTG（R11\~R13）两条几何路径无差别**——`FCellGeoData` 永远以 `CellId` 作为主键，下游怎么渲染（IsoSphere primal mesh 还是 PTG 高细分球皮）、是否做 WPO 顶点位移、是否上 LOD，都不影响 WorldGen 的输出形态。
+> **跨期同构性**（2026-06-29 更新）：原 PTG 路线已废弃。当前生产路线是 SDF 主稿 §16 的**自研球面网格方案**——本稿数据结构与算法**对 IsoSphere（R1~R8）与自研球面网格（R8.5+）两条几何路径无差别**——`FCellGeoData` 永远以 `CellId` 作为主键，下游怎么渲染（IsoSphere primal mesh 还是自研 sub+2 渲染网格）、是否做径向位移、是否上 LOD，都不影响 WorldGen 的输出形态。
 
 ---
 
 ## 0. 摘要 + 当前阶段
 
-**当前阶段**：W0 设计期（本稿创建中）。R1\~R7 渲染管线已完成；R8 阶段需消费 W1\~W4 的产出。
+**当前阶段**：**W4 cpp 完成，等待联调验收**。R1~R7 渲染管线已完成；W1 模块骨架 ✅、W2 板块构造 + 海陆分离 ✅、W3 三标量场（高程 + 湿度 + 温度）✅ 全部通过用户 PIE 验收；W4 cpp 已落地（`TerrainTags` 模块 + DataAsset 驱动的生物群系评分器）。
+
+> **路线调整（2026-06-29）**：原计划 "W4 → R8" 的串行依赖**已松绑**。新路线 "R8 (Tint 参数化) → R8.5 (自研球面网格) → W4 联调验收"——R8 + R8.5 阶段 SDF 端继续沿用 R3 Knuth 哈希 placeholder 观察 17 种地形配方在径向位移 + 水面遮挡下的视觉效果，然后再回头联调 W4 的 Whittaker 区间。WorldGen 模块自身的开发进度不变（W4 cpp 已完成、W5/W6 仍按原计划），仅是 "W4 验收" 这一动作被推迟到 R8.5 联调阶段。
 
 | 子阶段 | 状态 | 一句话目标 |
 | --- | --- | --- |
-| **W1** | ⏳ 待开始 | 模块骨架 + `FCellGeoData` + `FWorldGenSettings`，编译通过 |
-| **W2** | ⏳ 待开始 | 板块构造（球面 Voronoi + 漂移向量）+ 海陆分离 |
-| **W3** | ⏳ 待开始 | 高程场（板块边界抬升/俯冲）+ 温湿度场（纬度 + 雨影 + 高程） |
-| **W4** | ⏳ 待开始 | Whittaker 双轴生物群系分类 + 写 `LayerIndex` 入 LUT（接 R8） |
+| **W1** | ✅ 完成 | 模块骨架 + `FCellGeoData` + `FWorldGenSettings`，编译通过 |
+| **W2** | ✅ 完成 | 板块构造（球面 Voronoi + 漂移向量）+ 海陆分离 |
+| **W3** | ✅ 完成 | 高程场（板块边界抬升/俯冲）+ 温湿度场（纬度 + 上风 SSSP + 高程）+ W3 测试材质 |
+| **W4**（合并 W7）| 🛠 cpp 完成（待 R8.5 联调验收）| `TerrainTags` 模块落地 + `UTerrainDefinition::ClimateRules` 评分器分类 + 写 `Def->LayerIndex` 入 LUT（联调时正式替换 R8 的 Knuth placeholder） |
 | **W5** | ⏳ 待开始 | 河流/湖泊追踪（D8 on Hex/Pent 邻接） |
 | **W6** | ⏳ 待开始 | 12 五边形势力基地分配 + 缓冲带友好地形 |
-| **W7** | ⏳ 待开始 | DataAsset 化（`UTerrainDefinition` / `UBiomeTable`） |
+| ~~**W7**~~ | ✅ 合并入 W4 | （原计划：`UTerrainDefinition` / `UBiomeTable` DataAsset 化）——W4 一步到位后本阶段取消 |
 | **W8** | ⏳ 待开始 | 编辑器调参面板 + 可视化 Debug（板块染色、高程热图、河流叠加） |
 
-**对外承诺锚点**：W4 完成 = 第一张可玩星球的最小有效集（12 五边形 + 板块 + 海陆 + 19 layer 生物群系）；W5/W6 是丰富度增强；W7/W8 是工具链与可维护性。
+**对外承诺锚点**：W4 完成 = 第一张可玩星球的最小有效集（12 五边形 + 板块 + 海陆 + 19 layer 生物群系）；W5/W6 是丰富度增强；W8 是工具链与可维护性。
+
+> **✨ W4 架构拍板（2026-06-28）**：原计划“W4 cpp 硬编码 Whittaker 表 + W7 后 DataAsset 化”两阶段连始为一阶段。原因：“E/M/T 如何映射为 TerrainTag”是设计师可调的游戏设定，**应归属于 `TerrainTags` 模块、以 DataAsset 存储**，不应烘焙在 WorldGen cpp 中（否则 GameplayTag 的数据驱动原则失效）。另外，“几何短路”（`bIsLand` / `bIsCoast` / `bIsMountain`）也并非不可变的物理事实，而是“这个星球上什么叫海”这个游戏语义的一部分，同样交由设计师通过 `ClimateRules.Placement` 字段表达。WorldGen 仅作为“评分器”：递归遍历全部 `UTerrainDefinition`，调用每个 Def 的 `ScoreFor(Sample)` 取最高分者。详见 [W4_BiomeClassification.md](W4_BiomeClassification.md) §1 与 §2。
 
 ---
 
@@ -150,7 +154,7 @@ Whittaker（1975）提出地球生物群系主要由**年均温度 T** 与**年�
 >
 > **山脉特例**：`Elevation > MountainThreshold` 的 cell 直接打 `Mountain.Hill`/`Mountain.Peak`/`Mountain.Snow`，不进 Whittaker 表。
 
-`UBiomeTable`（`UDataAsset`）形式见 §7、§13。
+`UTerrainDefinition::ClimateRules`（DataAsset）形式见 [W4_BiomeClassification.md §2.1](W4_BiomeClassification.md)；本表仅作为 19 个 DataAsset 资产初始值的建议。
 
 ### 2.3 河流追踪（D8 / Steepest Descent on Hex）
 
@@ -322,13 +326,21 @@ struct WORLDGEN_API FWorldGenSettings
     UPROPERTY(EditAnywhere, Category="WorldGen|Climate", meta=(ClampMin="0.0", ClampMax="1.0"))
     float MoistureScale = 1.0f;
 
-    /** 海距湿度衰减系数（每 cell 衰减） */
+    /** 海距湿度衰减系数（上风向 SSSP 中按累积距离衰减）。W3.5 默认 0.15 */
     UPROPERTY(EditAnywhere, Category="WorldGen|Climate", meta=(ClampMin="0.0"))
-    float MoistureCoastalFalloff = 0.05f;
+    float MoistureCoastalFalloff = 0.15f;
 
-    /** 雨影衰减系数（越过山脉后湿度乘以此值） */
+    /** [W3.5 deprecated] 雨影已内嵌到上风向 SSSP 边权中，本字段保留但 W3 不读；W4+ 可能重启用 */
     UPROPERTY(EditAnywhere, Category="WorldGen|Climate", meta=(ClampMin="0.0", ClampMax="1.0"))
     float RainShadowFactor = 0.3f;
+
+    /** 高程衰减加权系数。上风向 SSSP 中高地 cell 边权 = 1 + AlphaElevation × max(0, Elev - SeaLevel)；默认 4.0 */
+    UPROPERTY(EditAnywhere, Category="WorldGen|Climate", meta=(ClampMin="0.0", ClampMax="10.0"))
+    float AlphaElevation = 4.0f;
+
+    /** 海岸边权减免系数。上风向 SSSP 中海岸 cell 为上风邻居时边权 = 1 - AlphaCoast；默认 0.5 */
+    UPROPERTY(EditAnywhere, Category="WorldGen|Climate", meta=(ClampMin="0.0", ClampMax="1.0"))
+    float AlphaCoast = 0.5f;
 
     /** 全局温度偏移（暖期 = +0.2，冰期 = -0.3） */
     UPROPERTY(EditAnywhere, Category="WorldGen|Climate", meta=(ClampMin="-1.0", ClampMax="1.0"))
@@ -350,9 +362,17 @@ struct WORLDGEN_API FWorldGenSettings
     UPROPERTY(EditAnywhere, Category="WorldGen|Bases")
     TArray<FGameplayTagContainer> ForcedBaseTraits;
 
-    /** 生物群系查表（W7 启用 DataAsset 化）；W4 阶段先用 cpp 硬编码默认 5×5 表 */
+    /**
+     * ✨ W4 启用（原计划 W7）。`UTerrainSet` 是 `TerrainTags` 模块提供的
+     * DataAsset，持有一组 `UTerrainDefinition*`（每个 Def 自带 `ClimateRules[]`、
+     * `LayerIndex`、玩法属性）。WorldGen `Step_ClassifyBiomes` 不知道任何
+     * Tag/Layer 语义，仅递归 `Set->TerrainDefs` 调用 `Def->ScoreFor(Sample)` 取最大者。
+     *
+     * 这是实现“数据驱动原则”（TechnicalDesign §0.2）的核心拍板：设计师能在
+     * 编辑器里调整“某 (T,M,E) 区间是什么生物群系”而不需重编译 cpp。
+     */
     UPROPERTY(EditAnywhere, Category="WorldGen|Biomes")
-    TSoftObjectPtr<class UBiomeTable> BiomeTable;
+    TSoftObjectPtr<class UTerrainSet> TerrainSet;
 };
 ```
 
@@ -445,7 +465,7 @@ flowchart TD
     S8 --> Done[FCellGeoData 数组]
 ```
 
-> **W4 验收锚点**：W1+W2+W3+S6 完成即可输出第一张可玩星球；W5/W6 是丰富度增强、不阻塞下游 R8。
+> **W4 验收锚点**：W1+W2+W3+S6 完成即可输出第一张可玩星球；W5/W6 是丰富度增强。**联调时机调整（2026-06-29）**：W4 完成后不立即接入 SDF 端 LayerIndex，而是等 R8（参数化 Tint）+ R8.5（自研球面网格）联调通过后再做最终接入——SDF 端在 R8/R8.5 阶段沿用 Knuth 哈希 placeholder 观察效果。
 
 下面各 Step 仅给**简介 + 输入输出 + 验收**；详细算法/HLSL/cpp 落地放各 W-step 独立详稿（[W1_ModuleSkeleton.md](W1_ModuleSkeleton.md)、[W2_PlatesAndLandSea.md](W2_PlatesAndLandSea.md)、...）。
 
@@ -470,15 +490,16 @@ flowchart TD
 - **输出**：`bIsLand`、`bIsCoast`
 - **W2 验收**：陆地大致占 30~50%、12 五边形若有部分落入海洋是允许的（W6 会在 Step8 强制陆地化基地）
 
-### 5.4 Step4 湿度场
+### 5.4 Step4 湿度场（W3.5 修订：上风向 SSSP + 高程加权边权）
 
-- **输入**：`ElevationField`、`bIsLand`、`bIsCoast`、`MoistureScale`、`MoistureCoastalFalloff`、`RainShadowFactor`
-- **算法**：
-  1. 风带基础：以纬度（`UnitCenter.z`）周期函数模拟信风/西风（详见 §7）
-  2. 海距衰减：从 `bIsCoast` BFS 向内陆扩散，每跳 `MoistureCoastalFalloff` 衰减
-  3. 雨影：沿盛行风方向，遇 `bIsMountain` 后下游湿度乘 `RainShadowFactor`
+- **输入**：`ElevationField`、`bIsLand`、`bIsCoast`、`MoistureScale`、`MoistureCoastalFalloff`、`AlphaElevation`、`AlphaCoast`
+- **算法**（[W3_ScalarFields.md §3.2](W3_ScalarFields.md) 详稿）：
+  1. 上风向 SSSP、多源初始化：所有 ocean cell + bIsCoast cell 的 AccumDist = 0
+  2. Bellman-Ford 多轮松弛：只从上风邻居（东侧 = `dot(nbr - cur, East) > 0`）取后续距离；边权 = `1 + AlphaElevation * max(0, Elev_up - SeaLevel) - AlphaCoast * (cur_up.bIsCoast ? 1 : 0)`（下限 0.1）；极区 `\|East\|<ε` 退化各向同性
+  3. 基础湿度：`MoistureField[i] = MoistureScale * exp(-MoistureCoastalFalloff * AccumDist[i])`；clamp 到 [0, 1]
 - **输出**：`MoistureField`
-- **W3 验收**：可视化 → 海岸湿润、内陆干燥、山脉背风侧明显沙漠化
+- **雨影不再独立**：高地 cell 边权 × AlphaElevation 后，跨过山脉后西侧自然更干。`RainShadowFactor` 废弃（保留字段）
+- **W3 验收**：可视化 → **大陆东岸湿润**、**大陆西岸干燥**（东风模型）、山脉背风侧明显沙漠化；海岸 cell 额外鲜湿。**不会出现**“陆地湿度集中于 [0.7, 1.0]”的平缓分布。
 
 ### 5.5 Step5 温度场（纬度 + 高度修正）
 
@@ -487,16 +508,22 @@ flowchart TD
 - **输出**：`TemperatureField`
 - **W3 验收**：极地寒冷、赤道炎热、高山降温
 
-### 5.6 Step6 生物群系分类（Whittaker 查表）
+### 5.6 Step6 生物群系分类（`UTerrainDefinition::ScoreFor` 评分器）
 
-- **输入**：`ElevationField`、`MoistureField`、`TemperatureField`、`bIsLand`、`bIsCoast`、`bIsMountain`、`UBiomeTable`（W7 后启用）
-- **算法**：
-  1. 海洋短路：`!bIsLand` → `Ocean.Deep`/`Ocean.Shallow`（按 Elevation 深度二分）
-  2. 海岸短路：`bIsCoast` → `Coast.Beach` / `Coast.Rocky`（按板块汇聚边界判别）
-  3. 山脉短路：`bIsMountain` → `Mountain.Hill` / `Mountain.Peak` / `Mountain.Snow`（按 Elevation + Temperature 二分）
-  4. 其余 cell：进入 §2.2 Whittaker 5×5 表查询
-- **输出**：`TerrainTag`、`Resources`（按 Tag → 资源映射表）
-- **W4 验收（R8 锚点）**：替换 R3 Knuth 哈希后，球面呈现合理的"赤道沙漠/温带森林/极地冰原 + 12 五边形"分布
+> ⚡ **W4 重要拍板（2026-06-28）**：原“hard-coded 海洋/海岸/山脉短路 + Whittaker 5×5 表”全部下沉为 `UTerrainDefinition::ClimateRules[]` DataAsset 字段。WorldGen 仅作为评分器，**不知道“什么是海洋/山脉”**，严格遵循 [TechnicalDesign.md §0.2](TechnicalDesign.md) 数据驱动原则。详见 [W4_BiomeClassification.md §2](W4_BiomeClassification.md)。
+
+- **输入**：`ElevationField`、`MoistureField`、`TemperatureField`、`bIsLand`、`bIsCoast`、`bIsMountain`、`UTerrainSet`（DataAsset，持一组 `UTerrainDefinition*`）
+- **算法（一句话）**：
+  ```
+  for each cell c:
+      Sample = { Elev_c, Moist_c, Temp_c, bLand_c, bCoast_c, bMountain_c }
+      Best = argmax_{Def ∈ Set->TerrainDefs} Def->ScoreFor(Sample)
+      CellData[c].TerrainTag = Best->TerrainTag
+  ```
+  `Def->ScoreFor(Sample)` 递归遍历本 Def 的 `ClimateRules[]`（OR 语义），取最高得分。单条规则：`Placement 匹配` 且 `T/M/E 均落在区间内` → 返回 `Priority`；否则 0。包含“短路”语义的规则可设 `bIsShortCircuit=true`，命中后会折合到最高优先级（详见 W4 详稿）。
+- **输出**：`CellData[].TerrainTag` + LUT.R 直读 `Best->LayerIndex`（渲染端 GridRender 直接从 Def 读，WorldGen 不负责中转）
+- **资源**：`Resources` 可作为 `UTerrainDefinition::DefaultResources` 同步拷入（W4 仅拷贝，不阅读）
+- **W4 验收锚点（R8.5 联调时触发）**：在 R8 + R8.5 通过后，把 SDF 端 BaseTexIdx 从 R3 Knuth 哈希切换为 `Def->LayerIndex` 真实查表，球面呈现合理的“赤道沙漠/温带森林/极地冰原 + 12 五边形 + 大陆东岸森林 vs 西岸沙漠”分布；调试师可在编辑器里改 `T_Forest_Tropical.uasset` 的 `ClimateRules[0].Temperature` 区间从 [0.7,1.0] 改为 [0.6,1.0] 看到热带雨林立刻扩张
 
 ### 5.7 Step7 河流追踪
 
@@ -517,9 +544,9 @@ flowchart TD
 
 ---
 
-## 6. 19-Layer 生物群系映射（Whittaker × 已导入纹理）
+## 6. 19-Layer 生物群系映射（DataAsset 资产初始值建议表）
 
-> ⚠ 本节为 **W4 启动时的"建议映射"**（按拍板 Q6 选项 c），不视为最终契约；W4 实测后可微调。已导入资产见 [Content/Textures/](../Content/Textures)，已合成 `T_TerrainAlbedoArray`（92 MB）。
+> ⚡ **W4 拍板后**：本表不再是“cpp 中硬编码的 `if-else` 链”，而是“为 19 个 `UTerrainDefinition` DataAsset 初次创建时填入 `ClimateRules[]` 的建议值”；如需微调仅在编辑器中改资产、无需重编译 cpp。已导入资产见 [Content/Textures/](../Content/Textures)，已合成 `T_TerrainAlbedoArray`（92 MB）。完整的 `ScoreFor` 评分机制、`Placement` 枚举、`Priority` 处理优先级均见 [W4_BiomeClassification.md §2](W4_BiomeClassification.md)。
 
 | Layer Idx | 资产前缀 | TerrainTag | 触发条件 |
 | --- | --- | --- | --- |
@@ -544,9 +571,9 @@ flowchart TD
 | 18 | `T_Snow` | `Terrain.Glacier` | T < 0 + (M ≥ 0.6 \|\| 极地) |
 | 19（可选） | `T_Lava` | `Terrain.Volcano` | 板块汇聚边界 + 海洋一侧 + 高 Elevation |
 
-> **Layer 索引规约**（与 SDF 主稿 §4.1 LUT 对齐）：`CellAttrLUT.R = LayerIndexBase`（uint8），slice 范围 [0, 19]，预留 [20, 255] 给 R9 的 Decor / Owner / Fog 三套独立 LUT 通道。
+> **Layer 索引规约**（与 SDF 主稿 §4.1 / §16.1.2 LUT 对齐）：R8 起 `CellAttrLUT` 升级为 4 张多通道 LUT；R 通道改为 BaseTexIdx (0~16，对应 17 种地形配方)，G 通道为 OverlayIdx。WorldGen 端只需在 `Def->LayerIndex` 字段填这 17 个索引，材质参数（Tint/HSV/Roughness/Triplanar 等）由 `UTerrainDefinition::FTerrainMaterialParams` DataAsset 字段携带（详见 SDF 主稿 §16.1.3 配方表）。
 
-`UTerrainDefinition`（详见 [TechnicalDesign.md](TechnicalDesign.md) §3.2）按上表逐项创建 DataAsset，由设计师在编辑器内调 LayerIndex / 移动消耗 / 防御加成。W4 阶段允许在 cpp 中硬编码 `TMap<FGameplayTag, int32>` 占位，W7 再 DataAsset 化。
+`UTerrainDefinition`（详见 [W4_BiomeClassification.md §2.1](W4_BiomeClassification.md)）按上表逐项创建 DataAsset：为每个 Tag 指定 `LayerIndex`、填 `ClimateRules[]`（一般 1~3 条）、填玩法属性。**不要在 cpp 中硬编码 `TMap<FGameplayTag, int32>`**——W4 已合并原 W7 的 DataAsset 化工作，该中转表从开始就不存在。
 
 ---
 
@@ -653,7 +680,7 @@ W2/W3 在 cpp 内显式实例化两个：`PlateNoise`（low-freq, 板块大格�
 详见 §12。本节仅列**最关键的 3 条**：
 
 1. **板块种子聚集** → 球面 Lloyd 松弛 5 次解决（§7.1）
-2. **Whittaker 边界跳变** → W7 后用 `FWorldGenSettings::BiomeTable` 软查表 + 邻域平滑（W7 详稿）
+2. **覆盖盲区跳变** → W4 `Step_ClassifyBiomes` 使用 Sentinel fallback `Plain.Grass`；W4.5+ 可在 `UTerrainDefinition::ScoreFor` 升级为 smoothstep 软匹配 + 邻域平滑（详见 [W4_BiomeClassification.md §2.2](W4_BiomeClassification.md)）
 3. **12 五边形落海/落山** → Step8 强制陆地化 + 缓冲带改写（§5.8）
 
 ---
@@ -678,7 +705,7 @@ W2/W3 在 cpp 内显式实例化两个：`PlateNoise`（low-freq, 板块大格�
 - 加载：`FSphereTopology::Build(SubdivisionLevel)` → `FWorldGenerator(Topo, Settings).Generate()` → 完全还原 `FCellGeoData[]`
 - **运行时 mutate**（OwnerId/Building/Decor）单独序列化 `UBoardState`，与 WorldGen 输出**不混合**
 
-> **跨期不变量**：同一 `(Sub, Seed, Settings)` 三元组在 R8 / R9 / R11 / R13 任何阶段都生成完全相同的世界——这是回放、调试、玩家分享种子的基础。
+> **跨期不变量**：同一 `(Sub, Seed, Settings)` 三元组在 R8 / R8.5 / R9 / R10 / R11 任何阶段都生成完全相同的世界——这是回放、调试、玩家分享种子的基础。
 
 ---
 
@@ -686,24 +713,32 @@ W2/W3 在 cpp 内显式实例化两个：`PlateNoise`（low-freq, 板块大格�
 
 | 阶段 | 状态 | 目标 | 验证 |
 | --- | --- | --- | --- |
-| **W1** | 🛠 cpp 完成（待用户 Rebuild 与 PIE 验收） | 新建 `Source/WorldGen/` 模块；`FCellGeoData`、`FWorldGenSettings`、`FWorldGenerator` 空骨架；TerraCivilization 主模块 Build.cs 加依赖；`APlanetTopologyDebugMesh` 持有 `FWorldGenSettings` UPROPERTY；编译通过、跑空 `Generate()` 无崩溃 | Output Log 输出 `[WorldGen] Skeleton OK, 642 cells, no-op generate`；详稿见 [W1_ModuleSkeleton.md](W1_ModuleSkeleton.md) |
-| **W2** | ⏳ 待开始 | Step1（板块构造） + Step3（海陆分离）；为每 cell 写 `PlateId / bIsLand / bIsCoast`；接 R3 LUT —— `LayerIndex = bIsLand ? 4 : 0`（草地/海洋两色） | 球面看到 12 板块色块（debug 染色模式） + 海陆轮廓清晰（草地/海洋两色） |
-| **W3** | ⏳ 待开始 | Step2（高程场） + Step4（湿度场） + Step5（温度场）；写 `Elevation/Moisture/Temperature/bIsMountain`；LUT 仍用 W2 的两色（仅看标量场，不影响渲染） | Debug 三标量场热图分别显示合理分布；山脉沿板块汇聚边界、海岸湿润内陆干燥、极地寒冷赤道炎热 |
-| **W4** | ⏳ 待开始 | Step6（Whittaker 生物群系分类）；19-Layer 映射 cpp 硬编码；`RebuildCellAttrLUT_()` 改为按 `Def->LayerIndex` 写入；**正式接 R8** | 球面呈现：12 五边形可见、12 板块边界山脉链、海陆 + 19 layer 生物群系合理分布 |
+| **W1** | ✅ 完成（用户已验收） | 新建 `Source/WorldGen/` 模块；`FCellGeoData`、`FWorldGenSettings`、`FWorldGenerator` 空骨架；TerraCivilization 主模块 Build.cs 加依赖；`APlanetTopologyDebugMesh` 持有 `FWorldGenSettings` UPROPERTY；编译通过、跑空 `Generate()` 无崩溃 | Output Log 输出 `[WorldGen] Skeleton OK, 642 cells, no-op generate`；详稿见 [W1_ModuleSkeleton.md](W1_ModuleSkeleton.md) |
+| **W2** | ✅ 完成（用户已验收） | Step1（板块构造） + Step3（海陆分离）；为每 cell 写 `PlateId / bIsLand / bIsCoast`；接 R3 LUT —— `LayerIndex = bIsLand ? 4 : 0`（草地/海洋两色） | 球面看到 12 板块色块（debug 染色模式） + 海陆轮廓清晰（草地/海洋两色）；详稿见 [W2_PlatesAndLandSea.md](W2_PlatesAndLandSea.md) |
+| **W3** | ✅ 完成（用户已验收） | Step2（高程场） + Step4（湿度场，含 W3.5 上风 SSSP 修订） + Step5（温度场）；写 `Elevation/Moisture/Temperature/bIsMountain`；同时写 `FCellEdge.bIsPlateBoundary / BoundaryStrength`；新增 `M_TopologyDebug_W3` 测试材质（红蓝归一化热图）；LUT 仍用 W2 的两色（仅看标量场，不影响 R7 渲染） | Debug 四种热图（Elevation/Moisture/Temperature/Mountain）分别显示合理分布；山脉沿板块汇聚边界、东风模型下大陆东岸湿润西岸干燥、极地寒冷赤道炎热；详稿见 [W3_ScalarFields.md](W3_ScalarFields.md) |
+| **W4**（合并 W7）| 🛠 cpp 完成（待验收）| `TerrainTags` 模块落地 + `UTerrainDefinition::ClimateRules` 评分器分类 + 写 `Def->LayerIndex` 入 LUT（正式接 R8） | 球面呈现：12 五边形可见、12 板块边界山脉链、海陆 + 19 layer 生物群系合理分布；在编辑器里改某 `UTerrainDefinition.uasset` 的 `ClimateRules[0].Temperature` 区间 → 下次 PIE 看到该生物群系范围变化（DataAsset 驱动御底验收） |
 | **W5** | ⏳ 待开始 | Step7（河流追踪）；写 `bIsRiver/bIsLake/FlowTo`；GridRender 在 LUT.B 通道携带 `bIsRiver` 做软边特殊样式 | 球面看到从山脉发源、汇入海洋的河流网，无环路无悬空 |
 | **W6** | ⏳ 待开始 | Step8（势力基地分配）；12 五边形强制陆地化 + 缓冲带；写 `BaseFactionId`；GridRender 在 Owner LUT（R9）显示 12 势力出生圈 | 12 五边形必为陆地、出生圈友好（无沙漠/雪山）、12 不同势力色 |
-| **W7** | ⏳ 待开始 | DataAsset 化：`UTerrainDefinition`、`UBiomeTable`、`UPlateProfile`；编辑器内调参 | 设计师无需重编 cpp 即可调整 Whittaker 表与 Tag→LayerIndex 映射 |
+| ~~**W7**~~ | ✅ 合并入 W4 | （原计划：`UTerrainDefinition` / `UBiomeTable` DataAsset 化）——`UTerrainDefinition` 在 W4 已 DataAsset 化并携带 `ClimateRules[]`；`UPlateProfile` 推到 W6 随势力基地调优阶段处理（如需要） |
 | **W8** | ⏳ 待开始 | 编辑器调参面板（PropertyCustomization）+ 可视化 Debug 模式（板块染色 / 高程热图 / 河流叠加 / 风带箭头） | 在 Editor Viewport 一键切换 6 种 Debug 视图 |
 
-每阶段单独可验证，不会卡死。W1~W4 是 R8 的最小有效集；W5~W6 是丰富度；W7~W8 是工具链。
+每阶段单独可验证，不会卡死。W1~W4 是 R8.5 联调验收的最小有效集（R8 自身只需 R3 Knuth placeholder 即可）；W5~W6 是丰富度；W8 是工具链（原 W7 DataAsset 化已合并进 W4）。
 
 ### 11.1 当前进度记录
 
 - **W0（✅ 2026-06）**：本设计稿创建。WorldGen 从 [SphericalSDFTerrainDesign.md](SphericalSDFTerrainDesign.md) 中独立出来，明确解耦边界（仅 `FCellGeoData` 单向契约）；19-Layer Whittaker 映射建议表完成；W1~W8 子阶段计划锁定。
 - **W1（📝 2026-06）**：[W1_ModuleSkeleton.md](W1_ModuleSkeleton.md) 详稿完成——含 9 个新文件可粘贴全文 + `TerraCivilization` 主模块对接清单 + 11 项验收清单 + 14 条排错表。
-- **W1（🛠 2026-06）**：W1 cpp 落地完成——`Source/WorldGen/` 9 个新文件全部创建、`TerraCivilization.Build.cs` 追加 `WorldGen + GameplayTags` 依赖、`APlanetTopologyDebugMesh.h` 加 `FWorldGenSettings WorldGenSettings` UPROPERTY、`Rebuild()` 末尾接入 `FWorldGenerator` 空 Generate 调用。**待用户：**在 UE Editor / Visual Studio 中 Rebuild 全项目，PIE 运行后验证 Output Log 命中 `[WorldGen] Skeleton OK, 642 cells, no-op generate`、R7 视觉零回归。
-
-**下一阶段**：W1 验收通过后启动 W2（板块构造 + 海陆分离），待创建 [W2_PlatesAndLandSea.md](W2_PlatesAndLandSea.md) 详稿。
+- **W1（🛠 2026-06）**：W1 cpp 落地完成——`Source/WorldGen/` 9 个新文件全部创建、`TerraCivilization.Build.cs` 追加 `WorldGen + GameplayTags` 依赖、`APlanetTopologyDebugMesh.h` 加 `FWorldGenSettings WorldGenSettings` UPROPERTY、`Rebuild()` 末尾接入 `FWorldGenerator` 空 Generate 调用。
+- **W1（✅ 2026-06 用户验收）**：用户在 PIE 中确认 Output Log 命中 `[WorldGen] Skeleton OK, 642 cells, no-op generate`、R7 视觉零回归（像素级保持）、Editor `WorldGen` 折叠组可见可编辑。W1 阶段全部 11 项验收清单 ✅ 通过。
+- **W2（📝 2026-06 启动）**：[W2_PlatesAndLandSea.md](W2_PlatesAndLandSea.md) 详稿撰写中。目标——Step1 板块构造（球面 Lloyd + 多源 BFS Voronoi + 板块漂移向量）+ Step3 海陆分离（按 SeaLevel 二分 + 海岸 1-ring 标记）；GridRender 端 LUT 切换为 `LayerIndex = bIsLand ? 4 : 0` 两色。
+- **W2（🛠 2026-06 cpp 落地）**：W2 cpp 落地完成——`FWorldGenerator::Step_PartitionPlates / Step_DetermineLandSea` 实体化（球面 Lloyd 5 次 + 板块漂移 + Fisher-Yates 海陆分配 + 1-ring 海岸标记）；`APlanetTopologyDebugMesh::Generator` 提升为 `TUniquePtr` 成员；`RebuildCellAttrLUT_()` R 通道按 `EWorldGenDebugView`（None / PlateId / LandSea）切换写入；过程中踩字段名坑 `Cells[i].Neighbors → NeighborCellIds`，已沉淀到 [AgentWorkflow.md §1.4.0](AgentWorkflow.md)。
+- **W2（✅ 2026-06 用户验收）**：用户在 PIE 中确认 Output Log 命中 `[WorldGen] W2 OK, 642 cells, 12 plates, ~257 land / ~385 ocean (~40%), ~50~80 coast`、12 板块色斑近似均等无飞地、海陆轮廓清晰、R7 视觉零回归。W2 阶段全部 12 项验收清单 ✅ 通过。
+- **W3（📝 2026-06 启动）**：[W3_ScalarFields.md](W3_ScalarFields.md) 详稿撰写中。目标——Step2 高程场（板块基础值 + 边界 $\Delta v_n$ 抬升 + fbm 噪声 + `bIsMountain` 阈值标记 + 写 `FCellEdge.bIsPlateBoundary / BoundaryStrength`）+ Step4 湿度场（风带 + 海距 BFS + 雨影）+ Step5 温度场（纬度 + 高程 lapse rate）；新增 Debug 视图 `Elevation / Moisture / Temperature / Mountain` 四种热图；LUT 仍维持 W2 两色（W4 才正式接 19-Layer）。
+- **W3（🛠 2026-06 cpp 落地）**：W3 cpp 落地完成——`WorldGen.Build.cs` 加 `FastNoiseLite` 私有依赖；`WorldGenerator.cpp` 内嵌 `FWorldGenNoise` （OpenSimplex2 + FBm 4 octaves） + 实体化 `Step_ComputeElevation`（抬升 0.5× 经验缩放 + fbm 种子 `Seed^0x1A2B3C4D` 解耦） / `Step_SimulateMoisture`（多源 BFS 海距 + 东向雨影） / `Step_ComputeTemperature`（纬度 `1-2|z|` + lapse rate）；`FWorldGenerator` 持有 `Topology` 升级为非 const（以写 `FCellEdge.bIsPlateBoundary/BoundaryStrength`）；`EWorldGenDebugView` 扩展 4 种热图 + `RebuildCellAttrLUT_` 两个 switch 同步；过程中还发现了 FastNoiseLite `enum class` 必须写完整三段 `FastNoiseLite::NoiseType::NoiseType_OpenSimplex2` 的坑，已沉淀到 [W3_ScalarFields.md §6](W3_ScalarFields.md) 排错表。
+- **W3.5（🔧 2026-06-28 修订）**：PIE 实测发现湿度梯度过弱、海陆差不显著、未体现风向；将 `Step_SimulateMoisture` 从"BFS 海距 + 东向雨影衰减"改为"上风向 SSSP 可变边权"——边权 `w(u→v) = 1 + AlphaElevation × max(0, Elev_v - SeaLevel) - AlphaCoast × bIsCoast(u)`，雨影内嵌为高地额外加权，海岸优先扩散；新增 `AlphaElevation / AlphaCoast` 两参数，`RainShadowFactor` 字段保留但 W3 不读。同期发现并修复"自西向东方向反"踩坑：UE5 是左手系 + Z up，正确东向公式是 `FVector(U.Y, -U.X, 0)` 而非凭 2D 直觉的 `(-U.Y, U.X, 0)`；已沉淀到 [AgentWorkflow.md §3.7](AgentWorkflow.md)。同步新增 `M_TopologyDebug_W3` 测试材质（Custom HLSL 把 `[0,1]` LUT 标量做红蓝归一化热图，便于直观观察 Elevation/Moisture/Temperature 的相对大小）。
+- **W3（✅ 2026-06-28 用户验收）**：用户在 PIE 中确认上风 SSSP 修订后湿度场出现合理梯度（东风模型下大陆东岸湿润、西岸干燥，山脉背风面进一步干燥）、高程/温度热图分布合理、12 板块边界山脉链清晰、海陆轮廓蜔蜒、R7 视觉零回归。W3 阶段全部验收清单 ✅ 通过；详稿见 [W3_ScalarFields.md](W3_ScalarFields.md)。
+- **W4（🏗 2026-06-28 架构拍板）**：用户提出关键架构质疑——“E/M/T → TerrainTag”的分类规则如果硬编码在 WorldGen，TerrainTags 将沉为字符串别名，违反 [TechnicalDesign §0.2](TechnicalDesign.md) 数据驱动原则。拍板结果：合并 W4 + W7，一步落地 `TerrainTags` 模块 + DataAsset 驱动；WorldGen 仅作为评分器、不知道任何具体生物群系语义；连“海洋/海岸/山脉”几何短路都归于 `ClimateRules.Placement` 设计师可调。Q1=A、Q2=`FWorldGenSettings::TerrainSet` 显式指向、Q3=硬区间 ScoreFor 起步、Q5=渲染端直读 `Def->LayerIndex`（不在 `FCellGeoData` 中转）。
+- **W4（🛠 2026-06-28 cpp 落地）**：W4 cpp 落地完成——新建 `Source/TerrainTags/` 模块（8 个文件：`TerrainTags.Build.cs`/`.h`/`.cpp` + `TerrainPlacementMask.h` + `TerrainClimateRule.h` + `TerrainDefinition.h/.cpp` + `TerrainSet.h/.cpp`）；创建 [`Config/Tags/Terrain.ini`](../Config/Tags/Terrain.ini) 注册 17 个 `Terrain.*` Tag；`.uproject` 添加 `Grid` / `WorldGen` / `TerrainTags` 三个 Modules 项；`WorldGen.Build.cs` 与 `TerraCivilization.Build.cs` 追加 `TerrainTags` 依赖；`FWorldGenSettings` 字段 `BiomeTable → TerrainSet : TSoftObjectPtr<UTerrainSet>` + `SentinelTerrainTag : FGameplayTag`；`FWorldGenerator::Step_ClassifyBiomes` 实体化为双层 for + `Def->ScoreFor(Sample)` argmax + `LastBiomeSentinelCount` 计数 + `[WorldGen] W4 OK ... biome-sentinel=N` 末尾日志；`EWorldGenDebugView` 末尾追加 `Biome` 项，`DebugView` 默认值从 `None` 改为 `Biome`；`RebuildCellAttrLUT_()` 顶部预构建 `TagToDefMap`，主写入与诊断 switch 统一调用 `ComputeLayerForCell` lambda（Biome / None 默认分支走 `Def->LayerIndex`）。cpp 端零 Tag 字符串句柄消费（Sentinel 走 `Settings.SentinelTerrainTag` 字段）。待用户在编辑器中创建 17 个 `DA_Terrain_*.uasset` + `DA_TerrainSet_Default.uasset` + 在 Actor 面板挂 `TerrainSet` 与 `SentinelTerrainTag = Terrain.Plain.Grass`，然后编译 + PIE 验收。
 
 ---
 
@@ -714,7 +749,7 @@ W2/W3 在 cpp 内显式实例化两个：`PlateNoise`（low-freq, 板块大格�
 | **板块种子聚集** | `RandomSeed` 落入坏种子，10 个种子集中在一个半球 | 球面 Lloyd 松弛 5 次（§7.1）；UI 暴露 `LloydIterations` 参数 |
 | **板块边界飞地** | BFS 扩张时一个 cell 同时被两板块争抢 | 多源 BFS 严格按入队序，第一个到达者胜；不允许覆盖 |
 | **12 五边形落海/落山** | 板块基础 Elevation 太低导致五边形 cell 落入海洋 | Step8 强制陆地化（抬升至 SeaLevel + 0.05）+ 缓冲带改写（§5.8） |
-| **Whittaker 边界跳变** | T/M 在 5×5 离散网格的边界上 cell 看起来突变 | W7 启用软查表（双线性插值 BiomeTable）+ 邻域多数表决平滑 |
+| **Whittaker 边界跳变** | T/M 在区间边界上 cell 看起来突变（砬克式）| W4.5+ 为 `UTerrainDefinition::ScoreFor` 升级为 smoothstep 软匹配 + 邻域多数表决平滑（详 [W4_BiomeClassification.md §6](W4_BiomeClassification.md)） |
 | **山脉过多/过少** | `MountainBoundaryStrength` 调过头或过小 | 暴露 `MountainThreshold` + `MountainBoundaryStrength` 双参数；W8 Debug 视图实时反馈 |
 | **湿度场全 0 或全 1** | 风带计算公式错误 / `MoistureScale` 过小 | W3 详稿单独给出测试用例：纯陆球（无海）应得全干；纯海球应得全湿 |
 | **河流环路** | Elevation 在数值精度下出现等值环 | 拓扑排序前用 `Elevation += tiny_jitter(CellId)` 打破 ties |
@@ -876,7 +911,7 @@ void FWorldGenerator::Step_PartitionPlates()
 | --- | --- | --- | --- |
 | **R** | LayerIndexBase（→ Texture2DArray slice） | W4 | [0, 19] 推荐；预留 [20, 255] 给扩展 |
 | **G** | LayerIndexDecor（雪覆盖、焦土、政治版图） | W6/R9 | 0 = 无 |
-| **B** | Variant（同地形随机变体） | W4/W7 | 由 `FCellGeoData::CellId` 哈希派生 |
+| **B** | Variant（同地形随机变体） | W4/W6 | 由 `FCellGeoData::CellId` 哈希派生 |
 | **A** | Mask（bit0=bIsCoast, bit1=bIsRiver, bit2=bIsBaseCity, ...） | W2/W5/W6 | 位掩码 |
 
 > 任何字段语义变更必须**同步**修改 SDF 主稿 §4.1 与本稿 §6/§14.1 两处。
@@ -919,23 +954,26 @@ sequenceDiagram
 **关键不变量**：
 
 - `WG.Generate()` 必须在 `RebuildCellAttrLUT_()` 之前完成
-- 任何 `CellId → LayerIndex` 的查询必须经过 `UTerrainDefinition`（不在 cpp 硬编码 Tag→Layer 映射，W7 后强制）
+- 任何 `CellId → LayerIndex` 的查询必须经过 `UTerrainDefinition`（W4 起严禁在 cpp 中硬编码 Tag→Layer 映射）
 - WorldGen 内部不得调用 GridRender / 材质 / LUT 任何 API；**WorldGen 模块的 Build.cs 不依赖 GridRender**
 
 ### 14.4 跨期路径的同构性
 
-与 SDF 主稿 §14.6 一致：WorldGen 输出 `FCellGeoData` 永远以 `CellId` 为主键；SDF 端无论是 R1~R10 的 IsoSphere 还是 R11~R13 的 PTG 路线，**都通过同一份 LUT 消费 WorldGen 的输出**。
+与 SDF 主稿 §16 一致：WorldGen 输出 `FCellGeoData` 永远以 `CellId` 为主键；SDF 端无论是 R1~R8 的 IsoSphere 还是 R8.5+ 的自研球面网格路线，**都通过同一份 LUT 消费 WorldGen 的输出**。
 
 具体而言：
 
 | 阶段 | SDF 渲染路径 | WorldGen 端是否需要适配 |
 | --- | --- | --- |
-| R8 接 W4 | IsoSphere primal + 19-Layer LUT | ❌ 不需要——这就是 W4 的原始目标 |
+| R8（Tint 参数化）| IsoSphere primal + 4 通道 LUT + 17 种 tint 配方（仍用 Knuth placeholder） | ❌ 不需要——R8 不消费 WorldGen，验收时 Knuth 哈希派生 BaseTexIdx |
+| R8.5（自研球面网格）| 自研 sub+2 渲染网格 + cpp 端径向位移（消费 `Elevation`）| ⚠ 仅消费 `Elevation` 字段——W3 已就绪，无需新增 |
+| W4 联调验收 | 在 R8.5 上把 BaseTexIdx 从 Knuth placeholder 切换为 `Def->LayerIndex` | ❌ 不需要——这就是 W4 的原始目标 |
 | R9 多 LUT | 加 Decor/Owner/Fog 三 LUT | ❌ 不需要——多 LUT 是 SDF 端的事；WorldGen 只需在 W6 写 BaseFactionId |
-| R10 LOD | 远距离 R4 / 近距离 R7 | ❌ 不需要——LOD 是 SDF 端的事 |
-| R11 PTG | PTG 高细分球皮 + GPU FindNearestCell | ❌ 不需要——LUT 通道含义不变 |
-| R12 WPO | 沿径向按 Elevation 位移 | ❌ 不需要——`Elevation` 字段在 W3 已就绪 |
-| R13 高亮 | 高亮 LUT | ❌ 不需要——高亮是运行时 LUT，与 WorldGen 无关 |
+| R10 LOD | 自研球面网格 LOD（远 sub+0、近 sub+2、超近 sub+3） | ❌ 不需要——LOD 是 SDF 端的事 |
+| R11 高亮 | 接入 §15 高亮描边 + SelectLUT | ❌ 不需要——LUT 通道含义不变 |
+| ~~原 R11 PTG 路线~~ | ❌ 已废弃 | — |
+| ~~原 R12 WPO 顶点位移~~ | ❌ 已废弃（被 R8.5 cpp 端径向位移取代）| — |
+| ~~原 R13 高亮~~ | ❌ 已废弃（编号改为 R11） | — |
 
 **结论**：从 W4 锁定 `FCellGeoData` 字段集那一刻起，**WorldGen 端永不为 SDF 端的迭代而改动**——这是双方解耦的硬承诺。
 
@@ -945,8 +983,8 @@ sequenceDiagram
 
 WorldGen 是 TerraCivilization 的"自然地理引擎"：**只对 `FSphereTopology` 与 `FWorldGenSettings` 负责，只输出 `FCellGeoData[]`**。
 
-它与 [SphericalSDFTerrainDesign.md](SphericalSDFTerrainDesign.md) 通过单向契约解耦，与 [TechnicalDesign.md](TechnicalDesign.md) §6 Gameplay 通过 `TerrainTag/OwnerId/bIsPentagon` 三字段解耦，与 SaveLoad 通过 `RandomSeed + SubdivisionLevel` 二元组解耦——这种"窄接口、宽内涵"的设计，正是项目能在 R8~R13 多个阶段保持低耦合、高可演化性的关键。
+它与 [SphericalSDFTerrainDesign.md](SphericalSDFTerrainDesign.md) 通过单向契约解耦，与 [TechnicalDesign.md](TechnicalDesign.md) §6 Gameplay 通过 `TerrainTag/OwnerId/bIsPentagon` 三字段解耦，与 SaveLoad 通过 `RandomSeed + SubdivisionLevel` 二元组解耦——这种"窄接口、宽内涵"的设计，正是项目能在 R8~R11 多个阶段保持低耦合、高可演化性的关键。
 
 W1 启动时的第一份详稿是 [W1_ModuleSkeleton.md](W1_ModuleSkeleton.md)；后续 W2~W8 每个子阶段独立成稿，命名规则 `W<N>_<Topic>.md`，结构对齐 [AgentWorkflow.md](AgentWorkflow.md) §1.3 的 8 章 + 附录。
 
-> **致后续维护者**：如果 SDF 端要新增字段（如 R11 的 GPU FindNearestCell 需要某个新 LUT 通道），先回到 §14.1 LUT 字段对齐表里加一行；不要在 cpp 里"顺手"加。窄接口的承诺一旦破坏，下次重构会跨 5 个模块。
+> **致后续维护者**：如果 SDF 端要新增字段（如 R8.5 自研网格需要某个新 LUT 通道、或 R9 多 LUT 扩展），先回到 §14.1 LUT 字段对齐表里加一行；不要在 cpp 里"顺手"加。窄接口的承诺一旦破坏，下次重构会跨 5 个模块。

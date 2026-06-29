@@ -3,6 +3,8 @@
 > 本文档是 [SphericalSDFTerrainDesign.md §6.4.1](SphericalSDFTerrainDesign.md#641-r6-落地方案在-r5-球面距离-δ-上叠加噪声扰动与-r4r5-几何兼容) 的独立落地文档，与 [R2_TopologyDebugMaterial.md](R2_TopologyDebugMaterial.md) / [R3_CellAttrLUTMaterial.md](R3_CellAttrLUTMaterial.md) / [R4_VoronoiBoundary.md](R4_VoronoiBoundary.md) / [R5_SharpenSoftEdge.md](R5_SharpenSoftEdge.md) 风格一致。
 >
 > 阅读本文档前必须先理解 [R5_SharpenSoftEdge.md](R5_SharpenSoftEdge.md) §1 的“球面有符号弧度距离 δ”——R6 不修改 R5 的 δ 公式，只是在调用 R5 之前把 fragment 方向 dir 做一次球面切向偏移。
+>
+> ⚠ **路线调整说明（2026-06-29）**：本文档中"R11 PTG 路线下零修改"等表述**已过期**——原 R11 PTG 路线已废弃，新生产路线是 [SDF 主稿 §16](SphericalSDFTerrainDesign.md#16-自研球面网格生产路线) 的"R8.5 自研球面网格"。R6 dir 切向偏移公式 + 噪声扰动**仍然零改动**搬运到 R8.5（dir = normalize(WorldPos - PlanetCenter) 起点不变）。
 
 ---
 

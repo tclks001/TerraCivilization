@@ -378,7 +378,7 @@ CPU / GPU 的"球面方向 → 所属 Cell"查询：
 
 平均查询复杂度 `O(log4(NumTris)) ≈ O(N)`，远快于线性遍历 `O(20·4^N)`。
 
-> **这是 SDF 主稿 §14.4 GPU FindNearestCell 的 CPU 端原型**——R11 PTG 路线把它烘焙成 GPU 纹理；详见 [SphericalSDFTerrainDesign.md §14.4](SphericalSDFTerrainDesign.md#144-gpu-端-findnearestcell拓扑下载与查询)。
+> **该调用的 GPU 烘焟路径已废弃**（2026-06-29）：原 SDF 主稿 §14.4 描述的"GPU FindNearestCell"是原 R11 PTG 路线产物，现路线是 R8.5 自研球面网格（详见 [SphericalSDFTerrainDesign.md §16](SphericalSDFTerrainDesign.md#16-自研球面网格生产路线)）：FindNearestCell 仅在 cpp 端预计算阶段调用（为渲染层 sub+2 网格的每个细顶点找最近 3 个逻辑 Cell），不再需要烘焟为 GPU 纹理。
 
 ### 3.7 `FSurfaceFrame`（局部正交基）
 
@@ -838,7 +838,7 @@ sub=5: 10242 cell 20480 corner/tri 30720 edge
 
 ## 11. 顶点法线与 UE5 光照约定（重要结论 + 经验沉淀）
 
-> 本章是 R7 阶段（Triplanar 真实地表纹理）调试 Lit 模式时挖到的关键事实，**不属于纯几何拓扑但与渲染端的"几何法线方向"强相关**——若不沉淀于本稿（拓扑权威），下游任何模块（PMC 调试 mesh / R11 PTG 生产 mesh / R8+ WorldGen 法线烘焙）都可能在"顶点法线方向"上踩同一个坑。
+> 本章是 R7 阶段（Triplanar 真实地表纹理）调试 Lit 模式时挖到的关键事实，**不属于纯几何拓扑但与渲染端的"几何法线方向"强相关**——若不沉淀于本稿（拓扑权威），下游任何模块（PMC 调试 mesh / R8.5 自研球面网格生产 mesh / R8+ WorldGen 法线烘焟）都可能在"顶点法线方向"上踩同一个坑。
 
 ### 11.1 UE5 渲染管线的两条硬约定
 
@@ -897,7 +897,8 @@ R7 阶段把 R6 哈希色换成 Triplanar 真实地表纹理，材质从 Emissiv
 | --- | --- |
 | **PMC（IsoSphere 调试 mesh，R1~R10）** | 顶点法线由 `KismetTangents` 自动生成；不要手填 `+UnitCenter`（朝外）；如确实必须手填，必须 `-UnitCenter`（朝内）并加注释解释 |
 | **PTG（R11+ 生产 mesh）** | spherified-cube 法线必须按 face_normal_LH 朝向（对球外渲染 = 朝球心）；R11 切换前必须显式验证：在 Buffer Visualization → World Normal viewmode 下，球的右半（朝光源一侧）应在 lit 后呈现"亮面"颜色（验证 N·L > 0） |
-| **R8+ WorldGen 法线烘焙** | 若 `FCellGeoData` 引入"per-cell 法线"字段（如山地法线扰动），必须明确该法线是"几何外法线方向"还是"UE face normal 方向"；若是前者，下游材质消费时必须 `* -1` 或 cpp 端写入时取负 |\n| **R12 WPO 顶点位移** | 任何沿径向的位移（`WPO = SomeOffset * UnitCenter`）**不改变** UE 几何 face normal 方向（仍为 cross_LH）；切向位移会破坏 face_normal 与 vertex_normal 的一致性，必须重新烘焙法线 |
+| **R8+ WorldGen 法线烘焟** | 若 `FCellGeoData` 引入"per-cell 法线"字段（如山地法线扰动），必须明确该法线是"几何外法线方向"还是"UE face normal 方向"；若是前者，下游材质消费时必须 `* -1` 或 cpp 端写入时取负 |
+| **R8.5 cpp 顶点位移** | 任何沿径向的位移（`Pos = Dir·(R + Σ wᵢ · Elevᵢ · HeightScale)`）**不改变** UE 几何 face normal 方向（仍为 cross_LH）；切向位移会破坏 face_normal 与 vertex_normal 的一致性，必须重新烘焟法线 |
 
 ### 11.6 一句话速记
 
@@ -911,4 +912,4 @@ R7 阶段把 R6 哈希色换成 Triplanar 真实地表纹理，材质从 Emissiv
 
 本稿一旦因 Grid 模块重构（如 `FSphereTopology::Build` 增加新字段、对偶定义变更）而需要更新，**必须同步更新所有引用本稿的下游主稿**——这是与 [AgentWorkflow.md §4.1](AgentWorkflow.md#41-跨阶段同步项检查表) 跨阶段同步项检查表平行的"基础设施稿"维护承诺。
 
-> **致后续维护者**：拓扑是几何刚性结构，不应轻易扩展字段。如确需新增（例如未来 R12 WPO 顶点位移可能需要把 Elevation 烘焙到 FCell 中），先在本稿 §3 / §8 中加一行字段说明 + 写入阶段、再改 cpp。**先文档、后代码**。
+> **致后续维护者**：拓扑是几何刚性结构，不应轻易扩展字段。如确需新增（例如未来 R8.5 自研球面网格需要把顶点 Elevation 烘焟进 某个几何缓存结构），先在本稿 §3 / §8 中加一行字段说明 + 写入阶段、再改 cpp。**先文档、后代码**。

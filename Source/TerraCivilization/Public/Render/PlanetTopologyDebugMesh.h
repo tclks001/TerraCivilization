@@ -14,6 +14,28 @@ class UMaterialInstanceDynamic;
 class UTexture2D;
 class UTexture2DArray;
 class FSphereTopology;
+class FWorldGenerator;
+
+/**
+ * EWorldGenDebugView
+ *
+ * W2 引入的“世界生成 Debug 视图切换”枚举。
+ * 默认 None 与 LandSea 等价（LayerIndex = bIsLand ? 4 : 0）；PlateId 模式下按板块染色。
+ * 详见 Docs/W2_PlatesAndLandSea.md §4.4。
+ * W3/W4/W5 各自追加选项（Elevation / Moisture / Temperature 热图等）。
+ */
+UENUM(BlueprintType)
+enum class EWorldGenDebugView : uint8
+{
+    None         UMETA(DisplayName = "None (默认 LayerIndex / 与 Biome 等价)"),
+    PlateId      UMETA(DisplayName = "PlateId 染色"),
+    LandSea      UMETA(DisplayName = "海陆两色"),
+    Elevation    UMETA(DisplayName = "Elevation 热图 (W3)"),     // W3 新增
+    Moisture     UMETA(DisplayName = "Moisture 热图 (W3)"),      // W3 新增
+    Temperature  UMETA(DisplayName = "Temperature 热图 (W3)"),   // W3 新增
+    Mountain     UMETA(DisplayName = "Mountain 高亮 (W3)"),      // W3 新增
+    Biome        UMETA(DisplayName = "Biome 真实分类 (W4，默认值)"),  // W4 新增
+};
 
 /**
  * APlanetTopologyDebugMesh
@@ -85,6 +107,14 @@ public:
      */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PlanetTopology|WorldGen")
     FWorldGenSettings WorldGenSettings;
+
+    /**
+     * W2 引入：Debug 视图切换。None 默认为「按 bIsLand 两色」，PlateId 模式按板块哈希染色。
+     * 切换后需重跑 Rebuild()（仅重写 LUT，几何不变；< 1 ms 成本）。
+     * 详见 Docs/W2_PlatesAndLandSea.md §4.4。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|WorldGen")
+    EWorldGenDebugView DebugView = EWorldGenDebugView::Biome;
 
     /** 渲染用的名义球半径（cm）。仅做几何缩放，不参与拓扑。 */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PlanetTopology", meta = (ClampMin = "1.0"))
@@ -252,6 +282,13 @@ private:
 
     /** 拓扑数据。OnConstruction 时按 SubdivisionLevel 构建。 */
     TUniquePtr<FSphereTopology> Topology;
+
+    /**
+     * W2 引入：WorldGen 运行期实例。Rebuild() 中按顺序：Reset() → 重建 Topology → MakeUnique<FWorldGenerator>(...) → Generate()。
+     * 生命周期必须于 Topology 之后、于 LUT 重建之前（LUT 消费 Generator->GetCellData()）。
+     * 详见 Docs/W2_PlatesAndLandSea.md §4 与 §6 排错表 #11。
+     */
+    TUniquePtr<FWorldGenerator> Generator;
 
     /**
      * R3：每 Cell 一个像素的 1×N 动态纹理（PF_B8G8R8A8）。
