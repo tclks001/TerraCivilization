@@ -18,12 +18,103 @@
 #include "TextureResource.h"
 #include "WorldGenerator.h"
 
+// PIE 退出后材质恢复钩子（详见 AgentWorkflow.md §3.11）。
+//   FWorldDelegates::OnPostWorldCleanup 在 Engine 模块，无需 UnrealEd。
+#include "Engine/World.h"
+
 // W4 引入：从 UTerrainSet 查 UTerrainDefinition->LayerIndex，写入 LUT.R。
 #include "TerrainSet.h"
 #include "TerrainDefinition.h"
 #include "GameplayTagContainer.h"
 
+// R8 引入：ProceduralMesh 几何重建依赖。水面层是本 Actor 下一个子组件（bEnableWaterShell
+//   开关 + WaterMaterial，详见 R8_ParametricTint.md §4.5 / AgentWorkflow.md §3.10）。
+//   原「Spawn 独立 APlanetWaterShell Actor 」路径已废弃（PIE 深拷贝会造成材质丢失）。
+
 DEFINE_LOG_CATEGORY_STATIC(LogPlanetTopologyDebugMesh, Log, All);
+
+// =====================================================================
+// R8：17 种地形配方表（详见 Docs/R8_ParametricTint.md §1.4 / §3.2.1）
+//
+// 字段顺序：BaseTexIdx, Tint(R,G,B), Sat, Bri, RoughMin, RoughMax,
+//           OverlayBlend, NormalStr, TriScale
+//
+// W4 联调时整体迁移到 UTerrainDefinition::FTerrainMaterialParams DataAsset。
+// =====================================================================
+namespace
+{
+    struct FR8Recipe
+    {
+        uint8  BaseTexIdx;       // 0=Soil, 1=Rock, 2=Forest（不应作为 base）
+        float  TintR, TintG, TintB;
+        float  SatMul;
+        float  BriMul;
+        float  RoughMin;
+        float  RoughMax;
+        float  OverlayBlend;     // 0=纯 base，>0 叠加 Forest
+        float  NormalStr;
+        float  TriScale;
+    };
+
+    static const FR8Recipe GR8Recipes[17] = {
+        // 0  Plain.Grass
+        { 0, 0.40f, 0.70f, 0.30f, 1.0f, 1.0f,  0.5f, 0.8f,  0.15f, 1.0f, 1.0f },
+        // 1  Plain.Savanna
+        { 0, 0.70f, 0.60f, 0.30f, 0.9f, 1.1f,  0.6f, 0.9f,  0.0f,  1.0f, 1.0f },
+        // 2  Forest.Temperate
+        { 0, 0.30f, 0.55f, 0.25f, 1.1f, 0.9f,  0.5f, 0.8f,  0.65f, 1.2f, 1.0f },
+        // 3  Forest.Tropical
+        { 0, 0.20f, 0.50f, 0.20f, 1.3f, 0.85f, 0.4f, 0.7f,  0.85f, 1.5f, 1.0f },
+        // 4  Forest.Taiga
+        { 0, 0.25f, 0.40f, 0.30f, 0.7f, 0.85f, 0.5f, 0.8f,  0.55f, 1.2f, 1.0f },
+        // 5  Wetland
+        { 0, 0.30f, 0.50f, 0.35f, 1.0f, 0.85f, 0.2f, 0.5f,  0.0f,  0.8f, 1.0f },
+        // 6  Desert.Sand
+        { 0, 0.95f, 0.85f, 0.60f, 0.9f, 1.2f,  0.7f, 0.95f, 0.0f,  0.5f, 0.5f },
+        // 7  Desert.Rocky
+        { 1, 0.70f, 0.60f, 0.45f, 0.7f, 1.0f,  0.7f, 0.95f, 0.0f,  1.0f, 1.0f },
+        // 8  Coast.Beach
+        { 0, 0.95f, 0.90f, 0.70f, 0.7f, 1.15f, 0.7f, 0.95f, 0.0f,  0.5f, 0.5f },
+        // 9  Coast.Rocky
+        { 1, 0.55f, 0.55f, 0.50f, 0.5f, 0.9f,  0.6f, 0.9f,  0.0f,  1.2f, 1.5f },
+        // 10 Mountain.Hill
+        { 1, 0.55f, 0.50f, 0.42f, 0.7f, 0.9f,  0.6f, 0.9f,  0.30f, 1.2f, 1.5f },
+        // 11 Mountain.Peak
+        { 1, 0.50f, 0.48f, 0.45f, 0.4f, 0.85f, 0.7f, 0.95f, 0.0f,  1.5f, 2.0f },
+        // 12 Mountain.Snow
+        { 1, 0.92f, 0.94f, 0.98f, 0.2f, 1.4f,  0.1f, 0.4f,  0.0f,  1.0f, 1.5f },
+        // 13 Tundra
+        { 0, 0.70f, 0.70f, 0.65f, 0.3f, 1.05f, 0.7f, 0.95f, 0.0f,  0.8f, 1.0f },
+        // 14 Glacier
+        { 1, 0.85f, 0.92f, 0.98f, 0.4f, 1.45f, 0.1f, 0.3f,  0.0f,  0.5f, 2.0f },
+        // 15 Ocean.Shallow
+        { 0, 0.20f, 0.50f, 0.70f, 1.5f, 0.8f,  0.05f, 0.2f, 0.0f,  0.3f, 1.5f },
+        // 16 Ocean.Deep
+        { 0, 0.05f, 0.15f, 0.40f, 1.5f, 0.5f,  0.05f, 0.2f, 0.0f,  0.2f, 2.0f },
+    };
+    static_assert(UE_ARRAY_COUNT(GR8Recipes) == 17, "R8 must have exactly 17 recipes");
+
+    // R8 placeholder：CellId → 配方索引（0..16）
+    FORCEINLINE int32 R8_PlaceholderRecipeIndex(int32 CellId)
+    {
+        constexpr uint32 KnuthHashConst = 2654435761u;
+        return static_cast<int32>((static_cast<uint32>(CellId) * KnuthHashConst) % 17u);
+    }
+
+    // 中性默认配方（W4 联调期 bUseR8PlaceholderRecipes=false 时填入 Cell*LUT，
+    //   让 R8 4 通道 LUT 不参与微调，HLSL 端等价于纯 R7 视觉）。
+    static const FR8Recipe GR8NeutralRecipe = {
+        /*BaseTexIdx*/  0,
+        /*Tint*/       1.0f, 1.0f, 1.0f,
+        /*Sat*/        1.0f,
+        /*Bri*/        1.0f,
+        /*RoughMin*/   0.5f,
+        /*RoughMax*/   0.8f,
+        /*OvlBlend*/   0.0f,
+        /*NormalStr*/  1.0f,
+        /*TriScale*/   1.0f,
+    };
+}
 
 APlanetTopologyDebugMesh::APlanetTopologyDebugMesh()
 {
@@ -42,9 +133,50 @@ APlanetTopologyDebugMesh::APlanetTopologyDebugMesh()
     MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     MeshComp->SetCanEverAffectNavigation(false);
     MeshComp->bUseComplexAsSimpleCollision = false;
+
+    // R8 水面层子组件（挂在 RootComponent 下）。与主 mesh 同款配置：Movable / NoCollision /
+    // 不影响导航 / AsyncCooking。默认 Visibility=false，由 Rebuild() 末尾根据 bEnableWaterShell 切换。
+    //
+    // 为什么不是 Spawn 独立 Actor：PIE 深拷贝 Editor World 时，`OnConstruction` 中 SpawnActor
+    // 出来的临时子 Actor 的材质引用会丢失（变成默认棋盘格）。Component 是 Owner Actor 的
+    // SubObject，PIE 拷贝跟随 Owner 一起走——无生命周期错位。
+    // 详见 [AgentWorkflow.md §3.10](../../../Docs/AgentWorkflow.md)。
+    WaterMeshComp = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("WaterMeshComp"));
+    WaterMeshComp->SetupAttachment(MeshComp);
+    WaterMeshComp->SetMobility(EComponentMobility::Movable);
+    WaterMeshComp->bUseAsyncCooking = true;
+    WaterMeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    WaterMeshComp->SetCanEverAffectNavigation(false);
+    WaterMeshComp->bUseComplexAsSimpleCollision = false;
+    WaterMeshComp->SetVisibility(false);
+    // 水面是半透明球壳：相机会从内部穿过，cull mode 保留默认 back-face culling。
+    // Two-Sided 在材质 M_WaterShell 自身设置（详见 R8 §4.5.3），不在 PMC 上开 bUseTwoSided。
+
+#if WITH_EDITOR
+    // ===== PIE 退出后材质恢复钩子（AgentWorkflow §3.11）=====
+    //
+    // 订阅 FWorldDelegates::OnPostWorldCleanup。该委托在任何 UWorld 被 Cleanup 后触发，
+    // PIE 退出也走这条路径。重复订阅 / dangling 问题由 BeginDestroy 中 UnRegister 防御。
+    //
+    // 仅 Editor 构建路径下有效 —— Standalone 不需要这个钩子（只有一个 Game World，
+    // 不会发生跨 World duplicate）。
+    PostWorldCleanupHandle = FWorldDelegates::OnPostWorldCleanup.AddUObject(
+        this, &APlanetTopologyDebugMesh::OnPostWorldCleanup_);
+#endif
 }
 
-APlanetTopologyDebugMesh::~APlanetTopologyDebugMesh() = default;
+APlanetTopologyDebugMesh::~APlanetTopologyDebugMesh()
+{
+    // PIE 钩子在析构中取消订阅。AddUObject 路径会自动在 UObject 销毁时表达动作，
+    // 但显式 Remove 避免中间状态多次触发与 dangling 风险 —— 详见 AgentWorkflow §3.11。
+#if WITH_EDITOR
+    if (PostWorldCleanupHandle.IsValid())
+    {
+        FWorldDelegates::OnPostWorldCleanup.Remove(PostWorldCleanupHandle);
+        PostWorldCleanupHandle.Reset();
+    }
+#endif
+}
 APlanetTopologyDebugMesh::APlanetTopologyDebugMesh(FVTableHelper& Helper) : Super(Helper) {}
 
 void APlanetTopologyDebugMesh::OnConstruction(const FTransform& Transform)
@@ -309,18 +441,26 @@ void APlanetTopologyDebugMesh::Rebuild()
         const FVector PB = Topology->Cells[CB].UnitCenter * Radius;
         const FVector PC = Topology->Cells[CC].UnitCenter * Radius;
 
-        // 法线：完全交给 KismetProceduralMeshLibrary::CalculateTangentsForMesh 自动计算
-        //（见下方 CreateMeshSection 前的取代块）。这里只预占 NA/NB/NC 顶点法线变量，
-        // 填入临时 placeholder（各顶点位置单位化），后续会被自动法线整体覆盖。
+        // 顶点法线：直接用 +UnitCenter（球面外法，朝外）。
         //
-        // 这里也可以改成手填 -UnitCenter（指向球心）——事实上那才是 UE5 左手系 +
-        // CCW frontface 约定下「与几何 face normal 同向」的法线，与 KismetTangents 自动推出的结果完全一致。
-        // 但**不推荐手填**——任何时候除非你真的明白自己在做什么，否则法线必须自动生成或由三角形
-        // 叉积计算得到（详见 [SphereTopologyReference.md §11](../../../Docs/SphereTopologyReference.md)
-        // 与 [AgentWorkflow.md §3.6](../../../Docs/AgentWorkflow.md)）。
-        const FVector NA = FVector::ZeroVector;
-        const FVector NB = FVector::ZeroVector;
-        const FVector NC = FVector::ZeroVector;
+        // ★ 经 R8 阶段用户实测确认（修订了早期 [SphereTopologyReference.md §11](../../../Docs/SphereTopologyReference.md)
+        //   "应朝球心"的错误结论）：UE5 在球外相机渲染下，漫反射公式
+        //   saturate(dot(N, LightDir)) 要求顶点法线 N **朝外**才能被太阳光照亮。
+        //   填 -UnitCenter（朝球心）会让所有像素 dot(N, L) ≤ 0 → 整球漆黑。
+        //   详见 [AgentWorkflow.md §3.15](../../../Docs/AgentWorkflow.md)（§11 推导错误的复盘）。
+        //
+        // **不走 KismetProceduralMeshLibrary::CalculateTangentsForMesh 自动法线**——
+        // 该工具在"每 Corner 展开 3 独立顶点（不共享）"的几何上等价于 flat shading：
+        // 每三角形 3 顶点都拿到面法线 → sub=3 球面在阴影 / 光照边界处出现 1280 个三角
+        // 阶梯锯齿（昼夜分割线沿 mesh 三角形边呈尖刺状，详见 AgentWorkflow §3.13 / §3.14）。
+        //
+        // 替代方案：每个顶点（位置 = Cell 中心）的"球面光滑顶点法线"= UnitCenter（朝外）。
+        //   · saturate(dot(UnitCenter, LightDir)) 在朝光半球 > 0 → Lit 正常受光
+        //   · 顶点之间法线插值光滑变化 → 阴影 / N·L 边界平滑，无三角形锯齿
+        //   · 与水面 SLW 的 +UnitCenter 同向（同一套几何/材质约定）
+        const FVector NA = Topology->Cells[CA].UnitCenter;
+        const FVector NB = Topology->Cells[CB].UnitCenter;
+        const FVector NC = Topology->Cells[CC].UnitCenter;
 
         // ===================================================================
         //  ★ CellId 编码：高 8 位 + 低 8 位拆分，避开 fp16 精度问题（极其重要！）
@@ -432,20 +572,16 @@ void APlanetTopologyDebugMesh::Rebuild()
     //    PMC SceneProxy 内部固定按 4 个 UV 通道初始化（InitFromDynamicVertex 第三参 = 4），
     //    所以 GPU 端材质可直接通过 TexCoord[1]/[2]/[3] 节点读到我们写入的值。
     //
-    // ★ 顶点法线 / 切线一律交给 KismetProceduralMeshLibrary::CalculateTangentsForMesh
+    // ★ Tangents 留空，Normals 已在装填段直接填 -UnitCenter（光滑球面顶点法线）。
     //
-    //   该工具按"Vertices 位置 + Triangles 绕序 + UVs 切线方向"自动推算，顶点法线严格与 UE5
-        //   左手系 + CCW frontface 约定同调（[ForwardLightingCommon.ush:387-392](../../../../Program%20Files/Epic%20Games/UE_5.8/Engine/Shaders/Private/ForwardLightingCommon.ush)
-    //   中 `saturate(dot(N, L))` 要求法线与光向同侧）。
+    //   不走 KismetTangents 的原因：本路径每 Corner 展开 3 独立顶点（不共享），
+    //   KismetTangents 在该几何上等价于 flat shading（每三角形 3 顶点共享面法线）→
+    //   sub=3 球面在阴影 / 光照边界呈现 1280 个三角阶梯锯齿。详见 AgentWorkflow §3.13/§3.14。
     //
-    //   成本：sub=3 下一次 ~6000 条 cross product（µ0.05 ms），对 OnConstruction 冷路径可忽。
-    //   详见 [SphereTopologyReference.md §11 顶点法线与 UE5 光照约定](../../../Docs/SphereTopologyReference.md)。
+    //   主材质 PS 端用 normalize(WorldPos - PlanetCenter) 反算球面 dir 自己处理纹理 / Triplanar，
+    //   不消费顶点法线——切线空间也无意义。Tangents 留空，PMC 按零向量处理。
     {
-        TArray<FVector> AutoNormals;
         TArray<FProcMeshTangent> AutoTangents;
-        UKismetProceduralMeshLibrary::CalculateTangentsForMesh(
-            Vertices, Triangles, UV0, AutoNormals, AutoTangents);
-        Normals  = MoveTemp(AutoNormals);
         Tangents = MoveTemp(AutoTangents);
     }
 
@@ -472,6 +608,14 @@ void APlanetTopologyDebugMesh::Rebuild()
     // 4.5) R4：构建 1×NumCells 的 CellDirLUT，把每 Cell 的 UnitCenter 写入 RGB 通道。
     //      PS 端用于球面 Voronoi 判别 argmax(dot(dir, V_i))，等位线 = 测地线大圆弧。
     RebuildCellDirLUT_(NumCells);
+
+    // 4.6) R8：3 张 per-cell 多通道参数 LUT（Tint / HSV+Rough / NSpec），由 GR8Recipes 表派生。
+    //      详见 Docs/R8_ParametricTint.md §1.3 / §3.2.4。
+    //      bUseR8PlaceholderRecipes=true（R8 主验收）时按 RecipeIdx (0..16) 派生；
+    //      false（W4 联调）时全部填中性默认值，让 4 LUT 不参与微调。
+    RebuildCellTintLUT_(NumCells);
+    RebuildCellHSVRoughLUT_(NumCells);
+    RebuildCellNSpecLUT_(NumCells);
 
     // 5) 材质：把外部 Material 包装成 MID，把 CellAttrLUT/CellDirLUT/PlanetCenter 注入 MID 参数。
     //    若 Material 为空：退回 PMC 默认白材质（仍能看到几何 + VertexColor）。
@@ -529,6 +673,20 @@ void APlanetTopologyDebugMesh::Rebuild()
             }
             MID->SetScalarParameterValue(TEXT("TriplanarSharpness"), TriplanarSharpness);
             MID->SetScalarParameterValue(TEXT("TileScale"),         TileScale);
+
+            // R8 新增注入：3 base PBR Array + 3 LUT + 水面参数
+            //   PS 端：每 cell 取 BaseTexIdx (LUT0.R) → PBRBaseAlbedo slice，
+            //          按 OverlayBlend (LUT0.B) 叠加 Forest（slice 2 固定），
+            //          按 LUT1.RGB Tint、LUT2 HSV/Roughness、LUT3 NormalStr/TriScale 微调。
+            //   详见 Docs/R8_ParametricTint.md §3.2.6。
+            if (PBRBaseAlbedo)    { MID->SetTextureParameterValue(TEXT("PBRBaseAlbedo"),    PBRBaseAlbedo);    }
+            if (PBRBaseNormal)    { MID->SetTextureParameterValue(TEXT("PBRBaseNormal"),    PBRBaseNormal);    }
+            if (PBRBaseRoughness) { MID->SetTextureParameterValue(TEXT("PBRBaseRoughness"), PBRBaseRoughness); }
+            // PBRBaseHeight: R8 阶段 HLSL 不读，但材质可能挂参数槽——挂上避免 fallback 警告
+            if (PBRBaseHeight)    { MID->SetTextureParameterValue(TEXT("PBRBaseHeight"),    PBRBaseHeight);    }
+            if (CellTintLUT)      { MID->SetTextureParameterValue(TEXT("CellTintLUT"),      CellTintLUT);      }
+            if (CellHSVRoughLUT)  { MID->SetTextureParameterValue(TEXT("CellHSVRoughLUT"),  CellHSVRoughLUT);  }
+            if (CellNSpecLUT)     { MID->SetTextureParameterValue(TEXT("CellNSpecLUT"),     CellNSpecLUT);     }
         }
 
         // 注意：不能写 `MID ? (UMaterialInterface*)MID : Material` —— Material 是
@@ -541,29 +699,30 @@ void APlanetTopologyDebugMesh::Rebuild()
         // 因为 .uasset 二进制 dump 看不到 HLSL 关键字，我们必须从 cpp 端反射读
         // 编辑器内存里 UMaterialExpressionCustom::Code 的真实内容来证伪。
         //
-        // R6 期望材质里至少有一个 Custom 节点同时拥有以下 11 个 Inputs：
-        //   UV0, UV1, UV2, UV3, WorldPos, PlanetCenter, CellAttrLUT, CellDirLUT, EdgeWidth, NoiseAmplitude, NoiseScale
-        // 缺失任意一项 → 打印 Error 级别日志（说明用户挂了 R3/R4/R5 旧材质，或新材质没接全）
-        //
-        // R7 期望材质里至少有一个 Custom 节点拥有以下 14 个 Inputs（R6 11 项 + R7 新增 3 项）：
-        //   ... R6 11 项 ... + TerrainAlbedoArray, TriplanarSharpness, TileScale
-        // TerrainNormalArray 是 R7 可选项，反射诊断不强制要求。
+        // R8 期望材质里至少有一个 Custom 节点拥有以下 17 个 Inputs（R7 13 项 + R8 新增 4 项，
+        // R7 的 terrainalbedoarray 在 R8 已被 pbrbasealbedo + 4 LUT 取代）：
+        //   UV0, UV1, UV2, UV3, WorldPos, PlanetCenter, CellAttrLUT, CellDirLUT,
+        //   EdgeWidth, NoiseAmplitude, NoiseScale, TriplanarSharpness, TileScale,
+        //   PBRBaseAlbedo, CellTintLUT, CellHSVRoughLUT, CellNSpecLUT。
+        // PBRBaseNormal/Roughness/Height 是 R8 可选项，反射诊断不强制要求。
+        // 详见 Docs/R8_ParametricTint.md §3.2.7。
 #if WITH_EDITORONLY_DATA
         if (UMaterial* BaseMat = Material->GetMaterial())
         {
             const TConstArrayView<TObjectPtr<UMaterialExpression>> Exprs = BaseMat->GetExpressions();
             int32 CustomFound = 0;
-            // R7 期望 Inputs 集合（小写比较，容错命名风格）
-            const TArray<FString> ExpectedR7Inputs = {
+            // R8 期望 Inputs 集合（小写比较，容错命名风格）
+            const TArray<FString> ExpectedR8Inputs = {
                 TEXT("uv0"), TEXT("uv1"), TEXT("uv2"), TEXT("uv3"),
                 TEXT("worldpos"), TEXT("planetcenter"),
                 TEXT("cellattrlut"), TEXT("celldirlut"),
                 TEXT("edgewidth"),
                 TEXT("noiseamplitude"), TEXT("noisescale"),
-                TEXT("terrainalbedoarray"),                  // R7 新增
-                TEXT("triplanarsharpness"), TEXT("tilescale") // R7 新增
+                TEXT("triplanarsharpness"), TEXT("tilescale"),
+                TEXT("pbrbasealbedo"),                                              // R8 替代 terrainalbedoarray
+                TEXT("celltintlut"), TEXT("cellhsvroughlut"), TEXT("cellnspeclut"), // R8 新增 3 LUT
             };
-            bool bAnyR7Compliant = false;
+            bool bAnyR8Compliant = false;
 
             for (UMaterialExpression* Expr : Exprs)
             {
@@ -610,10 +769,10 @@ void APlanetTopologyDebugMesh::Rebuild()
                                                     .Replace(TEXT("\r"), TEXT("\\r")));
                     }
 
-                    // ---- R7 合规性检查 ----
+                    // ---- R8 合规性检查 ----
                     TArray<FString> Missing;
                     TArray<FString> Disconnected;
-                    for (const FString& Need : ExpectedR7Inputs)
+                    for (const FString& Need : ExpectedR8Inputs)
                     {
                         if (!PresentLower.Contains(Need))         { Missing.Add(Need); }
                         else if (!ConnectedLower.Contains(Need))  { Disconnected.Add(Need); }
@@ -621,23 +780,23 @@ void APlanetTopologyDebugMesh::Rebuild()
 
                     if (Missing.Num() == 0 && Disconnected.Num() == 0)
                     {
-                        bAnyR7Compliant = true;
+                        bAnyR8Compliant = true;
                         UE_LOG(LogPlanetTopologyDebugMesh, Warning,
-                            TEXT("    ✓ R7 compliance: ALL %d expected inputs present & connected"),
-                            ExpectedR7Inputs.Num());
+                            TEXT("    ✓ R8 compliance: ALL %d expected inputs present & connected"),
+                            ExpectedR8Inputs.Num());
                     }
                     else
                     {
                         if (Missing.Num() > 0)
                         {
                             UE_LOG(LogPlanetTopologyDebugMesh, Error,
-                                TEXT("    ✗ R7 missing inputs: [%s] — this is likely an R2/R3/R4/R5/R6 material, not R7"),
+                                TEXT("    ✗ R8 missing inputs: [%s] — this is likely an R2/R3/R4/R5/R6/R7 material, not R8"),
                                 *FString::Join(Missing, TEXT(", ")));
                         }
                         if (Disconnected.Num() > 0)
                         {
                             UE_LOG(LogPlanetTopologyDebugMesh, Error,
-                                TEXT("    ✗ R7 inputs declared but NOT connected: [%s]"),
+                                TEXT("    ✗ R8 inputs declared but NOT connected: [%s]"),
                                 *FString::Join(Disconnected, TEXT(", ")));
                         }
                     }
@@ -649,18 +808,18 @@ void APlanetTopologyDebugMesh::Rebuild()
                     TEXT("[PlanetTopologyDebugMesh] Material '%s' contains NO UMaterialExpressionCustom nodes!"),
                     *BaseMat->GetName());
             }
-            else if (!bAnyR7Compliant)
+            else if (!bAnyR8Compliant)
             {
                 UE_LOG(LogPlanetTopologyDebugMesh, Error,
-                    TEXT("[PlanetTopologyDebugMesh] Material '%s' has %d Custom nodes but NONE is R7-compliant. ")
-                    TEXT("Expected one Custom with inputs: UV0,UV1,UV2,UV3,WorldPos,PlanetCenter,CellAttrLUT,CellDirLUT,EdgeWidth,NoiseAmplitude,NoiseScale,TerrainAlbedoArray,TriplanarSharpness,TileScale. ")
-                    TEXT("See R7_TerrainTriplanar.md §4 for the exact wiring."),
+                    TEXT("[PlanetTopologyDebugMesh] Material '%s' has %d Custom nodes but NONE is R8-compliant. ")
+                    TEXT("Expected one Custom with inputs: UV0,UV1,UV2,UV3,WorldPos,PlanetCenter,CellAttrLUT,CellDirLUT,EdgeWidth,NoiseAmplitude,NoiseScale,TriplanarSharpness,TileScale,PBRBaseAlbedo,CellTintLUT,CellHSVRoughLUT,CellNSpecLUT. ")
+                    TEXT("See R8_ParametricTint.md §4 for the exact wiring."),
                     *BaseMat->GetName(), CustomFound);
             }
             else
             {
                 UE_LOG(LogPlanetTopologyDebugMesh, Log,
-                    TEXT("[PlanetTopologyDebugMesh] Material '%s' is R7-compliant ✓"),
+                    TEXT("[PlanetTopologyDebugMesh] Material '%s' is R8-compliant ✓"),
                     *BaseMat->GetName());
             }
         }
@@ -668,25 +827,40 @@ void APlanetTopologyDebugMesh::Rebuild()
     }
 
     UE_LOG(LogPlanetTopologyDebugMesh, Log,
-        TEXT("[PlanetTopologyDebugMesh] Rebuilt (R7: 3-layer Triplanar real terrain). ")
+        TEXT("[PlanetTopologyDebugMesh] Rebuilt (R8: 3-base + 4-LUT parametric tint). ")
         TEXT("SubdivisionLevel=%d  Cells=%d  Corners=%d  Verts=%d  Tris=%d  Radius=%.1f  Smooth=%s  ")
-        TEXT("CellAttrLUT=%s  CellDirLUT=%s  PlanetCenter=(%.1f,%.1f,%.1f)  ")
+        TEXT("CellAttrLUT=%s  CellDirLUT=%s  CellTintLUT=%s  CellHSVRoughLUT=%s  CellNSpecLUT=%s  ")
+        TEXT("PlanetCenter=(%.1f,%.1f,%.1f)  ")
         TEXT("EdgeWidth=%.4f rad (%.2f°)  NoiseAmplitude=%.4f rad (%.2f°)  NoiseScale=%.1f /rad  ")
-        TEXT("TerrainAlbedoArray=%s  TerrainNormalArray=%s  TileScale=%.0f cm  TriplanarSharpness=%.1f  ")
+        TEXT("TerrainAlbedoArray=%s  TerrainNormalArray=%s  ")
+        TEXT("PBRBaseAlbedo=%s  PBRBaseNormal=%s  PBRBaseRoughness=%s  PBRBaseHeight=%s  ")
+        TEXT("TileScale=%.0f cm  TriplanarSharpness=%.1f  ")
+        TEXT("UseR8Placeholder=%s  EnableWaterShell=%s  WaterMaterial=%s  WaterSurfaceOffset=%.1f cm  ")
         TEXT("NumLayersHint=%d"),
         SubdivisionLevel, NumCells, NumCorners,
         Vertices.Num(), Triangles.Num() / 3, Radius,
         bSmoothNormals ? TEXT("true") : TEXT("false"),
-        CellAttrLUT ? TEXT("OK") : TEXT("MISSING"),
-        CellDirLUT  ? TEXT("OK") : TEXT("MISSING"),
+        CellAttrLUT     ? TEXT("OK") : TEXT("MISSING"),
+        CellDirLUT      ? TEXT("OK") : TEXT("MISSING"),
+        CellTintLUT     ? TEXT("OK") : TEXT("MISSING"),
+        CellHSVRoughLUT ? TEXT("OK") : TEXT("MISSING"),
+        CellNSpecLUT    ? TEXT("OK") : TEXT("MISSING"),
         GetActorLocation().X, GetActorLocation().Y, GetActorLocation().Z,
         EdgeWidth,      EdgeWidth      * 180.0 / PI,
         NoiseAmplitude, NoiseAmplitude * 180.0 / PI,
         NoiseScale,
-        TerrainAlbedoArray ? TEXT("OK") : TEXT("MISSING"),
+        TerrainAlbedoArray ? TEXT("OK") : TEXT("(none)"),
         TerrainNormalArray ? TEXT("OK") : TEXT("(none)"),
+        PBRBaseAlbedo    ? TEXT("OK") : TEXT("MISSING"),
+        PBRBaseNormal    ? TEXT("OK") : TEXT("(none)"),
+        PBRBaseRoughness ? TEXT("OK") : TEXT("(none)"),
+        PBRBaseHeight    ? TEXT("OK") : TEXT("(none)"),
         TileScale,
         TriplanarSharpness,
+        bUseR8PlaceholderRecipes ? TEXT("YES") : TEXT("no"),
+        bEnableWaterShell ? TEXT("YES") : TEXT("no"),
+        WaterMaterial    ? *WaterMaterial->GetName()  : TEXT("(none)"),
+        WaterSurfaceOffset,
         NumLayersHint);
 
     // ===== W2: WorldGen 板块构造 + 海陆分离 =====
@@ -695,6 +869,24 @@ void APlanetTopologyDebugMesh::Rebuild()
     // 这里末尾不再重复运行——保留代码块占位，方便 W3+ 在此追加流水线后处理（如
     // 反射诊断、AssetTagSync 等不影响 LUT 的副效应）。
     // 详见 Docs/W2_PlatesAndLandSea.md §4。
+
+    // ===== R8: 水面层重建（Component 子对象路径）=====
+    //
+    //   bEnableWaterShell=false → ClearAllMeshSections + 隐形；
+    //   bEnableWaterShell=true  → 用 (Radius+WaterSurfaceOffset) 重铺 sub=3 球皮 +
+    //                              SetMaterial(0, WaterMaterial)。
+    //
+    //   该路径取代了早期"SpawnActor 独立 APlanetWaterShell"路径——后者在 PIE 启动时
+    //   会因 OnConstruction-SpawnActor 时序坑导致材质丢失（变成默认棋盘格球）。详见
+    //   Docs/AgentWorkflow.md §3.10。Component 子对象的生命周期由 Owner Actor 管，
+    //   PIE 深拷贝 / 编辑器 OnConstruction 重跑都不会丢任何状态。
+    //
+    //   验收期：
+    //     - bEnableWaterShell=false                   → 单看 17 配方地形；
+    //     - bEnableWaterShell=true + MeshComp.Visibility=false → 单看水面球。
+    //
+    //   详见 Docs/R8_ParametricTint.md §3.2.10 / §4.5。
+    RebuildWaterMesh_();
 }
 
 // =====================================================================
@@ -831,6 +1023,13 @@ void APlanetTopologyDebugMesh::RebuildCellAttrLUT_(int32 NumCells)
             case EWorldGenDebugView::None:
             default:
             {
+                // ★ R8：当启用 placeholder 配方时，优先返回 17 配方哈希索引（0..16），
+                //   覆盖 W4 真实 Layer。R8 主验收期默认走此分支；W4 联调时把
+                //   bUseR8PlaceholderRecipes 关闭即可切回 W4 路径。
+                if (bUseR8PlaceholderRecipes)
+                {
+                    return (uint8)R8_PlaceholderRecipeIndex(CD.CellId);
+                }
                 // ★ W4：默认视图 = Biome 真实分类。
                 // CD.TerrainTag 未设（None）或 Tag 不在表中（TerrainSet 未挂） → fallback LayerIndex 0。
                 if (UTerrainDefinition* const* Found = TagToDefMap.Find(CD.TerrainTag))
@@ -863,9 +1062,17 @@ void APlanetTopologyDebugMesh::RebuildCellAttrLUT_(int32 NumCells)
         }
         else
         {
-            // Fallback：W2 之前的 Knuth 哈希 placeholder（防止 Generator 失效时 LUT 全 0）
-            const uint32 Hashed = (uint32)CellId * KnuthHash;
-            Layer = (uint8)(Hashed % (uint32)LayerMod);
+            // Fallback：Generator 失效时使用 R8 placeholder（与上面 default 分支一致），
+            // 否则使用 W2 之前的 Knuth 哈希按 NumLayersHint 取模。
+            if (bUseR8PlaceholderRecipes)
+            {
+                Layer = (uint8)R8_PlaceholderRecipeIndex(CellId);
+            }
+            else
+            {
+                const uint32 Hashed = (uint32)CellId * KnuthHash;
+                Layer = (uint8)(Hashed % (uint32)LayerMod);
+            }
         }
 
         // BGRA 顺序写入。R 通道存 Layer，其余先填 0（R8 阶段会启用）。
@@ -896,6 +1103,10 @@ void APlanetTopologyDebugMesh::RebuildCellAttrLUT_(int32 NumCells)
                 {
                     // ★ W4：复用上面的 ComputeLayerForCell lambda，避免主写入与诊断逻辑剧本偏移。
                     Expected = ComputeLayerForCell((*CellsPtr)[i]);
+                }
+                else if (bUseR8PlaceholderRecipes)
+                {
+                    Expected = (uint8)R8_PlaceholderRecipeIndex(i);
                 }
                 else
                 {
@@ -1065,4 +1276,494 @@ void APlanetTopologyDebugMesh::RebuildCellDirLUT_(int32 NumCells)
     NewLUT->UpdateResource();
 
     CellDirLUT = NewLUT;
+}
+
+// =====================================================================
+//  R8：CellTintLUT / CellHSVRoughLUT / CellNSpecLUT 构建 / 填充。
+//
+//  3 张 LUT 共享相同的纹理布局，仅 RGBA 通道含义不同：
+//    - 大小：1 × NumCells
+//    - 格式：PF_FloatRGBA（FP16x4，每像素 8 字节）
+//    - Filter = TF_Nearest（必须，禁止双线性插值）
+//    - SRGB   = false（线性参数，不是颜色）
+//    - AddressX/Y = TA_Clamp
+//
+//  数据来源：bUseR8PlaceholderRecipes=true 时按 R8_PlaceholderRecipeIndex(CellId) 查 GR8Recipes 表；
+//            false 时全部填 GR8NeutralRecipe（中性默认值，让 R8 4 LUT 不参与微调）。
+//
+//  GPU 端访问范式（材质 Custom 节点）：
+//      float4 lut1 = CellTintLUT.Load(int3(CellId, 0, 0));     // RGB=Tint, A=HueShift
+//      float4 lut2 = CellHSVRoughLUT.Load(int3(CellId, 0, 0)); // R=Sat, G=Bri, B=RMin, A=RMax
+//      float4 lut3 = CellNSpecLUT.Load(int3(CellId, 0, 0));    // R=NormalStr, G=HeightScale, B=Spec, A=TriScale
+//
+//  详见 Docs/R8_ParametricTint.md §1.3 / §3.2.4。
+// =====================================================================
+
+// 内部 helper：根据 bUseR8PlaceholderRecipes 与 CellId 解析出该 cell 应使用的配方。
+static const FR8Recipe& R8_PickRecipe(bool bUsePlaceholder, int32 CellId)
+{
+    if (bUsePlaceholder)
+    {
+        return GR8Recipes[R8_PlaceholderRecipeIndex(CellId)];
+    }
+    return GR8NeutralRecipe;
+}
+
+// 内部 helper：创建一张 1×NumCells 的 PF_FloatRGBA 动态纹理（用 R8 三 LUT 共用模板）。
+static UTexture2D* R8_CreateFloatRGBALUT(int32 NumCells, const TCHAR* DebugName)
+{
+    UTexture2D* NewLUT = UTexture2D::CreateTransient(NumCells, 1, PF_FloatRGBA, DebugName);
+    if (!NewLUT)
+    {
+        return nullptr;
+    }
+
+    NewLUT->Filter        = TF_Nearest;
+    NewLUT->SRGB          = false;
+    NewLUT->AddressX      = TA_Clamp;
+    NewLUT->AddressY      = TA_Clamp;
+    NewLUT->NeverStream   = true;
+    NewLUT->CompressionSettings = TC_HDR;
+    NewLUT->LODGroup      = TEXTUREGROUP_ColorLookupTable;
+    NewLUT->MipGenSettings = TMGS_NoMipmaps;
+    return NewLUT;
+}
+
+void APlanetTopologyDebugMesh::RebuildCellTintLUT_(int32 NumCells)
+{
+    if (NumCells <= 0)
+    {
+        CellTintLUT = nullptr;
+        return;
+    }
+
+    UTexture2D* NewLUT = R8_CreateFloatRGBALUT(NumCells, TEXT("CellTintLUT_Transient"));
+    if (!NewLUT)
+    {
+        UE_LOG(LogPlanetTopologyDebugMesh, Error,
+            TEXT("[PlanetTopologyDebugMesh] CreateTransient(CellTintLUT) failed (NumCells=%d)"), NumCells);
+        CellTintLUT = nullptr;
+        return;
+    }
+
+    FTexturePlatformData* Plat = NewLUT->GetPlatformData();
+    if (!Plat || Plat->Mips.Num() == 0)
+    {
+        UE_LOG(LogPlanetTopologyDebugMesh, Error,
+            TEXT("[PlanetTopologyDebugMesh] CellTintLUT has no mip 0; abort fill."));
+        CellTintLUT = nullptr;
+        return;
+    }
+
+    FByteBulkData& Bulk = Plat->Mips[0].BulkData;
+    FFloat16* Dst = static_cast<FFloat16*>(Bulk.Lock(LOCK_READ_WRITE));
+    if (!Dst)
+    {
+        UE_LOG(LogPlanetTopologyDebugMesh, Error,
+            TEXT("[PlanetTopologyDebugMesh] Failed to Lock CellTintLUT mip 0."));
+        CellTintLUT = nullptr;
+        return;
+    }
+
+    for (int32 c = 0; c < NumCells; ++c)
+    {
+        const FR8Recipe& R = R8_PickRecipe(bUseR8PlaceholderRecipes, c);
+        Dst[c * 4 + 0] = FFloat16(R.TintR);
+        Dst[c * 4 + 1] = FFloat16(R.TintG);
+        Dst[c * 4 + 2] = FFloat16(R.TintB);
+        Dst[c * 4 + 3] = FFloat16(0.0f);   // HueShift 预留 0
+    }
+
+    Bulk.Unlock();
+
+    // 诊断：dump 前 8 个 cell（FP16 → float 转回打印），验证写入正确性
+    {
+        const FFloat16* Verify = static_cast<const FFloat16*>(Bulk.LockReadOnly());
+        if (Verify)
+        {
+            const int32 NumDump = FMath::Min(NumCells, 8);
+            FString Dump;
+            for (int32 i = 0; i < NumDump; ++i)
+            {
+                const int32 RecipeIdx = bUseR8PlaceholderRecipes
+                    ? R8_PlaceholderRecipeIndex(i)
+                    : -1;
+                Dump += FString::Printf(
+                    TEXT("  Cell%-3d: Tint=(%.3f, %.3f, %.3f, %.3f)  RecipeIdx=%d\n"),
+                    i,
+                    Verify[i * 4 + 0].GetFloat(),
+                    Verify[i * 4 + 1].GetFloat(),
+                    Verify[i * 4 + 2].GetFloat(),
+                    Verify[i * 4 + 3].GetFloat(),
+                    RecipeIdx);
+            }
+            UE_LOG(LogPlanetTopologyDebugMesh, Log,
+                TEXT("[PlanetTopologyDebugMesh] CellTintLUT first %d cells (NumCells=%d, UsePlaceholder=%s):\n%s"),
+                NumDump, NumCells,
+                bUseR8PlaceholderRecipes ? TEXT("YES") : TEXT("no"),
+                *Dump);
+            Bulk.Unlock();
+        }
+    }
+
+    NewLUT->UpdateResource();
+    CellTintLUT = NewLUT;
+}
+
+void APlanetTopologyDebugMesh::RebuildCellHSVRoughLUT_(int32 NumCells)
+{
+    if (NumCells <= 0)
+    {
+        CellHSVRoughLUT = nullptr;
+        return;
+    }
+
+    UTexture2D* NewLUT = R8_CreateFloatRGBALUT(NumCells, TEXT("CellHSVRoughLUT_Transient"));
+    if (!NewLUT)
+    {
+        UE_LOG(LogPlanetTopologyDebugMesh, Error,
+            TEXT("[PlanetTopologyDebugMesh] CreateTransient(CellHSVRoughLUT) failed (NumCells=%d)"), NumCells);
+        CellHSVRoughLUT = nullptr;
+        return;
+    }
+
+    FTexturePlatformData* Plat = NewLUT->GetPlatformData();
+    if (!Plat || Plat->Mips.Num() == 0)
+    {
+        CellHSVRoughLUT = nullptr;
+        return;
+    }
+
+    FByteBulkData& Bulk = Plat->Mips[0].BulkData;
+    FFloat16* Dst = static_cast<FFloat16*>(Bulk.Lock(LOCK_READ_WRITE));
+    if (!Dst)
+    {
+        CellHSVRoughLUT = nullptr;
+        return;
+    }
+
+    for (int32 c = 0; c < NumCells; ++c)
+    {
+        const FR8Recipe& R = R8_PickRecipe(bUseR8PlaceholderRecipes, c);
+        Dst[c * 4 + 0] = FFloat16(R.SatMul);
+        Dst[c * 4 + 1] = FFloat16(R.BriMul);
+        Dst[c * 4 + 2] = FFloat16(R.RoughMin);
+        Dst[c * 4 + 3] = FFloat16(R.RoughMax);
+    }
+
+    Bulk.Unlock();
+    NewLUT->UpdateResource();
+    CellHSVRoughLUT = NewLUT;
+}
+
+void APlanetTopologyDebugMesh::RebuildCellNSpecLUT_(int32 NumCells)
+{
+    if (NumCells <= 0)
+    {
+        CellNSpecLUT = nullptr;
+        return;
+    }
+
+    UTexture2D* NewLUT = R8_CreateFloatRGBALUT(NumCells, TEXT("CellNSpecLUT_Transient"));
+    if (!NewLUT)
+    {
+        UE_LOG(LogPlanetTopologyDebugMesh, Error,
+            TEXT("[PlanetTopologyDebugMesh] CreateTransient(CellNSpecLUT) failed (NumCells=%d)"), NumCells);
+        CellNSpecLUT = nullptr;
+        return;
+    }
+
+    FTexturePlatformData* Plat = NewLUT->GetPlatformData();
+    if (!Plat || Plat->Mips.Num() == 0)
+    {
+        CellNSpecLUT = nullptr;
+        return;
+    }
+
+    FByteBulkData& Bulk = Plat->Mips[0].BulkData;
+    FFloat16* Dst = static_cast<FFloat16*>(Bulk.Lock(LOCK_READ_WRITE));
+    if (!Dst)
+    {
+        CellNSpecLUT = nullptr;
+        return;
+    }
+
+    for (int32 c = 0; c < NumCells; ++c)
+    {
+        const FR8Recipe& R = R8_PickRecipe(bUseR8PlaceholderRecipes, c);
+        Dst[c * 4 + 0] = FFloat16(R.NormalStr);
+        Dst[c * 4 + 1] = FFloat16(0.0f);          // HeightScale: R8.5 写入；R8 暂用 0
+        Dst[c * 4 + 2] = FFloat16(1.0f);          // SpecularBoost: 中性 1.0
+        Dst[c * 4 + 3] = FFloat16(R.TriScale);
+    }
+
+    Bulk.Unlock();
+    NewLUT->UpdateResource();
+    CellNSpecLUT = NewLUT;
+}
+
+// =====================================================================
+//  R8：水面层 mesh 构建（Component 子对象路径）
+//
+//  几何方案：
+//    复用 Grid 模块的 FSphereTopology(SubdivisionLevel=3)，得到 642 mesh 顶点 / 1280
+//    primal 三角形（icosphere sub=3）。每个 Corner（=primal 三角形）展开为 3 个独立顶点
+//    提交给 WaterMeshComp，与 R8 主 mesh 走完全一致的几何路径，便于 R8.5 自研球面网格
+//    上线后无歧义切换。
+//
+//  选择 sub=3 而非更高细分的理由：
+//    · 水面材质只需要 WorldPos + Time 做 fbm 法线扰动，几何精度无关；
+//    · sub=3 仅 1280 三角形，OnConstruction 冷路径成本 < 1 ms；
+//    · 顶点法线**直接用 UnitCenter**（球面外法）实现数学完美光滑球面着色——
+//      不走 KismetProceduralMeshLibrary::CalculateTangentsForMesh，因为本路径每
+//      Corner 展开 3 独立顶点（不共享），KismetTangents 在该几何上等价于 flat
+//      shading（每三角形 3 顶点都拿到面法线），sub=3 球面会出现 1280 个清晰小棱
+//      面。详见 AgentWorkflow.md §3.13"独立顶点 + KismetTangents 的 flat-shading 陷阱"。
+//
+//  与早期 SpawnActor 路径的差分：
+//    早期方案是在 OnConstruction 中 SpawnActor<APlanetWaterShell>，把 mesh 包在独立 Actor
+//    里。该路径在 PIE 启动时存在生命周期错位（Editor World → PIE World 深拷贝过程中
+//    SpawnActor 出来的 Editor 临时 Actor 的材质引用会丢失，变成默认棋盘格球；退 PIE
+//    时 Actor 被回收）。Component 是 Owner Actor 的 SubObject，PIE 拷贝跟随 Owner 走，
+//    无任何额外管理代码。详见 [AgentWorkflow.md §3.10](../../../Docs/AgentWorkflow.md)。
+// =====================================================================
+void APlanetTopologyDebugMesh::RebuildWaterMesh_()
+{
+    if (!WaterMeshComp)
+    {
+        return;
+    }
+
+    // bEnableWaterShell=false 路径：清空 mesh + 隐形即可，不做几何工作
+    if (!bEnableWaterShell)
+    {
+        WaterMeshComp->ClearAllMeshSections();
+        WaterMeshComp->SetVisibility(false);
+        return;
+    }
+
+    // ---- 1) 构建 / 复用 sub=3 拓扑 ----
+    //
+    // 使用固定 SubdivisionLevel=3。理由：
+    //   · 642 verts / 1280 tris 已经足够把 fbm 噪声采样空间撑开（顶点间球面距 ≈ 8°）
+    //   · 升到 sub=4 会让顶点数 ×4（→ 2562 verts），但水面 material 完全在 PS 端做扰动，
+    //     几何细节无收益
+    //   · sub=3 与 R8 主 mesh sub=3 顶点位置 1:1 对齐，将来 R8.5 接入自研球面网格后
+    //     可直接共享拓扑实例
+    if (!WaterTopology.IsValid())
+    {
+        WaterTopology = MakeUnique<FSphereTopology>(3);
+    }
+
+    const int32 NumCells   = WaterTopology->Cells.Num();
+    const int32 NumCorners = WaterTopology->Corners.Num();
+    if (NumCells == 0 || NumCorners == 0)
+    {
+        UE_LOG(LogPlanetTopologyDebugMesh, Warning,
+            TEXT("[PlanetTopologyDebugMesh] Empty water topology (Cells=%d, Corners=%d). Skip water build."),
+            NumCells, NumCorners);
+        WaterMeshComp->ClearAllMeshSections();
+        WaterMeshComp->SetVisibility(false);
+        return;
+    }
+
+    const float WaterRadius = Radius + WaterSurfaceOffset;
+
+    // ---- 2) 装填顶点 / 索引缓冲 ----
+    //
+    // 每个 Corner 展开 3 个独立顶点（不共享），与 R8 主 mesh 路径一致。
+    const int32 NumVerts = NumCorners * 3;
+
+    TArray<FVector>          Vertices;
+    TArray<int32>            Triangles;
+    TArray<FVector>          Normals;
+    TArray<FVector2D>        UV0;
+    TArray<FVector2D>        UV1;
+    TArray<FVector2D>        UV2;
+    TArray<FVector2D>        UV3;
+    TArray<FLinearColor>     VertexColors;
+    TArray<FProcMeshTangent> Tangents;
+
+    Vertices.Reserve(NumVerts);
+    Triangles.Reserve(NumVerts);
+    Normals.Reserve(NumVerts);
+    UV0.Reserve(NumVerts);
+    UV1.Reserve(NumVerts);
+    UV2.Reserve(NumVerts);
+    UV3.Reserve(NumVerts);
+    VertexColors.Reserve(NumVerts);
+
+    for (int32 CornerIdx = 0; CornerIdx < NumCorners; ++CornerIdx)
+    {
+        const FCorner& Cor = WaterTopology->Corners[CornerIdx];
+
+        const int32 CA = Cor.CellIds[0];
+        const int32 CB = Cor.CellIds[1];
+        const int32 CC = Cor.CellIds[2];
+        if (!WaterTopology->Cells.IsValidIndex(CA) ||
+            !WaterTopology->Cells.IsValidIndex(CB) ||
+            !WaterTopology->Cells.IsValidIndex(CC))
+        {
+            continue;
+        }
+
+        const FVector PA = WaterTopology->Cells[CA].UnitCenter * WaterRadius;
+        const FVector PB = WaterTopology->Cells[CB].UnitCenter * WaterRadius;
+        const FVector PC = WaterTopology->Cells[CC].UnitCenter * WaterRadius;
+
+        // 法线：直接用每个顶点的 UnitCenter（球面外法）作为顶点法线，达到
+        // 数学上完美光滑的球面着色——水面在视觉上就该是连续光滑球面。
+        //
+        // 这里**故意不走** KismetProceduralMeshLibrary::CalculateTangentsForMesh
+        // 自动法线路径——原因：水面 mesh 的几何与主 mesh 同款，每个 Corner 展开
+        // 3 个独立顶点（不共享）。在这种"顶点完全独立"的拓扑上，KismetTangents
+        // 算出来的法线等价于 flat shading（每个三角形的 3 个顶点都拿到面法线），
+        // 球面渲染会出现 1280 个三角小棱面——这正是 R8 验收期实测看到的"水面有棱
+        // 角"现象。详见 AgentWorkflow.md §3.6 / §3.13。
+        //
+        // 主 mesh 不能这么做（材质要展示 cell 边界 SDF），但水面 SLW 视觉就是
+        // 一颗光滑反射球——直接用 UnitCenter 作为顶点法线既物理正确又零棱角。
+        const FVector NA = WaterTopology->Cells[CA].UnitCenter;
+        const FVector NB = WaterTopology->Cells[CB].UnitCenter;
+        const FVector NC = WaterTopology->Cells[CC].UnitCenter;
+
+        // 水面 material 不需要 cell 编码 UV / OneHot 重心 / VertexColor LayerHash，
+        // 全部留默认 0（SLW 路径下 UV 也不会被材质消费）。
+        const FVector2D    UVZero(0.0f, 0.0f);
+        const FLinearColor ColWhite(1.0f, 1.0f, 1.0f, 1.0f);
+
+        const int32 BaseIdx = Vertices.Num();
+
+        Vertices.Add(PA); Normals.Add(NA);
+        UV0.Add(UVZero); UV1.Add(UVZero); UV2.Add(UVZero); UV3.Add(UVZero);
+        VertexColors.Add(ColWhite);
+
+        Vertices.Add(PB); Normals.Add(NB);
+        UV0.Add(UVZero); UV1.Add(UVZero); UV2.Add(UVZero); UV3.Add(UVZero);
+        VertexColors.Add(ColWhite);
+
+        Vertices.Add(PC); Normals.Add(NC);
+        UV0.Add(UVZero); UV1.Add(UVZero); UV2.Add(UVZero); UV3.Add(UVZero);
+        VertexColors.Add(ColWhite);
+
+        // ---- 3) 三角形索引 ----
+        //
+        // 沿用 FCorner.CellIds 原始顺序（CCW from outside）；不做 bFlipWinding。
+        // 详见 R8 主 Rebuild() 的"绕序与法线坑"块和 SphereTopologyReference.md §11。
+        Triangles.Add(BaseIdx + 0);
+        Triangles.Add(BaseIdx + 1);
+        Triangles.Add(BaseIdx + 2);
+    }
+
+    // ---- 4) Tangents 留空 ----
+    //
+    // Normals 已在装填顶点时直接用 UnitCenter 填好（球面外法 → 完美光滑球面着色，
+    // 见上方装填段注释）。Tangent 不再调用 KismetTangents 自动计算——
+    // KismetTangents 会**先算面法线再覆盖 Normals 数组**，把我们刚填好的光滑
+    // UnitCenter 法线砸回 flat shading；其副产物 Tangent 又只在 SLW 路径下被忽略。
+    //
+    // 留空 Tangents 数组，PMC 端会按零向量处理；SLW Shading Model 通过 Normal 引脚
+    // 直接消费 World Space 法线，不走 Tangent 空间反算 → 无视觉差异。
+    Tangents.Reset();
+
+    // ---- 5) 提交到 PMC ----
+    WaterMeshComp->ClearAllMeshSections();
+    WaterMeshComp->CreateMeshSection_LinearColor(
+        /*SectionIndex*/ 0,
+        Vertices,
+        Triangles,
+        Normals,
+        UV0,
+        UV1,
+        UV2,
+        UV3,
+        VertexColors,
+        Tangents,
+        /*bCreateCollision*/ false);
+
+    // ---- 6) 应用材质 ----
+    if (WaterMaterial)
+    {
+        WaterMeshComp->SetMaterial(0, WaterMaterial);
+    }
+    else
+    {
+        UE_LOG(LogPlanetTopologyDebugMesh, Warning,
+            TEXT("[PlanetTopologyDebugMesh] WaterMaterial slot is empty; water mesh will render with default checker. ")
+            TEXT("Assign M_WaterShell in Details > PlanetTopology|R8 > WaterMaterial."));
+    }
+
+    WaterMeshComp->SetVisibility(true);
+
+    UE_LOG(LogPlanetTopologyDebugMesh, Log,
+        TEXT("[PlanetTopologyDebugMesh] Rebuilt water mesh: Radius=%.1f cm  Cells=%d  Corners=%d  Verts=%d  Tris=%d  Material=%s"),
+        WaterRadius, NumCells, NumCorners, Vertices.Num(), Triangles.Num() / 3,
+        WaterMaterial ? *WaterMaterial->GetName() : TEXT("(none)"));
+}
+
+// =====================================================================
+//  PIE 退出后材质恢复钩子（详见 Docs/AgentWorkflow.md §3.11）
+//
+//  问题现象：
+//    Editor 中放置 APlanetTopologyDebugMesh 后 Rebuild 正常显示；进入 PIE 一切正常；
+//    退出 PIE 后回到 Editor —— 主 mesh 与水面 mesh 都变成不透明的默认白材质 / 棋盘格
+//    （Material Stats 仍正常）；再 Rebuild 或者再次进入 PIE 又恢复。
+//
+//  根因：
+//    PIE 启动时 UE 把整个 Editor World 深拷贝（DuplicateWorld）成 PIE World，
+//    Editor 端的 APlanetTopologyDebugMesh 实例 A_editor 与其 MID_editor 都被
+//    duplicate 出 A_pie / MID_pie。MeshComp / WaterMeshComp 的 SceneProxy 在 PIE
+//    期间持有的是 PIE 端的 MID_pie 引用——PIE 退出时 PIE World 整体 Cleanup，MID_pie
+//    被 GC 后，Editor 端 MeshComp 的 RenderProxy 再次刷新时拿不到合法 material 引用，
+//    fallback 到 UEngine::DefaultMaterial（白色不透明）。
+//
+//  修复：
+//    监听 FWorldDelegates::OnPostWorldCleanup —— 在任何 UWorld 被 cleanup 后触发。
+//    若 cleanup 的 World 不是 *本 Actor 所在 World*（即被 cleanup 的是 PIE World，
+//    而本 Actor 还活在 Editor World），就调一次 Rebuild() 把 MID 重建并 SetMaterial。
+//
+//    跳过 *本 Actor 所在 World* 被 cleanup 的情况——那时本 Actor 即将被销毁，
+//    Rebuild 会触发悬挂访问（GetWorld() 返回 null 或半释放状态）。
+//
+//    仅 Editor 构建路径有效（Standalone 不会发生跨 World duplicate）。
+// =====================================================================
+void APlanetTopologyDebugMesh::OnPostWorldCleanup_(UWorld* World, bool bSessionEnded, bool bCleanupResources)
+{
+#if WITH_EDITOR
+    // 防御 1：本 Actor 即将销毁（GetWorld 不可信）—— 跳过
+    if (!IsValid(this) || HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed))
+    {
+        return;
+    }
+
+    // 防御 2：被 cleanup 的就是本 Actor 所在 World —— 即将销毁，跳过
+    UWorld* MyWorld = GetWorld();
+    if (!MyWorld || MyWorld == World)
+    {
+        return;
+    }
+
+    // 防御 3：仅在"游戏会话真的结束"（bSessionEnded=true，PIE/Standalone 退出）时恢复
+    //   —— 切关卡 / 编辑器关闭等场景为 false，不需要也不应该 Rebuild
+    if (!bSessionEnded)
+    {
+        return;
+    }
+
+    // 防御 4：仅当本 Actor 在 Editor World 中时才需要恢复（PIE 退出 → Editor 端材质失效）。
+    //   如果本 Actor 自己就在 PIE/Game World 里，不会发生跨 World 引用失效问题。
+    if (MyWorld->WorldType != EWorldType::Editor && MyWorld->WorldType != EWorldType::EditorPreview)
+    {
+        return;
+    }
+
+    UE_LOG(LogPlanetTopologyDebugMesh, Log,
+        TEXT("[PlanetTopologyDebugMesh] PIE world cleaned up; rebuilding to restore Editor MID + materials. "
+             "(MyWorld=%s, CleanedWorld=%s, bSessionEnded=%d, bCleanupResources=%d)"),
+        *MyWorld->GetName(),
+        World ? *World->GetName() : TEXT("(null)"),
+        bSessionEnded ? 1 : 0, bCleanupResources ? 1 : 0);
+
+    Rebuild();
+#endif
 }

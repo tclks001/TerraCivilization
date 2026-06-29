@@ -318,12 +318,75 @@ cpp 落地后给用户一份"下一步该做什么"清单，包含：
 
 | 限制 | 错误现象 | 正确写法 |
 | --- | --- | --- |
-| ❌ 不允许嵌套定义函数 | `function definition is not allowed here` + `use of undeclared identifier 'Noise3D'` | scoped block 内联（`{ ... }` 包局部变量） |
+| ❌ 不允许嵌套定义函数 | `function definition is not allowed here` + `use of undeclared identifier 'Noise3D'`；**或编辑器静默失败、材质 stats 显示 0 instructions** | scoped block 内联（`{ ... }` 包局部变量）**或** `#define MACRO(IN, OUT) { ... }` 宏 |
 | ❌ 不允许 `#include` | 无（要用节点的 `IncludeFilePaths` 字段） | inline 全部依赖 |
 | ❌ RT ClosestHit 阶段不允许 `Sample(...)` | `Opcode Sample not valid in shader model lib_6_6(closesthit)` | 一律 `SampleLevel(samp, uv, 0)` |
 | ⚠ Inputs 顺序必须与 HLSL 形参一一对应 | 颜色出现不连续色块 / 编译错位 | 严格按详稿 §4.3.1 顺序声明 Inputs |
 
 > R6 函数定义错误 + R7 RT Sample 错误 = HLSL 在 UE Custom 节点的两个最经典坑，必须默认掌握。
+
+#### 3.3.1 ⚠ "不允许函数定义"的根因与修复模板（R6 / R8 反复踩坑）
+
+**根因**：UE 把 Custom 节点的 Code 字段直接拼接进 PS / VS 主函数体——所以 Code 字段本身就**已经在一个函数体内**了。在函数体里再写 `float Foo(...) { ... }` = 嵌套函数定义，HLSL 不允许。
+
+**症状**：
+- 如果 Code 编译成功了：Stats 面板显示 0 instructions（材质 fallback 到默认黑），运行时整球漆黑或不显示
+- 如果 Code 编译失败：Output Log 出现 `function definition is not allowed here` 或 `use of undeclared identifier 'XXX'`（主函数找不到嵌套函数）
+
+**两条修复路径**：
+
+**路径 A — `#define` 宏（推荐，多处复用时）**：
+
+```hlsl
+// ❌ 错误：嵌套函数
+float ValueNoise(float2 p)
+{
+    return frac(sin(dot(p, float2(12.9, 78.2))) * 43758.5);
+}
+float n1 = ValueNoise(uvA);
+float n2 = ValueNoise(uvB);
+
+// ✅ 正确：用宏，宏体 { ... } block 创建子作用域，输出变量在外部声明
+#define VN(IN_P, OUT_N)                                          \
+{                                                                \
+    float2 _vp = (IN_P);                                         \
+    OUT_N = frac(sin(dot(_vp, float2(12.9, 78.2))) * 43758.5);   \
+}
+float n1, n2;
+VN(uvA, n1);
+VN(uvB, n2);
+```
+
+宏的 4 个边界陷阱：
+- ① 宏体外层必须 `{ ... }`，**不要写 `do { ... } while(0)`**——HLSL 不支持 `do-while`
+- ② 续行符 `\` **后面不能有空格**——否则反斜杠续行失效，编译报 `unbalanced braces`
+- ③ 宏内局部变量统一加 `_` 前缀（如 `_vp`），避免与调用方变量名冲突
+- ④ 宏内**只赋值不能 `return`**——主函数体的 return 才能真正退出 PS
+
+**路径 B — `{ ... }` block 内联（一次性、无复用时）**：
+
+```hlsl
+// 单次使用直接 inline：无需 macro，作用域天然隔离
+float n1;
+{
+    float2 _vp = uvA;
+    n1 = frac(sin(dot(_vp, float2(12.9, 78.2))) * 43758.5);
+}
+```
+
+#### 3.3.2 三个不要犯的子错
+
+| # | 错误写法 | 原因 |
+| --- | --- | --- |
+| ① | 直接复制 ShaderToy / Substance 的 `float Foo(...) { return ... }` 代码到 Code 字段 | ShaderToy 是顶层函数级（`mainImage` 主函数外可定义辅助函数）；UE Custom 是 PS 主函数体内，规则不同 |
+| ② | 误以为"`#define MACRO(p) frac(sin(p))` 这种单行表达式宏可以"——然后宏内有多个语句 | 单行表达式宏只能写**单个表达式**，多语句必须用 `{ ... }` block 包装 |
+| ③ | 文档里写"`float Foo(...) { ... }`"作为算法参考，没标注"不能直接粘贴" | 后人会直接 Ctrl+C/V 然后踩坑——务必在算法参考块顶部标记"⚠ 这是数学参考，落地必须改为宏 / 内联" |
+
+#### 3.3.3 项目内已落地样板
+
+- [R8_ParametricTint.md §4.4.2.1](R8_ParametricTint.md)：`#define VN3D` + `#define SAMPLE_PARAM_COLOR` 主材质宏化版（推荐范式）
+- [R8_ParametricTint.md §4.5.3.3 节点 ③](R8_ParametricTint.md)：`#define HASH21` + `#define VN2D` 水面材质宏化版
+- [R8_ParametricTint.md §2.2 / §2.3](R8_ParametricTint.md)：函数语法只作算法参考，章节顶部已加显著警示
 
 ### 3.4 ⚠ `SetTextureParameterValue` 类型一致性
 
@@ -345,33 +408,30 @@ cpp 落地后给用户一份"下一步该做什么"清单，包含：
 
 不对齐：编辑器红色错误，材质 fallback 到 WorldGridMaterial。
 
-### 3.6 ⚠ 顶点法线写法通则（UE5 左手系 + CCW 约定，R7 经典踩坑）
+### 3.6 ⚠ 顶点法线写法通则（UE5 左手系 + CCW 约定，经 R8 实测修订）
 
-> **核心结论**：UE5 是左手坐标系 + CCW frontface（[`D3D12State.cpp:356`](../../Program%20Files/Epic%20Games/UE_5.8/Engine/Source/Runtime/D3D12RHI/Private/D3D12State.cpp) `FrontCounterClockwise = true`，对所有材质硬编码全局生效）+ 漫反射用 `saturate(dot(N, L))`（[`ForwardLightingCommon.ush:387-392`](../../Program%20Files/Epic%20Games/UE_5.8/Engine/Shaders/Private/ForwardLightingCommon.ush)，6 处 lit 路径全部命中同一公式）。**对球外渲染的球面 mesh，正确的顶点法线应指向球心而非球外**——这与几何直觉相反。
+> **核心结论**（已修订）：UE5 是左手坐标系 + CCW frontface（[`D3D12State.cpp:356`](../../Program%20Files/Epic%20Games/UE_5.8/Engine/Source/Runtime/D3D12RHI/Private/D3D12State.cpp) `FrontCounterClockwise = true`）+ 漫反射用 `saturate(dot(N, L))`（[`ForwardLightingCommon.ush:387-392`](../../Program%20Files/Epic%20Games/UE_5.8/Engine/Shaders/Private/ForwardLightingCommon.ush)）。**对球外渲染的球面 mesh，顶点法线应朝外**（`+UnitCenter`）——与几何直觉完全一致。
+>
+> ⚠ 早期版本（R7 期）曾误推为"应朝球心"，该结论已于 R8 期被实测证伪（详见 [SphereTopologyReference.md §11.4](SphereTopologyReference.md#114-关联踩坑历史与文档修订)）。
 
 #### 3.6.1 硬性要求
 
 | # | 要求 | 实施 |
 | --- | --- | --- |
-| ① | **任何时候不要用原始数据直接写法线** | 例如 ❌ `Normal = UnitCenter`（朝外）/ `Normal = (P - PlanetCenter).Normalize()`（朝外）—— 都是几何直觉外法线，与 UE 的 face_normal_LH 反向，Lit 漆黑 |
-| ② | **法线必须自动生成或由三角形叉积计算得到** | 首选 `KismetProceduralMeshLibrary::CalculateTangentsForMesh`（自动按 `cross(P1-P0, P2-P0)` 累加）；或显式 `cross(P1-P0, P2-P0).GetSafeNormal()` 后**确认方向**再写入 |
-| ③ | **如确实需要手填，必须取负** | 例如 球面 mesh 写 `Normal = -UnitCenter`（朝内）并加注释解释——这与 UE face_normal_LH 同向 |
+| ① | **球面 mesh 顶点法线首选 `+UnitCenter`（朝外）**——与几何直觉、SLW 反射、Lit 漫反射公式全部同向 | 例：`Normal = Cell.UnitCenter`。Tangents 留空（Default Lit 不消费切线空间；如需法线贴图再单独算 World→Tangent basis）|
+| ② | **不要滥用 KismetTangents 自动法线** | 仅在"顶点跨三角形共享"的 mesh 上产出平滑法线；本项目"每 Corner 展开 3 独立顶点"拓扑下该工具等价 flat shading，会让阴影 / 光照边界出三角棱面锯齿（§3.13 / §3.14）|
+| ③ | **禁止写 `-UnitCenter`（朝球心）** | 会让 `dot(N, L) ≤ 0` 全像素 → 整球漆黑。早期§3.6 这条写成"必须取负"，现已证伪并删除 |
 
 #### 3.6.2 判别法
 
-- View Mode 切 Lit ↔ Unlit：**Unlit 正常 + Lit 漆黑**是法线方向反向的指纹（不是材质 fallback、不是绕序错误、不是相机位置）
+- View Mode 切 Lit ↔ Unlit：**Unlit 正常 + Lit 漆黑**是法线方向反向的指纹（不是材质 fallback、不是绕序错误、不是相机位置）；在本项目中最常见的原因是**误写 `-UnitCenter`**，改回 `+UnitCenter` 即恢复
 - Buffer Visualization → World Normal viewmode：**朝光源一侧的半球应在 lit 后呈亮**；若反过来 → 法线方向反了
 
-#### 3.6.3 错误归因路径（已避免重蹈，R7 复盘）
+#### 3.6.3 错误归因路径（已避免重蹈，R7→R8 复盘）
 
-R7 Lit 漆黑曾被多次误归因，不要再走这些弯路：
-1. ❌ 怀疑材质槽位挂错 → 实际不是
-2. ❌ 怀疑 Texture Object Parameter 位置 A 空槽 → 实际不是
-3. ❌ 怀疑相机在球内 / Actor 负 Scale / 材质 PDO → 全部排除
-4. ❌ **怀疑绕序错误** → 一度修改 `Triangles.Add` 引入"朝外校正"，反而出现"看到内壁 + 相机移动方向反"等更严重的视觉错误（绕序原本就是对的，CCW from outside）
-5. ✅ 用 `KismetTangents` 自动法线 + 用户实测三角形 CCW from outside + 源码验证 `FrontCounterClockwise=true` + `saturate(dot(N, L))` → 闭环
+R7 期曾报告一次 Lit 漆黑并被误归因为"需要朝内法线"，其实是多个问题被 KismetTangents 同时掩盖。R8 阶段用同一段代码独立 sign 翻转复现证伪了这个误结论。详见 [SphereTopologyReference.md §11.4](SphereTopologyReference.md#114-关联踩坑历史与文档修订)。
 
-**详见**：[SphereTopologyReference.md §11](SphereTopologyReference.md#11-顶点法线与-ue5-光照约定重要结论--经验沉淀)（权威参考）/ [SphericalSDFTerrainDesign.md §11.2](SphericalSDFTerrainDesign.md#112-pmcptg-渲染契约顶点法线与-ue5-光照约定)（PMC↔PTG 跨期契约）/ [R7_TerrainTriplanar.md §6](R7_TerrainTriplanar.md) 排错表"整球 Lit 模式漆黑"行。
+**详见**：[SphereTopologyReference.md §11](SphereTopologyReference.md#11-顶点法线与-ue5-光照约定重要结论--经验沉淀)（权威参考，已修订） / [SphericalSDFTerrainDesign.md §11.2](SphericalSDFTerrainDesign.md#112-pmcptg-渲染契约顶点法线与-ue5-光照约定)（PMC↔PTG 跨期契约） / [R7_TerrainTriplanar.md §6](R7_TerrainTriplanar.md) 排错表"整球 Lit 模式漆黑"行。
 
 ### 3.7 ⚠ UE5 左手系 + Z up 下的"自西向东"方向（W3 经典踩坑）
 
@@ -509,6 +569,568 @@ W3 第一版落地的 `Step_SimulateMoisture` 凭"2D 逆时针旋转 90°"直觉
 | ② | 数据驱动方案（如 W4 的 `Terrain.*` Tag）的验收清单第一项是 **"在编辑器内创建 Tag Source 并粘贴详稿 ini 内容"**，*不是* "重启编辑器"——重启对未注册的 ini 完全无效 |
 | ③ | 凡读引擎源码得到行为推论时，必须**写最小复现**实测验证，*不要*基于"看起来 SearchPath 注册了就该自动扫描"的字面理解发布通则；W4 第一/二/三版就是凭源码字面推论给了错误指引（[详见 §3.8.2 复盘表](#382-错误归因路径w4-实际踩坑--修正-2026-06-28-完整复盘)）|
 | ④ | 在详稿 §6 排错表为每个新增 ini 配置预先写一行"下拉框为空"，给后人留档（[W4_BiomeClassification.md §6](W4_BiomeClassification.md) 已落地）|
+
+---
+
+### 3.9 ⚠ `TUniquePtr<前向声明类型>` 的析构契约（R8 水面 Actor 经典踩坑）
+
+#### 3.9.1 现象
+
+新增 cpp Actor `APlanetWaterShell` 持有 `TUniquePtr<FSphereTopology> Topology`；在 .h 中按"最小依赖"原则只前向声明 `class FSphereTopology;`，未在 .h 显式声明析构函数。编译报错：
+
+```
+error C2027: use of undefined type 'FSphereTopology'
+error C2338: static_assert failed: 'cannot delete an incomplete type'
+note: while compiling class template member function 'TDefaultDelete<...>::operator()'
+note: instantiated in Module.TerraCivilization.gen.cpp
+```
+
+错误指向 `.gen.cpp`——而 `.gen.cpp` 是 UHT 自动生成的，那里**只 include 了 .h（前向声明）而没 include `FSphereTopology.h`**，因此 `delete Topology.Get()` 无法看到完整类型。
+
+#### 3.9.2 根因（UE 5.8 [UniquePtr.h:55-60](../../../Program%20Files/Epic%20Games/UE_5.8/Engine/Source/Runtime/Core/Public/Templates/UniquePtr.h) 官方说明）
+
+`TDefaultDelete<T>::operator()` 上方的注释明确给出修复模板：
+
+> If you get an error here when trying to use a `TUniquePtr<FForwardDeclaredType>` inside a UObject then:
+> - Declare all your UObject's constructors and destructor in the .h file.
+> - Define all of them in the .cpp file. You can use `UMyObject::UMyObject() = default;` to auto-generate the default constructor and destructor so that they don't have to be manually maintained.
+> - Define a `UMyObject(FVTableHelper& Helper)` constructor too, otherwise it will be defined in the .gen.cpp file where your pimpl type doesn't exist. It cannot be defaulted, but it need not contain any particular implementation.
+
+**为什么 VTableHelper 也要显式定义**：UHT 在 `.gen.cpp` 里默认生成 `Class(FVTableHelper&) = default`，同样会触发"看不到完整类型"问题。把它显式定义在 .cpp（已 include 了完整类型的地方），就把析构链路全部限制在 .cpp 里了。
+
+#### 3.9.3 修复模板（强制三件套）
+
+**.h**：声明三个特殊成员（注意 `virtual` + `= default` 都不放在 .h）：
+
+```cpp
+public:
+    APlanetWaterShell();
+
+    /** 显式声明析构 + VTableHelper 构造，原因：持有 TUniquePtr<前向声明类型>。 */
+    virtual ~APlanetWaterShell();
+    APlanetWaterShell(FVTableHelper& Helper);
+```
+
+**.cpp**：定义三个成员，include 完整类型（如 `#include "FSphereTopology.h"`）：
+
+```cpp
+APlanetWaterShell::APlanetWaterShell() { /* 正常初始化 */ }
+APlanetWaterShell::~APlanetWaterShell() = default;             // 必须 .cpp，可 = default
+APlanetWaterShell::APlanetWaterShell(FVTableHelper& Helper) : Super(Helper) {}  // 不能 = default
+```
+
+#### 3.9.4 三条不要犯的子错
+
+| # | 错误写法 | 原因 |
+| --- | --- | --- |
+| ① | `virtual ~APlanetWaterShell() = default;`（写在 .h）| `= default` 让编译器在 .h 处实例化析构 → 仍触发 `.gen.cpp` 路径，原 bug 复现 |
+| ② | `APlanetWaterShell(FVTableHelper& Helper) = default;`（.cpp）| VTableHelper 构造 *不能* `= default`——基类 `AActor::AActor(FVTableHelper&)` 不是 trivially-constructible，必须显式 `: Super(Helper) {}`（与 [APlanetBinder](../Source/TerraCivilization/Private/Interaction/PlanetBinder.cpp) / [APlanetTopologyDebugMesh](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp) 同款）|
+| ③ | "为了简单，干脆在 .h `#include "FSphereTopology.h"`" | 短期能编过，长期破坏 .h 最小依赖原则——下游文件（蓝图反射头、UI 模块、Editor 模块）都会被强制拉入 Grid 模块，编译时间 / 头文件膨胀指数级上升 |
+
+#### 3.9.5 通用规则
+
+> 凡 `UObject` 子类持有 `TUniquePtr<T>` 且 T 在 .h 仅前向声明 → **必须执行 §3.9.3 三件套**。
+>
+> 不仅适用于 `TUniquePtr`，也适用于 `TPimplPtr` / `TSharedPtr<T, ESPMode::NotThreadSafe>` 等其他 RAII 包装。
+>
+> 项目内已落地的样板：
+> - [APlanetBinder](../Source/TerraCivilization/Public/Interaction/PlanetBinder.h)（PTG 早期，最早踩坑）
+> - [APlanetTopologyDebugMesh](../Source/TerraCivilization/Public/Render/PlanetTopologyDebugMesh.h)（R1 拓扑可视化，持有 `TUniquePtr<FSphereTopology>` 与 `TUniquePtr<FWorldGenerator>`）
+>
+> R8 水面层早期版本 `APlanetWaterShell` 也踩过同一坑并按本模板修复，后因独立 Actor 生命周期问题（详见 §3.10）整个被删除，水面 mesh 改为 `APlanetTopologyDebugMesh` 的子组件 `WaterMeshComp`。
+>
+> 三处的修复手法**完全一致**——下次再写新 Actor 持有前向声明 pimpl 时，直接按 §3.9.3 模板抄即可。
+
+---
+
+### 3.10 ⚠ `OnConstruction` 中 `SpawnActor` 的 Editor / PIE 生命周期错位（R8 水面层经典踩坑）
+
+#### 3.10.1 现象
+
+R8 水面层早期实现：在 `APlanetTopologyDebugMesh::Rebuild()`（由 `OnConstruction` 调用）末尾用 `World->SpawnActor<APlanetWaterShell>(WaterShellClass, ...)` 创建一个独立水面 Actor，再把它 `AttachToActor` 到本 Actor。Editor 中放置正常——能看到一颗贴着水纹的半透明球。但**点 PIE 后**：
+
+1. 水面 Actor 在视觉上**变成不透明的默认棋盘格球**（材质丢失）；
+2. 退 PIE 时水面 Actor 整个消失，但 Details 里的 `WaterShellClass` 字段仍在。
+
+也就是 **Editor 视觉与 PIE 视觉不一致**，无法用 PIE 验收水面材质效果。
+
+#### 3.10.2 根因
+
+PIE 启动时 UE 会把整个 Editor World **深拷贝**到 PIE World：
+
+1. 在 `OnConstruction` 中 `SpawnActor` 出来的子 Actor 是**未持久化到 .umap 的临时 Editor Actor**（不在 outliner 选中链路）。深拷贝时它会被一起复制过去，但其中的 `TObjectPtr<UMaterialInterface> WaterMaterial` 引用**没有写进 .umap**——拷贝后变成 None。
+2. PIE 启动后 `OnConstruction` **会再跑一次**，又触发一次 `SpawnActor` + 销毁旧的扫描循环；但旧的 attach 关系在深拷贝时被破坏，扫描循环可能误判，最终留下材质空槽的 Actor。
+3. 退 PIE 时整个 PIE World 被回收，那个 SpawnActor 出来的 Editor 临时实例一并消失。
+
+**核心：`OnConstruction` 中 SpawnActor 的子 Actor 处于"既不属于 Editor 持久层、又会被 PIE 拷贝"的灰色生命周期带，UPROPERTY 引用在拷贝过程中无保障**。
+
+#### 3.10.3 修复模板：把子 Actor 改为 Owner Actor 的 SubObject Component
+
+`APlanetTopologyDebugMesh` 不再持有 `TSubclassOf<AActor> WaterShellClass`，而是**直接拥有一个子组件**：
+
+```cpp
+// .h
+UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "...|R8")
+bool bEnableWaterShell = false;
+
+UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "...|R8")
+TObjectPtr<UMaterialInterface> WaterMaterial;
+
+UPROPERTY(VisibleAnywhere, Category = "...|R8")
+TObjectPtr<UProceduralMeshComponent> WaterMeshComp;
+```
+
+```cpp
+// .cpp 构造函数（注意：CreateDefaultSubobject 必须在构造函数中调用，
+// 不能在 OnConstruction / Rebuild 中创建——否则又落入"非持久 SubObject"陷阱）
+WaterMeshComp = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("WaterMeshComp"));
+WaterMeshComp->SetupAttachment(MeshComp);   // attach 到 Root 的兄弟链
+WaterMeshComp->SetVisibility(false);        // 默认隐形
+// ...其它 PMC 配置（Movable / NoCollision / NoNavigation / AsyncCooking）
+```
+
+```cpp
+// .cpp Rebuild() 末尾
+RebuildWaterMesh_();   // 内部按 bEnableWaterShell + WaterMaterial 重建 mesh + SetMaterial
+```
+
+`Component` 是 Owner Actor 的 **SubObject**——PIE 深拷贝跟着 Owner 整体走，UPROPERTY 引用**一起序列化/拷贝**，无任何额外管理代码、无任何生命周期窗口。
+
+#### 3.10.4 三条不要犯的子错
+
+| # | 错误写法 | 原因 |
+| --- | --- | --- |
+| ① | 在 `OnConstruction` 中 `NewObject<UProceduralMeshComponent>` 而不是构造函数中 `CreateDefaultSubobject` | OnConstruction 中创建的 Component 也属于"非持久 SubObject"，PIE 拷贝时同样会丢字段 |
+| ② | 改用 `Components Hierarchy` 蓝图节点动态 attach 一个 PMC | 蓝图侧动态 Component 的 UPROPERTY 引用同样不进 .umap，PIE 拷贝丢失 |
+| ③ | 给 SpawnActor 加 `Params.ObjectFlags = RF_Transactional \| RF_DefaultSubObject` 试图骗持久层 | UE 不允许这样标记非构造期 SpawnActor 出来的 Actor，会触发 ensure；而且即便骗过去，`RF_DefaultSubObject` 在跨 World 拷贝时不被尊重 |
+
+#### 3.10.5 通用规则
+
+> **凡需要"被 Owner Actor 联动构建 / 销毁"的视觉子对象（mesh、贴图、材质实例、灯光等）→ 必须用 Component（SubObject），不要用 SpawnActor 出来的子 Actor。**
+>
+> 唯一可以用子 Actor 的场景：该子 Actor 自身需要拥有独立的 Replication / GameplayLogic / AbilitySystem，是一个"游戏实体"而非"视觉装饰"。
+>
+> 项目内已落地的样板：
+> - [APlanetTopologyDebugMesh::WaterMeshComp](../Source/TerraCivilization/Public/Render/PlanetTopologyDebugMesh.h)（R8 水面层，本节复盘对象）
+> - [APlanetTopologyDebugMesh::MeshComp](../Source/TerraCivilization/Public/Render/PlanetTopologyDebugMesh.h)（R1 主 mesh，从一开始就走 Component 路径，未踩坑）
+
+---
+
+### 3.11 ⚠ PIE 退出后 Editor 中 MID/Material 引用失效（R8 反复踩坑）
+
+#### 3.11.1 现象
+
+Editor 中放置 `APlanetTopologyDebugMesh` 后 Rebuild 显示正常；进入 PIE 一切正常；**退出 PIE 回到 Editor 后**，主 mesh 与水面 mesh 都变成不透明的默认白材质 / 棋盘格——**但 Material Stats 仍然正常**（说明材质本身没坏），且**再次 Rebuild 或再进 PIE 立即恢复**。
+
+> 关键诊断特征："PIE 退出后才丢、Rebuild 又有了" → 一定是 MID/材质引用层失效，而**不是几何/数据层问题**。
+
+#### 3.11.2 根因（UE 5.x DuplicateWorld + GC 行为）
+
+PIE 启动时 UE 把整个 Editor World **深拷贝**（`UEditorEngine::DuplicateWorldForPIE`）成 PIE World：
+
+| 阶段 | Editor World | PIE World |
+| --- | --- | --- |
+| 启动前 | A_editor + MeshComp_editor + MID_editor | — |
+| PIE 启动后 | 同上（保留） | A_pie + MeshComp_pie + MID_pie（duplicate）|
+| PIE 期间 | MeshComp_editor.SceneProxy → MID_editor | MeshComp_pie.SceneProxy → MID_pie |
+| PIE 退出（Cleanup PIE World）| MeshComp_editor.SceneProxy → **MID_pie 已被 GC，引用悬挂** | A_pie / MID_pie / MeshComp_pie 全部 GC |
+| 渲染线程刷新 RenderProxy | fallback 到 `UEngine::DefaultMaterial` | — |
+
+**触发关键**：`UMaterialInstanceDynamic::Create(Material, this)` 用本 Actor 作为 Outer。**duplicate 时 MID 跟随 Owner 一起进 PIE**，PIE 退出销毁 PIE World 时 MID_pie 被 GC，`MeshComp_editor.SceneProxy` 在某些刷新路径上拿到的 `OverrideMaterials[0]` 引用就指向了 stale 对象，最终 fallback。
+
+类似的引用失效也会发生在：
+- `Texture2D` 通过 `CreateTransient(...)` 创建（Outer = TransientPackage，但被 MID_pie 引用 root → MID_pie GC 后 LUT 也可能被一起回收）
+- `UStaticMeshComponent` 持有的 Override Material
+- 任何 cpp 端 `NewObject<...>(this, ...)` 创建的视觉资源
+
+#### 3.11.3 修复模板：监听 `FWorldDelegates::OnPostWorldCleanup`
+
+```cpp
+// .h
+private:
+    FDelegateHandle PostWorldCleanupHandle;
+
+    /** PIE 退出后 MID/Material 引用恢复回调。 */
+    void OnPostWorldCleanup_(UWorld* World, bool bSessionEnded, bool bCleanupResources);
+```
+
+```cpp
+// .cpp 构造函数末尾
+#if WITH_EDITOR
+    PostWorldCleanupHandle = FWorldDelegates::OnPostWorldCleanup.AddUObject(
+        this, &AMyActor::OnPostWorldCleanup_);
+#endif
+
+// .cpp 析构函数（不能用 = default，必须 Remove 防止 dangling）
+AMyActor::~AMyActor()
+{
+#if WITH_EDITOR
+    if (PostWorldCleanupHandle.IsValid())
+    {
+        FWorldDelegates::OnPostWorldCleanup.Remove(PostWorldCleanupHandle);
+        PostWorldCleanupHandle.Reset();
+    }
+#endif
+}
+
+// .cpp 回调实现
+void AMyActor::OnPostWorldCleanup_(UWorld* World, bool bSessionEnded, bool bCleanupResources)
+{
+#if WITH_EDITOR
+    // 防御 1：本 Actor 即将销毁 → 不能 Rebuild
+    if (!IsValid(this) || HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed)) return;
+
+    UWorld* MyWorld = GetWorld();
+    // 防御 2：被 cleanup 的就是本 Actor 所在 World → 即将销毁，跳过
+    if (!MyWorld || MyWorld == World) return;
+
+    // 防御 3：仅当游戏会话真的结束（PIE/Standalone 退出）时恢复，切关卡 / 编辑器关闭跳过
+    if (!bSessionEnded) return;
+
+    // 防御 4：仅当本 Actor 在 Editor World（PIE 退出 → Editor 端材质失效）时才恢复
+    if (MyWorld->WorldType != EWorldType::Editor &&
+        MyWorld->WorldType != EWorldType::EditorPreview) return;
+
+    // 安全 → 重建一次（重新创建 MID + SetMaterial）
+    Rebuild();
+#endif
+}
+```
+
+> **`FWorldDelegates::OnPostWorldCleanup` 在 Engine 模块** —— 无需依赖 UnrealEd，Build.cs 无需新增模块依赖。Standalone 构建路径下 `WITH_EDITOR=0`，回调不注册不触发，零额外开销。
+
+#### 3.11.4 四条防御为什么都需要
+
+| 防御 | 不写会怎样 |
+| --- | --- |
+| ① `IsValid(this) + RF_BeginDestroyed/FinishDestroyed` | 本 Actor 自己被销毁过程中收到 cleanup 通知（编辑器关闭场景），直接 Rebuild 会触发悬挂访问 crash |
+| ② `MyWorld == World` | 编辑器关闭 → Editor World 自己 Cleanup → 此时 `this` 的 World 即将销毁，Rebuild 中所有 SubObject 操作未定义 |
+| ③ `bSessionEnded` | 切关卡（streaming level load/unload）也走 Cleanup 路径但 `bSessionEnded=false`；不过滤会导致每次切关卡都触发不必要的 Rebuild |
+| ④ `WorldType != Editor` | 本 Actor 自身就在 PIE/Game 中（玩家关卡里跑游戏），此时不会发生跨 World duplicate 问题；不过滤会在游戏运行时多余触发 |
+
+#### 3.11.5 不要用的替代方案
+
+| 错误方案 | 失败原因 |
+| --- | --- |
+| 在 `UMaterialInstanceDynamic::Create(Material, GetTransientPackage())` 改 Outer | 改成 TransientPackage 后 PIE duplicate 不再 fork MID，但 PIE 期间 MID 上注入的参数会污染 Editor MID（因为是同一个对象），PIE 退出后参数变成 PIE 最后一帧的状态 |
+| 在 `PostEditChangeProperty` / `PostLoad` 中重建 | 这两个钩子 PIE 退出**不会触发** —— Editor Actor 完全没收到任何属性变更或加载事件 |
+| 给 MID 字段加 `RF_RootSet` 防 GC | RootSet 是全局根集合，会让 PIE GC 把 MID_pie 也一并保留——内存泄漏 + 渲染状态错乱 |
+| `FEditorDelegates::EndPIE`（UnrealEd 模块）| 能用但要给 Build.cs 加 UnrealEd 模块依赖 + 包 `WITH_EDITOR`；用 `FWorldDelegates::OnPostWorldCleanup` 等价且更轻量 |
+| 改 `UPROPERTY` 标志加 `DuplicateTransient` | 会让 MID 在 duplicate 时被跳过 —— PIE World 里 MID 是 nullptr，PIE 期间就显示棋盘格了，问题被前移 |
+
+#### 3.11.6 通用规则
+
+> 凡是 cpp 端 `NewObject<T>(this, ...)` / `UMaterialInstanceDynamic::Create(Mat, this)` / `CreateTransient(...)` 创建的"视觉资源对象"（材质实例、动态纹理、动态 mesh 数据等），且**只在 Editor 中通过 `OnConstruction` 路径填充**的——
+>
+> **必须**注册 `FWorldDelegates::OnPostWorldCleanup` 兜底回调，按 §3.11.3 模板实现 4 个防御 + Rebuild 调用，确保 PIE 退出后 Editor 视觉一致。
+>
+> 如果 Actor 同时还运行在 PIE/Game 中（实际游戏 Actor），还要在 `BeginPlay` 中再触发一次 Rebuild ——但这是另一个话题（运行时材质刷新），与本节排坑无关。
+>
+> 项目内已落地的样板：
+> - [APlanetTopologyDebugMesh::OnPostWorldCleanup_](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp)（本节复盘对象，R8 主 mesh + 水面层）
+
+---
+
+### 3.12 ⚠ Translucent 不接收 SSR / 反射探针 → 水体应使用 Single Layer Water shading model（R8 水面层经典踩坑）
+
+#### 3.12.1 现象
+
+R8 验收期把水面材质 `M_WaterShell` 配置为：
+
+- Blend Mode = `Translucent`
+- Shading Model = `Default Lit`
+- Translucency → Lighting Mode = `Surface ForwardShading`（已按"看似最优"配置）
+- Specular = 0.5~1.0、Roughness = 0.05~0.2、Normal = fbm 法线扰动
+
+实际效果：水面**只是浅蓝色透明球，无任何反射 / 高光，PIE 期间也看不出时间流动**。
+
+强力诊断（详见 §3.12.4 测试 A）证伪了"通路坏了"假设：把 Blend Mode **临时改为 `Opaque` + Roughness=0**，反射立刻显著、fbm 噪声波纹流动也清晰可见——说明 fbm / sparkle 通路本身完全正确。
+
+#### 3.12.2 根因
+
+**UE5 Translucent shading model 在不开 Project-wide Forward Shading 的前提下，物理上无法接收 ScreenSpaceReflection / ReflectionCapture / SkyLight 反射**。这是 UE5 渲染管线的硬约束——Translucent 走的是 Forward 简化路径，默认管线下：
+
+| 反射源 | Translucent 接收？ |
+| --- | --- |
+| ScreenSpaceReflection | ❌（除非在 Translucency 分组里勾 Screen Space Reflections，且效果有限）|
+| ReflectionCapture（Box/Sphere）| ❌ |
+| SkyLight 实时 capture | ❌ |
+| Lumen Reflections | ❌ |
+| 太阳 specular（DirectionalLight）| ✅（但只是单方向，不算"反射"，是"高光"）|
+
+所以 Translucent 水面只能看到一点点太阳高光（如果 Roughness 极低且光向恰好对着相机），但**永远看不到天空映在水面上**。这与"水的反射"视觉直觉强烈冲突，也是新手在 UE5 中做水体的最高频踩坑。
+
+#### 3.12.3 修复路径
+
+**首选：切到 `Single Layer Water` Shading Model**（UE5 官方 Water Plugin 用的同一套）
+
+| 配置项 | 改为 |
+| --- | --- |
+| Blend Mode | `Opaque` ⚠ |
+| Shading Model | `Single Layer Water` ⚠ |
+| Two Sided | ✓ |
+| Translucency Lighting Mode | 失效（Opaque 模式下不可见）|
+| 主节点 Opacity 引脚 | 失效（Opaque 模式下不可见）|
+
+SLW 本质是不透明渲染（写深度、参与 GBuffer），但内置"水下颜色透出 + SkyLight 反射 + Lumen 反射 + 太阳 specular"的整套近似——既透又反，且性能比 Translucent 还好。
+
+新增 `Single Layer Water Material Output` 节点（材质图右键搜索添加），4 个引脚：
+
+- Scattering Coefficients：水的散射颜色（蓝绿调）
+- Absorption Coefficients：水的吸收颜色（红光衰减最快）
+- Phase G：散射各向异性（先用 0）
+- Color Scale Behind Water：水下颜色染色（先用 (1,1,1) 让水下原色透出）
+
+场景前置条件**缺一不可**：
+
+| # | 条件 | 缺失症状 |
+| --- | --- | --- |
+| ① | DirectionalLight 勾 `Atmosphere Sun Light` | 无太阳 specular highlight |
+| ② | 场景里有 ASkyLight + 勾 `Real Time Capture` | **反射全黑** |
+| ③ | Project Settings → Reflection Method ≠ None | SSR 失效 |
+
+> **可选**：Sphere/Box ReflectionCapture 提升局部反射；Lumen Reflections 是默认推荐路径。
+
+完整 R8 SLW 实现见 [R8_ParametricTint.md §4.5.3](R8_ParametricTint.md)。
+
+**次选**（不推荐，仅作记录）：保留 Translucent，开启 Project Settings → Rendering → **Forward Shading** ✓ + 材质 Translucency 勾 Screen Space Reflections + Forward Shading 勾 High Quality Reflections。这条路会**全项目所有材质切到 Forward 渲染**——影响 Lumen / Nanite 兼容性，R8/R8.5 阶段不要为一个测试球开此项目级开关。
+
+**末选**（伪反射，仅作 placeholder）：保留 Translucent + Default Lit，承认无真反射，把 sparkle 通过 Emissive 显式画出来。视觉够用但不是物理反射，跟相机角度 / 光源位置无关。R8 验收期已抛弃此路径。
+
+#### 3.12.4 二分诊断流程（强信号、不可错认）
+
+当遇到"水面看起来不动 / 没反射"时，按下面流程二分定位根因：
+
+**测试 A：fbm 是否在跑？**
+
+把 Custom Node A（Wave Noise，输出 Float1）输出 → Multiply ×3 → 接 Emissive Color；Blend Mode 临时改 Opaque、Opacity 接 1。Emissive 不走光照不走 Specular，**只要 fbm 在跑就一定能看到漂移噪声**。
+
+| 现象 | 结论 |
+| --- | --- |
+| 缓慢漂移的灰度噪声 | fbm OK，问题在反射通路 → 跳测试 B |
+| 静态不动 | Time 没接 / fbm 跑死 |
+| 纯白纯黑 | VN 宏续行符问题 |
+
+**测试 B：反射通路是否在工作？**
+
+把 M_WaterShell 临时改为 Blend Mode = Opaque + Roughness = 0 + Specular = 1（不改 Shading Model）。
+
+| 现象 | 结论 |
+| --- | --- |
+| 反射显著 | Default Lit + Opaque 下反射正常 → 100% 是 Translucent 的 SSR/Capture 不接收问题 → 切 SLW |
+| 仍然没反射 | 场景缺 SkyLight / Lumen Reflections 关闭，先修场景再谈 |
+
+#### 3.12.5 通用规则
+
+> 凡是"既要透光又要反射"的视觉对象（水体、薄冰、玻璃、半透明能量球）：
+>
+> - 水体 → **Single Layer Water**（首选）
+> - 薄冰 / 玻璃 / 半透明能量球 → 评估 SLW 是否够用；如果不够再考虑 Translucent + Forward Shading 全开
+>
+> **绝不要**用 Translucent + Default Lit + 期待真反射 —— UE5 物理上不支持，是新手最高频陷阱。
+>
+> 项目内已落地的样板：
+> - [R8_ParametricTint.md §4.5.3](../Docs/R8_ParametricTint.md)（M_WaterShell SLW 完整节点级实现，本节复盘对象）
+
+---
+
+### 3.13 ⚠ 独立顶点 mesh + KismetTangents 自动法线 = 隐式 flat shading（R8 水面层经典踩坑）
+
+#### 3.13.1 现象
+
+R8 水面层 `WaterMeshComp` 用 sub=3 球面拓扑，几何路径与主 mesh 完全相同——**每个 Corner 展开 3 个独立顶点（不共享）**——共 1280 三角形 / 3840 顶点。法线交给 `UKismetProceduralMeshLibrary::CalculateTangentsForMesh` 自动计算（这是 §3.6 推荐的"避免手填法线坑"的标准做法）。
+
+实际效果：水面 SLW 反射能看到天空，时间流动也对，**但球面表面有清晰可见的 1280 个三角小棱面**——光滑反射被棱角"切割"成片状。
+
+#### 3.13.2 根因
+
+`CalculateTangentsForMesh` 的算法是：
+
+1. 对每个三角形 T，算面法线 N(T) = `cross(P1-P0, P2-P0).GetSafeNormal()`
+2. **对每个顶点 V**，遍历所有"以 V 为顶点的三角形"，把它们的 N(T) 相加并归一化 → 得到顶点法线
+
+这个算法在**顶点共享**的 mesh 上工作正常（顶点 V 被多个三角形共享 → 法线被周围多个面取平均 → 光滑插值），但在**顶点完全不共享**的 mesh 上：
+
+- 每个顶点 V 只属于一个三角形（因为我们对每个 Corner 展开 3 独立顶点）
+- 步骤 2 的"求和"只有一个面 → 顶点法线 = 该三角形的面法线
+- 三角形 3 个顶点的法线**完全相同**（都等于面法线）
+- 光栅化插值出来的逐像素法线 = **常量面法线**
+- 视觉效果 = **flat shading**（每个三角形是一个清晰的扁平面）
+
+简言之：**`CalculateTangentsForMesh` 在"顶点完全不共享"的几何上不能产出光滑法线，等价于隐式 flat shading**。
+
+#### 3.13.3 为什么主 mesh 没踩到这个坑
+
+R8 主 mesh 同样是"每 Corner 展开 3 独立顶点"——但你不会在 R7/R8 主材质里看到棱面。原因：
+
+- 主材质 R8 走 SDF + Triplanar 路径，**法线在 PS 端从 `WorldPosition` 球面反算**：`float3 dir = normalize(WorldPosition - PlanetCenter)` → 这是数学完美球面外法
+- 顶点法线（KismetTangents 算出的 flat 法线）**完全不参与材质计算**——主材质的 Custom 节点根本不读 VertexNormalWS
+- → flat shading 法线在主 mesh 上是"隐藏 bug，无视觉影响"
+
+而水面 SLW shading model **必须读顶点法线**（通过 Compose Normal 节点 + VertexNormalWS）—— flat shading 法线被 SLW 直接消费 → 棱面立刻可见。
+
+#### 3.13.4 修复模板：根据 mesh 几何选择法线策略
+
+| 几何类型 | 推荐法线策略 | 原因 |
+| --- | --- | --- |
+| 顶点共享 mesh（FRenderTri 路径、Static Mesh）| KismetTangents 自动 | 共享顶点会被多面取平均，光滑插值 |
+| 顶点不共享 + 球面（如 IsoSphere primal）| **直接用 `UnitCenter` 作为顶点法线** | 数学完美光滑，零棱面 |
+| 顶点不共享 + 任意几何 | 显式预计算"每顶点共享圈"再求平均 | 自己实现 smooth shading |
+| 顶点不共享 + 想要 flat shading（低多边形美术风格）| KismetTangents 自动 | flat shading 是想要的效果，刚好对上 |
+
+**水面 mesh 的修复代码**（已落地于 [PlanetTopologyDebugMesh.cpp `RebuildWaterMesh_`](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp)）：
+
+```cpp
+// ❌ 错误：顶点不共享 mesh + KismetTangents = flat shading
+// const FVector NZero = FVector::ZeroVector;
+// Vertices.Add(PA); Normals.Add(NZero);   // 占位
+// ...
+// UKismetProceduralMeshLibrary::CalculateTangentsForMesh(
+//     Vertices, Triangles, UV0, AutoNormals, AutoTangents);
+// Normals = MoveTemp(AutoNormals);        // 实际是 flat 法线
+
+// ✅ 正确：球面 mesh 直接用 UnitCenter 作为顶点法线
+const FVector NA = WaterTopology->Cells[CA].UnitCenter;
+const FVector NB = WaterTopology->Cells[CB].UnitCenter;
+const FVector NC = WaterTopology->Cells[CC].UnitCenter;
+
+Vertices.Add(PA); Normals.Add(NA);
+Vertices.Add(PB); Normals.Add(NB);
+Vertices.Add(PC); Normals.Add(NC);
+
+// Tangents 留空——KismetTangents 一调用会先重算 Normals 把刚填的 UnitCenter 砸掉；
+// 而 SLW shading model 通过 Normal 引脚直接消费 World Space 法线，不读 Tangent 空间。
+Tangents.Reset();
+```
+
+#### 3.13.5 三条不要犯的子错
+
+| # | 错误写法 | 原因 |
+| --- | --- | --- |
+| ① | "为了简单，先填 ZeroVector，最后调 KismetTangents 覆盖"——但 mesh 是顶点不共享 | KismetTangents 会把 ZeroVector 替换成**面法线**，但因为顶点不共享 → flat shading（本节根因）|
+| ② | 既填 UnitCenter 又调 KismetTangents | KismetTangents 会**覆盖**你刚填的 UnitCenter 法线（参数是 `out OutNormals`，整组重写），白填了 |
+| ③ | 试图通过提高 SubdivisionLevel（sub=4/5/6）来"让棱面变小看不出来" | 棱面数量增加但仍存在；性能上升；**根因没解决**——正确做法是改法线策略 |
+
+#### 3.13.6 通用规则
+
+> 凡是 ProceduralMesh 上"每三角形展开 3 独立顶点"的几何（**球面 IsoSphere mesh、SDF 软边 mesh、Cell 编码 mesh** 都是这个路径），**绝不能盲目调用 `KismetProceduralMeshLibrary::CalculateTangentsForMesh` 期待光滑法线**——它在该几何上等价于 flat shading。
+>
+> 球面情况下直接用 `UnitCenter` 作为顶点法线即可（Tangent 留空，由材质 Shading Model 决定是否需要——若需要 Tangent 空间反算法线，再单独算 World→Tangent basis）。
+>
+> 项目内已落地的样板：
+> - [APlanetTopologyDebugMesh::RebuildWaterMesh_](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp)（水面 SLW 光滑反射球，§3.13 复盘对象，+UnitCenter）
+> - [APlanetTopologyDebugMesh::Rebuild](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp)（主 mesh 同样用 +UnitCenter，**§3.14 复盘对象**）
+>
+> ⚠ **本结论的修订史**：
+> - 早期版本的 §3.13 曾说"主 mesh 仍走 KismetTangents 路径，因为材质 PS 端 `normalize(WorldPosition - PlanetCenter)` 反算法线"——但 R8 主材质 PS 的 dir 只用作 Triplanar 投影方向、**未覆盖 Normal 引脚**，Lit 走的仍是顶点法线。该说法已修正为"主 mesh 也应取 +UnitCenter、不调 KismetTangents"（§3.14）。
+> - 早期版本的 §3.14 / [SphereTopologyReference.md §11](../Docs/SphereTopologyReference.md) 曾说"主 mesh 顶点法线应取 -UnitCenter（朝球心）以匹配 UE5 face_normal_LH"——该结论已于 R8 阶段被用户实测 sign 翻转复现证伪（朝内法线令整球漆黑）。现已修订为"+UnitCenter、朝外"，详见 [SphereTopologyReference.md §11.4](../Docs/SphereTopologyReference.md#114-关联踩坑历史与文档修订) 修订史。
+
+---
+
+### 3.14 ⚠ Flat 顶点法线在 PS 反算法线材质上的"阴影边界尖刺锯齿"（§3.13 的兄弟坑）
+
+#### 3.14.1 现象
+
+主 mesh `APlanetTopologyDebugMesh::Rebuild` 走 §3.13 复盘的"每 Corner 展开 3 独立顶点 + KismetTangents 自动法线 = 隐式 flat shading"路径。早期版本认为这"无视觉影响"——因为主材质 PS 端用 `normalize(WorldPos - PlanetCenter)` 反算球面法线，**着色阶段不消费顶点法线**。
+
+但实际 PIE 测试显示：
+
+- **球面着色本身光滑**（PS 反算法线工作正常）✓
+- **昼夜分割线（光照明暗过渡边界）沿 mesh 三角形边缘呈现锯齿状阶梯**——肉眼可清晰数出 sub=3 的 1280 个三角形面 ✗
+- **远距离投射阴影**（CSM）边界同样呈三角棱面阶梯 ✗
+- 调高 `WaterSurfaceOffset` 后水面遮挡了部分锯齿 → 误判为 Z-fighting，但**真实根因不在水面**
+
+#### 3.14.2 根因：阴影 / N·L 判定不走材质 PS
+
+UE5 渲染管线中**消费顶点法线**的路径远多于材质 PS：
+
+| 路径 | 是否消费 VertexNormal | 是否走材质 PS 反算 |
+| --- | --- | --- |
+| Base pass 着色 | ✓ 默认；但材质可在 PS 端覆盖 Normal 引脚 | ✓ |
+| Shadow caster pass（DepthOnly + 三角形 face cull）| ✓（VS 阶段算 dot(N, LightDir) < 0 的三角形不投影）| ✗ 完全不走 PS |
+| CSM 接收阴影 / Lit cull | ✓ | ✗ |
+| **N·L back-face self-shadow**（昼夜分割线核心）| ✓ | ✗ |
+| Lumen 反射几何代理 | ✓ | ✗ |
+| Distance Field 阴影 | ✓ | ✗ |
+
+主材质 PS 反算 Normal 只能解决**第 1 项**——剩下的 5 条全部用顶点法线，**flat 顶点法线在这些路径上原汁原味呈现 1280 个三角面**。
+
+具体到昼夜分割线：UE 在 VS 阶段对每个三角形算 `dot(face_normal, LightDir)`，背向光的三角形整体被 N·L self-shadow 抑制（置 0 或近似 0）—— flat 法线 = 三角形 3 顶点共享面法线 = **整个三角形要么受光要么不受光**，相邻三角形的"二选一"差异在分割线两侧形成棱面阶梯。这就是肉眼看到的 sub=3 三角形边缘锯齿。
+
+#### 3.14.3 为什么 PS 反算法线无法救济
+
+很自然的反应是："那我在 PS 里覆盖 Normal 引脚，把 flat 顶点法线替换成 PS 反算的 dir 法线不就好了吗？"——**不行**。
+
+Material Editor 的 Normal 引脚**只影响 base pass 的反射 / 漫反射**。Shadow caster pass 在 UE 渲染管线里是**独立 pass**，由引擎在 cull stage 直接拿 vertex buffer 的 Normal 字段做几何剔除——**这个 pass 不读材质 Normal 引脚**（甚至材质实例化都不在 shadow pass 里跑）。
+
+所以即使你写了完美的 PS 反算法线，shadow / N·L back-face culling 仍然按 vertex buffer 里的 flat 法线工作。**根治办法只有一个：在 vertex buffer 里写入光滑顶点法线**。
+
+#### 3.14.4 修复模板：在 cpp 端直接写 +UnitCenter
+
+按 [SphereTopologyReference.md §11](../Docs/SphereTopologyReference.md)（已修订）约定：
+
+| 材质 Shading Model | 顶点法线方向 | 理由 |
+| --- | --- | --- |
+| Default Lit / 主材质（球外渲染）| **`+UnitCenter`**（朝外）| `saturate(dot(+UnitCenter, LightDir))` 在朝光半球 > 0 → Lit 正确受光；顶点间法线插值平滑 |
+| Single Layer Water（球外渲染）| **`+UnitCenter`**（朝外）| SLW 期待"朝外法线 = 入射光反射方向"，与 Default Lit **同向** |
+| Unlit | 任意 / 留空 | 不消费法线 |
+
+⚠ **早期版本的错误说法**：该表曾写"Default Lit 用 -UnitCenter（朝球心）"——该结论被 R8 阶段用户实测 sign 翻转复现证伪（-UnitCenter 令整球漆黑）。详见 [SphereTopologyReference.md §11.4](../Docs/SphereTopologyReference.md#114-关联踩坑历史与文档修订)。**主 mesh 和水面 mesh 均取 +UnitCenter**。
+
+**主 mesh 修复代码**（已落地于 [PlanetTopologyDebugMesh.cpp `Rebuild`](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp)）：
+
+```cpp
+// ❌ 错误：占位 + KismetTangents 自动覆盖 = flat shading
+// const FVector NA = FVector::ZeroVector;
+// const FVector NB = FVector::ZeroVector;
+// const FVector NC = FVector::ZeroVector;
+// ...
+// UKismetProceduralMeshLibrary::CalculateTangentsForMesh(...);  // 覆盖成 flat 面法线
+
+// ❌ 也错误：-UnitCenter（朝球心）会让 dot(N, L) ≤ 0 全像素 → 整球漆黑
+// const FVector NA = -Topology->Cells[CA].UnitCenter;
+
+// ✅ 正确：每个顶点（位置 = Cell 中心）的光滑顶点法线 = +UnitCenter（朝外）
+const FVector NA = Topology->Cells[CA].UnitCenter;
+const FVector NB = Topology->Cells[CB].UnitCenter;
+const FVector NC = Topology->Cells[CC].UnitCenter;
+
+// Tangents 留空——主材质 PS 端不消费 Tangent 空间法线
+// 不调 KismetTangents（避免覆盖刚填的法线，且本路径独立顶点上等价 flat shading）
+TArray<FProcMeshTangent> AutoTangents;
+Tangents = MoveTemp(AutoTangents);
+```
+
+#### 3.14.5 二分诊断流程：识别"是 PS 反算 OK 但顶点法线 flat"
+
+当遇到"主体表面平滑但**光照 / 阴影边界**呈三角阶梯"时：
+
+| 测试 | 现象 | 结论 |
+| --- | --- | --- |
+| 旋转 mesh 看锯齿是否跟着转 | 跟着 mesh 几何走 | 阴影边界跟 vertex buffer 法线 → **顶点法线 flat** |
+| Buffer Visualization → World Normal | 球面显示 1280 个色块（每三角形一种颜色）| 顶点法线 = 面法线 = flat |
+| Buffer Visualization → World Normal | 球面显示连续色调（极少数缝隙）| 顶点法线 smooth ✓ |
+| 关掉 DirectionalLight 锯齿是否消失 | 消失 | 锯齿来自 N·L self-shadow，根因在顶点法线 |
+
+#### 3.14.6 三条不要犯的子错
+
+| # | 错误想法 | 实际后果 |
+| --- | --- | --- |
+| ① | "主材质走 PS 反算法线，顶点法线 flat 不影响视觉" | 阴影边界 / shadow caster cull / Lumen 反射代理全部消费 vertex buffer 法线，PS 反算救不了它们 |
+| ② | "降低 SubdivisionLevel 阴影锯齿就看不出来了" | 三角形数量减少但单个三角形面积变大，锯齿反而更显眼 |
+| ③ | "在 Material 里勾掉 Cast Shadows / 关掉 DirLight CSM 来回避问题" | 治标——视觉上的"球体真实感"依赖光照细节，关掉 self-shadow 后球面变成"贴图 + 环境光"风格，跟 SLW 反射效果不匹配 |
+
+#### 3.14.7 通用规则
+
+> **凡是 mesh 几何的"阴影边界 / 昼夜分割线 / 接触面"上看到沿三角形棱面的锯齿** —— 直接定位到顶点法线为 flat（无论是 KismetTangents 在独立顶点上的 flat shading，还是手填面法线的 low-poly 风格）。
+>
+> 主材质 PS 端的法线反算只解决 base pass 渲染，**不解决任何 self-shadow / N·L cull / Lumen 几何代理路径**——这些路径只看 vertex buffer。
+>
+> **球面 mesh 的修复模板**：顶点法线直接写 `+UnitCenter`（朝外）——Default Lit 和 SLW 同向，不调 KismetTangents。
+>
+> 项目内已落地的样板：
+> - [APlanetTopologyDebugMesh::Rebuild](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp)（主 mesh，本节复盘对象，+UnitCenter）
+> - [APlanetTopologyDebugMesh::RebuildWaterMesh_](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp)（水面 SLW，§3.13 复盘对象，+UnitCenter）
 
 ---
 

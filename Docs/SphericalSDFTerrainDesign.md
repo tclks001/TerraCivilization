@@ -873,7 +873,7 @@ CPU 侧：
 | **R5** | ✅ 已完成 | 在 R4 球面 Voronoi 距离空间做软边——定义 $\delta_i = \theta_i - \min_{j\neq i}\theta_j$（到 Voronoi 边的有符号绝对弧度距离，$\theta_i = \arccos(\hat{d}\cdot V_i)$），权重 $w_i = \text{smoothstep}(\text{EdgeWidth}/2, -\text{EdgeWidth}/2, \delta_i)$。`EdgeWidth = 0` 退化为 R4 硬边；`EdgeWidth > 0` 时过渡带是测地线大圆弧两侧的等距弧度带；颜色三层独立 hash 加权。`EdgeWidth` 单位为**绝对弧度**（跨 sub 语义不变）（详见 [R5_SharpenSoftEdge.md](R5_SharpenSoftEdge.md)） | `EdgeWidth = 0` 视觉与 R4 完全一致；`EdgeWidth = 0.05`（约 2.86°）看到 hex/pent 边变成等宽测地线软边；`EdgeWidth = 0.20` 看到大幅柔软渐变；过渡带在 mesh 边中点处与硬边路径几何严格对齐（**无相位错位**） |
 | **R6** | ✅ 已完成 | 在 R5 球面距离空间叠加 per-cell 3D 噪声扰动——$\tilde\delta_i = \delta_i + n_i(\hat{d}) \cdot \text{NoiseAmplitude}$，软边权重沿用 R5 公式但用 $\tilde\delta_i$ 替代 $\delta_i$。`NoiseAmplitude` 单位为**绝对弧度**（与 EdgeWidth 同制），`NoiseScale` 单位为每弧度周期数；`NoiseAmplitude = 0` 退化为 R5；与 EdgeWidth **正交**——可独立控制"软/硬"和"直/蜿蜒"两个视觉维度（详见 [R6_BoundaryNoise.md](R6_BoundaryNoise.md)） | `NoiseAmplitude = 0` 视觉与 R5 一致；`NoiseAmplitude = 0.05, NoiseScale = 10` 看到 hex/pent 边变成蜿蜒曲线但仍可识别原 cell 形状；跨 mesh 边时 cell 边形状连续无缝；`EdgeWidth = 0 + NoiseAmplitude > 0` 看到硬边蜿蜒；`EdgeWidth > 0 + NoiseAmplitude > 0` 看到软边蜿蜒 |
 | **R7** | ✅ 已完成 | 把 R6 输出里的三层 `hash(layer_i+1)` 哈希色换为 `SampleTriplanar(TerrainAlbedoArray, layer_i, WorldPos, dir)` 真实地表采样；R4-R6 的 δ / w / dirP 计算链路全部保留。需新建 1–2 张 `Texture2DArray`（`TerrainAlbedoArray` + 可选 `TerrainNormalArray`），slice 下标从 `CellAttrLUT.r` 读取。面法 $\hat{n}$ 必须用**未扰动的 dir** 而非 R6 dirP（详见 [R7_TerrainTriplanar.md](R7_TerrainTriplanar.md)） | 调小 NumLayersHint（如 4）后能看到同色块上三个 Triplanar 采样区块（yz / xz / xy 三面混合未出接缝）；调大 NumLayersHint=16 后 cell 内部是草/沙/雪/岩交错的马赛克拼接，cell 边处蜿蜒软过渡（R6） |
-| **R8** | ⏳ 待开始 | **材质参数化（Tint 路径）**：把 R7 的 19 张独立 `Texture2DArray` slice 升级为 **3 张基础 PBR 套件（Soil / Rock / Forest Canopy）+ 多通道参数 LUT 微调**——每个 cell 通过 4 张 RGBA LUT 携带 (BaseTexIdx, OverlayIdx, OverlayBlend, Tint, HSV 修正, Normal/Roughness/Specular 修正, Triplanar Scale)。同时**新增水面层**：在 IsoSphere 之外额外渲一个 sub=3 的简易球皮 mesh，挂噪声扰动的反光 + 透光水材质，作为全局水面（与基础 mesh 自然遮挡，本期无球面网格无法遮挡 → 独立验收）。**不依赖 W4**：CellAttrLUT.r（BaseTexIdx）继续沿用 R3 的 Knuth 哈希 placeholder，仅观察 17 种地形配方的视觉效果是否合理 | (a) 关掉水面层后地形球展示 17 种地形 placeholder 配方，颜色 / 粗糙度 / 法线强度的差异肉眼可辨；(b) 单独打开水面层后看到一颗"贴满水纹的球"（无遮挡），噪声扰动让反光斑驳；(c) R6 软蜿蜒边在 17 种 tint 之间自然过渡；(d) 详稿见 [R8_ParametricTint.md](R8_ParametricTint.md)（待撰写）|
+| **R8** | 🛠 cpp 完成（待材质验收）| **材质参数化（Tint 路径）**：把 R7 的 19 张独立 `Texture2DArray` slice 升级为 **3 张基础 PBR 套件（Soil / Rock / Forest Canopy）+ 多通道参数 LUT 微调**——每个 cell 通过 4 张 RGBA LUT 携带 (BaseTexIdx, OverlayIdx, OverlayBlend, Tint, HSV 修正, Normal/Roughness/Specular 修正, Triplanar Scale)。同时**新增水面层**：在 IsoSphere 之外额外渲一个 sub=3 的简易球皮 mesh，挂噪声扰动的反光 + 透光水材质，作为全局水面（与基础 mesh 自然遮挡，本期无球面网格无法遮挡 → 独立验收）。**不依赖 W4**：CellAttrLUT.r（BaseTexIdx）继续沿用 R3 的 Knuth 哈希 placeholder，仅观察 17 种地形配方的视觉效果是否合理 | (a) 关掉水面层后地形球展示 17 种地形 placeholder 配方，颜色 / 粗糙度 / 法线强度的差异肉眼可辨；(b) 单独打开水面层后看到一颗"贴满水纹的球"（无遮挡），噪声扰动让反光斑驳；(c) R6 软蜿蜒边在 17 种 tint 之间自然过渡；(d) 详稿见 [R8_ParametricTint.md](R8_ParametricTint.md) ✅|
 | **R8.5** | ⏳ 待开始 | **自研球面网格（无 LOD）**：构建 `FSphereTopology(SubdivisionLevel + 2)` 的 primal mesh 作为渲染 mesh（每个粗 Tri 细分为 16 份），每个细顶点预计算 "最近 3 Cell + acos 三方权重 w[3]"（与 §14.7 / §16.3 同公式），按 `Pos = Dir·(R + Σ wᵢ · Elevᵢ · HeightScale)` 做径向位移、用 `KismetTangents` 重算法线。把 R8 材质（17 种 tint 配方 + 水面层）挂到自研网格上联调，确认 Elevation 位移 + 水面遮挡 + tint 边界三者视觉协调。**不做 LOD**——sub=5 全球 ~10K cells × 16 ≈ 160K 三角形，UE 常规 ProcMesh 吃得下（详见 §16） | 山脉沿板块边界连续抬升、海底盆地下沉、水面把海底完全遮挡（Ocean.Deep slot 配方仅在水面被掀开时可见）；R6 边界软过渡仍然成立，且与 Elevation 高度过渡天然同步（共用 w[3]）；R8 与 R8.5 视觉差异主要是"有起伏 / 无起伏" |
 | **W4 验收** | ⏳ 待开始（依赖 R8.5）| 在 R8 + R8.5 联调通过后，把 CellAttrLUT.R / 4 通道材质 LUT 中的"BaseTexIdx + 17 种配方索引"从 Knuth 哈希 placeholder 切换为 `Def->LayerIndex` + `Def->FTerrainMaterialParams` 真实查表（W4 详稿 [W4_BiomeClassification.md](W4_BiomeClassification.md) 已就绪）。本步**不增加 SDF 端工作量**——SDF 端只是把 17 种配方的 BaseTexIdx 换源 | 球面呈现合理的"赤道沙漠 / 温带森林 / 极地冰原 + 12 五边形 + 大陆东岸森林 vs 西岸沙漠"分布；调试师可在编辑器里改 `T_Forest_Tropical.uasset` 的 `ClimateRules[0].Temperature` 区间立即生效 |
 | **R9** | ⏳ 待开始 | 加 Decor / Owner / Fog 三套独立 LUT（在 R8 4 通道基础上扩展） | 政治版图 + 战争迷雾 + 城市 / 农田装饰上线 |
@@ -899,7 +899,7 @@ CPU 侧：
 R8 (Tint 参数化 + 水面层) → R8.5 (自研球面网格无 LOD) → W4 (Biome 分类正式接入) → R9 (多 LUT) → R10 (LOD) → R11 (高亮)
 ```
 
-- **R8** 不依赖 W4——`CellAttrLUT.R` 与 4 通道材质 LUT 的 BaseTexIdx 继续沿用 R3 的 Knuth 哈希 placeholder，仅观察 17 种地形配方 + 水面层的视觉效果是否合理；详见 §16.1 与 [R8_ParametricTint.md](R8_ParametricTint.md)（待撰写）。
+- **R8** 不依赖 W4——`CellAttrLUT.R` 与 4 通道材质 LUT 的 BaseTexIdx 继续沿用 R3 的 Knuth 哈希 placeholder，仅观察 17 种地形配方 + 水面层的视觉效果是否合理；详见 §16.1 与 [R8_ParametricTint.md](R8_ParametricTint.md) ✅。
 - **R8.5** 把 mesh 从 IsoSphere 切到 `FSphereTopology(SubdivisionLevel + 2)` 自研球面网格，实现径向位移（Elevation）+ 法线重算 + 水面遮挡；详见 §16。
 - **W4** 推迟到 R8 + R8.5 联调通过后再调，因为有了真实地形位移 + 水面遮挡后调 Whittaker 区间反而更直观。WorldGen 端 W4 详稿 [W4_BiomeClassification.md](W4_BiomeClassification.md) 已就绪、不阻塞此排序。
 - 原计划的 R11/R12/R13 PTG 路线**已废弃**，§14 章节文字保留作历史档案。
@@ -921,43 +921,53 @@ R8 (Tint 参数化 + 水面层) → R8.5 (自研球面网格无 LOD) → W4 (Bio
 | **左手系 + CCW frontface** | UE5 是左手坐标系（X 前 / Y 右 / Z 上），D3D12 RasterizerDesc 全局硬编码 `FrontCounterClockwise = true`；默认 `CullMode = CM_CW` 映射为 `D3D12_CULL_MODE_BACK`（剔除背面、**保留 CCW frontface**） | [`D3D12State.cpp` L34 / L356](../../Program%20Files/Epic%20Games/UE_5.8/Engine/Source/Runtime/D3D12RHI/Private/D3D12State.cpp) |
 | **漫反射 N·L 同侧** | 所有 lit 路径共用 `float NoL = saturate(dot(N, L));`，顶点法线 `N` 与该路径定义的光向 `L` 同侧才亮，反侧被 clamp 为 0 | [`ForwardLightingCommon.ush` L387-392](../../Program%20Files/Epic%20Games/UE_5.8/Engine/Shaders/Private/ForwardLightingCommon.ush)（6 处 lit 路径全部同公式） |
 
-#### 11.2.2 几何推论：球面 mesh 顶点法线应指向球心
+#### 11.2.2 几何推论：球面 mesh 顶点法线应朝外（已修订）
 
-在 UE5 左手系下，对一个从球外被相机看到的 CCW from outside 三角形：
+**数学事实**（R8 期修订）：
 
 ```
-face_normal_LH = -cross_RH(P1-P0, P2-P0)
+叉积 cross(P1-P0, P2-P0) 的代数定义是 (a_y·b_z - a_z·b_y, ...) ——
+该公式在左 / 右手坐标系下数值结果完全相同。
 
-        由于 CCW from outside + 相机在球外 = CCW from camera
-        且 face_normal_LH 指向「远离相机的一侧」
-   →   face_normal_LH 指向**球心**（而非几何外法线朝外的方向）
+手性只决定"该数值结果如何被几何解读"，但点的位置不变，
+所以"叉积指向哪个空间点"也不变。不存在 cross_LH = -cross_RH 这种关系。
+
+对一个从球外被相机看到的 CCW from outside 三角形：
+   叉积遵循右手定则（四指从 P1-P0 弯向 P2-P0）→ 拇指迎面对相机
+   → 叉积指向朝外（背离球心、朝相机方向）
 ```
 
-**与几何直觉相反**。直觉说"球面外法线 = 顶点位置归一化（朝外）"，但 UE 的 lit shading 假设你写入的顶点法线**与该三角形的 face_normal_LH 同向**（朝内）；写反了 `dot(N, L)` 大多数像素会落在 ≤ 0 一侧 → 整球漆黑。
+**与几何直觉完全一致**：“球面外法线 = 顶点位置归一化（朝外）”。UE 的 lit shading 期待顶点法线朝外：`saturate(dot(+UnitCenter, LightDir))` 在朝光半球 > 0 → Lit 正常受光。
 
-#### 11.2.3 PMC 端实现（R1~R10）
+⚠ **早期版本的错误推论**（"face_normal_LH = -cross_RH 朝球心"）已于 R8 阶段被实测证伪，详见 [SphereTopologyReference.md §11.4](SphereTopologyReference.md#114-关联踩坑历史与文档修订)。
 
-[`PlanetTopologyDebugMesh.cpp`](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp) Rebuild 中，顶点法线 / 切线**不手填**，一律交给 `KismetProceduralMeshLibrary::CalculateTangentsForMesh` 自动生成——该工具内部用 `cross(P1-P0, P2-P0)` 累加到顶点，结果严格遵循 UE 的几何约定（朝球心）。
+#### 11.2.3 PMC / 自研球面网格 端实现（R1~R10 / R8.5+）
 
-**成本**：sub=3 下一次 ~6000 条 cross product（µ0.05 ms），对 OnConstruction 冷路径可忽。
+[`PlanetTopologyDebugMesh.cpp`](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp) `Rebuild` / `RebuildWaterMesh_` 中，顶点法线**直接手填 `+UnitCenter`**（朝外）。Tangents 留空（Default Lit / SLW 不消费 Tangent 空间）。
 
-**禁止**：手填 `Normal = UnitCenter`（朝外、几何直觉外法线）——这在 R7 之前的手填代码中是隐藏错误，R1~R6 Unlit/Emissive 不参与光照所以不暴露，R7 切到 Default Lit 立刻漆黑。如确实需要手填，必须 `Normal = -UnitCenter`（朝内）并加注释解释。
+**为什么不走 KismetTangents 自动法线**：本项目 mesh 采用"每 Corner 展开 3 独立顶点（不共享）"拓扑。KismetTangents 在该几何上等价 flat shading（每三角形 3 顶点拿到面法线），sub=3 球面在阴影 / 光照边界会出现 1280 个三角棱面锯齿。详见 [AgentWorkflow.md §3.13 / §3.14](AgentWorkflow.md)。
 
-#### 11.2.4 PTG 端实现（R11+）
+**手填 `+UnitCenter` 同时解决两个问题**：
+- 顶点之间法线插值平滑 → 阴影 / N·L 边界平滑，无三角棱面锯齿
+- 与几何几不变（各顶点位置归一化即得）→ 零成本、零歧义
 
-R11 把 PMC 换成 PTG 高细分球皮时，`UProceduralMeshComponent` 顶点流由 `ProceduralTerrainGenerator` 插件的 `GenerateSphereData` 生成（spherified-cube）。**必须验证**：
+**禁止**：手填 `Normal = -UnitCenter`（朝球心）——这是早期版 §11.2 仅凭错误推导得出的结论，实际会令整球 `dot(N, L) ≤ 0` 全像素漆黑。R8 阶段已实测证伪。
 
-1. **PTG 生成的 6 个 face 三角形索引是否 CCW from outside** —— 这是 UE 默认 frontface 的必要条件
-2. **PTG 顶点法线是否与 face_normal_LH 同向**（对球外渲染 = **朝球心**） —— spherified-cube 默认可能输出 face normal 或顶点位置归一化朝外，都是错的；仅是"关 backface culling"也是治标不治本
-3. **PTG 启用 WPO（R12 顶点位移）后法线是否仍同向** —— 径向位移不改变 face normal 方向；任何切向位移都需重新烘焙法线
+#### 11.2.4 PTG / 自研球面网格 端实现（R8.5+）
 
-R11 验收黄金检查点：在 Buffer Visualization → World Normal viewmode 下，**朝光源一侧的半球** lit 后应亮（验证 `dot(N, L) > 0`），反面应暗。若全黑 → 法线方向是反的，需取负。
+R8.5 把 PMC 换成自研高细分球皮时，**顶点法线仍取 `+UnitCenter`（朝外）**。如果采用 spherified-cube 生成路径，**必须验证**：
+
+1. **生成的 6 个 face 三角形索引是否 CCW from outside** —— 这是 UE 默认 frontface 的必要条件
+2. **顶点法线是否朝外（背离球心）** —— spherified-cube 默认可能输出 face 法线或顶点位置归一化朝外，后者才是对的；误填朝内会漆黑
+3. **启用 WPO（顶点位移）后法线是否仍朝外** —— 径向位移不改变 face normal 方向；任何切向位移都需重新烘焙法线
+
+R8.5 验收黄金检查点：在 Buffer Visualization → World Normal viewmode 下，**朝光源一侧的半球** lit 后应亮（验证 `dot(N, L) > 0`），反面应暗。若全黑 → 法线方向是反的，需取负。
 
 #### 11.2.5 为什么 R1~R6 没暴露这个问题
 
-R1~R6 主验证路径全部使用 **Unlit shading model**（纯白 / Emissive 哈希色 / Emissive 真实纹理）。Unlit **不消费顶点法线**，颜色只由 BaseColor / Emissive 决定。所以 R1~R6 调试阶段手填 `Normal = UnitCenter`（朝外）也一直视觉正常。
+R1~R6 主验证路径全部使用 **Unlit shading model**（纯白 / Emissive 哈希色 / Emissive 真实纹理）。Unlit **不消费顶点法线**，颜色只由 BaseColor / Emissive 决定。所以 R1~R6 调试阶段手填任意方向都不暴露。
 
-**R7 是第一个消费顶点法线的阶段**（Default Lit 走 N·L 漫反射），隐藏错误立刻暴露为整球漆黑。这是为什么该修复滞后到 R7 才落地的原因。
+**R7 是第一个消费顶点法线的阶段**（Default Lit 走 N·L 漫反射），隐藏错误立刻暴露为整球漆黑。当时一度被误归因为"UE 要求法线朝内"，R8 阶段以同代码 sign 翻转复现证伪了该误结论。详见 [SphereTopologyReference.md §11.4](SphereTopologyReference.md#114-关联踩坑历史与文档修订)。
 
 #### 11.2.6 与上游的关系
 
@@ -1679,9 +1689,9 @@ R8 阶段**仍跑在 IsoSphere primal mesh 上**（与 R7 相同），变化全�
 
 | 名称 | 用途 | 推荐分辨率 / 格式 |
 | --- | --- | --- |
-| **A. Soil**（土 / 草 / 沙）| 高频小颗粒，用作平地 / 沙漠 / 海岸 / 海底底层 | 1024² × 4 通道（Albedo / Normal / Roughness / Height）|
-| **B. Rock**（岩石碎裂） | 中频片状，用作山脉 / 戈壁 / 岩石海岸 | 同上 |
-| **C. Forest Canopy**（树冠 / 苔藓） | 中低频块状，用作所有森林类的 Overlay 层 | 同上 |
+| **A. Soil**（碎石沙砾） | 高频小颗粒，用作平地 / 沙漠 / 海岸 / 海底底层 — Gravel042 | 1024² × 4 通道（Albedo / Normal / Roughness / Height）|
+| **B. Rock**（岩石） | 中频片状，用作山脉 / 戈壁 / 岩石海岸 — Rock022 | 同上 |
+| **C. Forest Canopy**（苔藓 / 树冠） | 中低频块状，用作所有森林类的 Overlay 层 — Moss002 | 同上 |
 
 > 第 4 张可选 Snow/Ice，但首版用 A 通过 `Brightness↑↑ + Roughness↓` 模拟即可。每张套件 ≈ 4 MB（BC1/BC5 压缩），3 张总计 ≈ 12 MB 显存——可控。
 
@@ -1722,24 +1732,39 @@ R7 现有的 `CellAttrLUT`（1×NumCells × R8G8B8A8）已不够用，扩展为 
 
 > **R8 阶段验收时**：`CellAttrLUT.R` 写入 BaseTexIdx，但**仍按 R3 的 Knuth 哈希 placeholder**派生 17 种配方索引（0~16）；W4 完成后 SDF 端把 placeholder 一行改成 `Def->FTerrainMaterialParams` 真实查表，无其他改动。
 
-#### 16.1.4 水面层（独立 sub=3 球皮，R8 验收时单独打开）
+#### 16.1.4 水面层（独立 sub=3 球皮 + Single Layer Water shading model）
 
-水体不走 SDF 多层混合，而是独立渲一个**简易球皮 mesh**：
+水体不走 SDF 多层混合，而是独立渲一个**简易球皮 mesh**，使用 UE5 内置的 **Single Layer Water**（SLW）着色模型——这是 UE5 官方 Water Plugin 用的同一套 shading model。
 
-- 几何：`FSphereTopology(SubdivisionLevel=3)` 的 primal mesh，半径 = `GlobeRadius + WaterSurfaceOffset`（R8 阶段 `WaterSurfaceOffset = 0`，即贴在球面上）；
-- 材质：噪声扰动的反光 + 透光水材质——
-  - **Albedo**：深蓝 → 浅蓝（按 fragment 法线与光向夹角），Tint 由全局水色参数控制；
-  - **Normal**：两层 fbm 噪声法线动画（`Time * FlowSpeed` 滚动 UV），叠加形成波纹；
-  - **Roughness**：低（0.1~0.3），让反光强；
-  - **Specular**：高，太阳能在水面留 specular highlight；
-  - **Opacity**：建议 R8 先用 0.85 半透明（看到下方海床配方），R8.5 后做 depth-fade 让浅海更透；
-- 渲染顺序：作为单独的 `UProceduralMeshComponent` 挂在 `APlanetTopologyDebugMesh` 之外的 Actor 或同 Actor 子组件，**在地形 mesh 之后渲染**；
-- **R8 阶段限制**：因为 R8 仍跑在 IsoSphere 球面 mesh 上（半径恒定），水面与地形完全重合 → **水面层会把所有 cell 的颜色都盖掉**。因此 R8 阶段验收时**分开看**：
-  - 关掉水面层 → 看 17 种地形配方（包括海洋的两种海床配方）；
-  - 打开水面层 + 关掉地形球 → 看一颗"贴满水纹的球"，验证水材质的反光 / 透光 / 噪声扰动效果。
+> ⚠ **方案变更（2026-06-29）**：原 §16.1.4 V1 用 `Translucent + Default Lit + Surface ForwardShading` 路线，但 Translucent 默认管线**不接收 ReflectionCapture/SSR**——视觉上水面看起来"颜色平、无反光、无时间感"，PIE 与 Editor 都验不出 sparkle。R8 验收期实测明确：Translucent 路线在不开 Project-wide Forward Shading 的前提下，物理上无法实现"既透光又反射"的效果。**SLW 才是 UE5 提供的物理水路径**——本质是不透明渲染（写深度、参与 GBuffer），但内置"水下颜色透出 + 大气反射 + 焦散"的整套近似。
+
+- **几何**：`FSphereTopology(SubdivisionLevel=3)` 的 primal mesh，半径 = `GlobeRadius + WaterSurfaceOffset`（R8 阶段 `WaterSurfaceOffset = 0`，即贴在球面上）。
+- **材质**（M_WaterShell）：
+  - **Blend Mode**：`Opaque`（SLW 必须 Opaque——这是与老方案最大差异）；
+  - **Shading Model**：`Single Layer Water`；
+  - **Two Sided**：勾选（球内外都渲，便于相机进入水球时仍可见）；
+  - 主节点引脚：
+    - **Base Color**：深水基色（如 `(0.0, 0.05, 0.1)`，很暗即可，反射会主导视觉）；
+    - **Specular**：1.0；
+    - **Roughness**：0.02~0.1（决定反射锐利度，越小越亮）；
+    - **Normal**：fbm 噪声扰动法线（与老方案一致，`Time * FlowSpeed` 驱动）；
+  - 新出现的特殊节点 **Single Layer Water Material Output**（材质图右键搜索添加）：
+    - **Scattering Coefficients**：`(0.05, 0.18, 0.25)`——水的散射颜色（蓝绿调）；
+    - **Absorption Coefficients**：`(0.3, 0.08, 0.04)`——水的吸收颜色（红光衰减最快 → 远处变蓝，物理正确）；
+    - **Phase G**：0.0（散射各向异性，先用 0）；
+    - **Color Scale Behind Water**：`(1, 1, 1)`（水下颜色染色，先白）；
+- **场景前置条件**（SLW 反射依赖外部光照源，缺一不可）：
+  - **DirectionalLight**：勾选 `Atmosphere Sun Light`（驱动太阳 specular highlight）；
+  - **SkyLight**：放一个 ASkyLight，勾选 **Real Time Capture**（驱动环境反射；缺它反射全黑）；
+  - **Project Settings → Rendering → Reflection Method**：`Lumen` 或 `Screen Space`（推荐 Lumen）；
+  - 可选 Sphere/Box ReflectionCapture：在水面附近放一个，提升反射质量（非必需）。
+- **渲染顺序**：作为 `APlanetTopologyDebugMesh` 的子 `UProceduralMeshComponent`（`WaterMeshComp`）；SLW 写深度 + 不透明排序——与地形 mesh 自然遮挡，不需要手工调 RenderPriority。
+- **R8 阶段限制**：因为 R8 仍跑在 IsoSphere 球面 mesh 上（半径恒定），水面与地形完全重合 → **水面层会把所有 cell 都盖住**。因此 R8 阶段验收时**分开看**：
+  - 关掉水面层（`bEnableWaterShell=false`）→ 看 17 种地形配方（包括海洋的两种海床配方）；
+  - 打开水面层 + 关掉地形球的 `MeshComp.Visibility` → 看一颗"贴满水纹的反光球"，验证 SLW 反射 + 噪声法线扰动效果。
 - **R8.5 后真正联调**：地形球被 Elevation 拉出起伏后，水面（半径 R + ε，恒定）只在 cell 高度 < 0 时盖住该 cell（自然遮挡海底），这才是水面的目标视觉。
 
-详细 cpp / 材质资产搭建步骤待 [R8_ParametricTint.md](R8_ParametricTint.md) 撰写时给出。
+完整材质节点连线（包括 Wave Noise Custom 宏、SLW Material Output 接线、场景 SkyLight 配置、排错清单）见 [R8_ParametricTint.md §4.5.3](R8_ParametricTint.md)。
 
 ### 16.2 R8.5 自研球面网格几何
 
@@ -1830,7 +1855,7 @@ for (int32 V = 0; V < NumRenderVerts; ++V)
 
 径向位移后顶点法线不再等于 Dir（山坡上的法线明显不指向球心），需要重算。**强制使用** `KismetProceduralMeshLibrary::CalculateTangentsForMesh`——这是 UE 内置的工具，按 `cross(P1-P0, P2-P0)` 累加到顶点，结果严格遵循 UE5 左手系 + CCW frontface 约定（详见 [AgentWorkflow.md §3.6](AgentWorkflow.md) / [SphericalSDFTerrainDesign.md §11.2](#112-pmcptg-渲染契约顶点法线与-ue5-光照约定)）。
 
-> **不要手填法线**——这是 R7 阶段已经踩过的坑。手填 `Normal = UnitCenter`（朝外）在 Lit 模式下整球漆黑（face_normal_LH 朝内）。
+> **不要手填错误方向的法线**——主 mesh 顶点法线应该写 `+UnitCenter`（朝外）。写成 `-UnitCenter`（朝球心）会让 Lit 模式下整球漆黑（`dot(N, L) ≤ 0` 全像素被 clamp）。详见 [SphereTopologyReference.md §11](SphereTopologyReference.md)（已于 R8 期修订）。
 
 #### 16.4.2 把"最近 3 Cell + 权重"传给材质
 

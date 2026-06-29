@@ -206,6 +206,11 @@ public:
      * 附录 A）。
      *
      * 留空时材质退化为 R6 哈希色（Custom 节点的 TerrainAlbedoArray Input 没接 → 反射诊断报错）。
+     *
+     * R8 起：本字段保留作历史档案——R8 主材质 M_TopologyDebug_R8 不再使用此参数，
+     * 改用下方的 `PBRBaseAlbedo` 3-slice Texture2DArray + 4 通道 LUT 派生 17 种地形配方。
+     * 旧 R7 材质（M_TopologyDebug_R7）继续可用——MID 注入对未声明参数 no-op。
+     * 详见 Docs/R8_ParametricTint.md §3.1。
      */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PlanetTopology|R7")
     TObjectPtr<UTexture2DArray> TerrainAlbedoArray;
@@ -249,6 +254,98 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|R7",
               meta = (ClampMin = "10.0", ClampMax = "10000.0"))
     float TileScale = 100.0f;
+
+    // ===== R8: 参数化 Tint 路径（3 base PBR + 4 通道 LUT 微调 + 水面层）=====
+
+    /**
+     * R8：3 张共享基础 PBR 套件的 BaseColor 数组（NumSlices=3）。
+     *
+     * 每个 slice = 1 张基础 PBR 套件的 BaseColor（sRGB）：
+     *   slice 0 = Soil   (Gravel042，碎石沙砾——平地/沙地/海床)
+     *   slice 1 = Rock   (Rock022，岩石——山脉/戈壁/岩石海岸)
+     *   slice 2 = Forest (Moss002，苔藓/树冠——所有 Forest.* 配方的 Overlay 层)
+     *
+     * 由 Content/Textures/T_PBRBase_Albedo.uasset 提供（详见 R8_ParametricTint.md 附录 A）。
+     *
+     * R8 阶段 17 种地形配方通过 LUT0.R 选择 slice 0/1，LUT0.B（OverlayBlend）控制
+     * 是否叠加 slice 2（Forest）。即同一组基础贴图能派生出 17 种视觉差异显著的地形。
+     *
+     * 留空时材质退化为 R6 哈希色（Custom 节点的 PBRBaseAlbedo Input 没接 → 反射诊断报错）。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PlanetTopology|R8")
+    TObjectPtr<UTexture2DArray> PBRBaseAlbedo;
+
+    /**
+     * R8：3 张共享基础 PBR 套件的 Normal 数组（NormalDX，NumSlices=3）。
+     * slice 与 PBRBaseAlbedo 一一对齐（0=Soil, 1=Rock, 2=Forest）。
+     * R8 主验收期可不接（Custom Code 不强制读取 Normal）；接上后可在附录 B 路径启用 PBR Normal。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PlanetTopology|R8")
+    TObjectPtr<UTexture2DArray> PBRBaseNormal;
+
+    /**
+     * R8：3 张共享基础 PBR 套件的 Roughness 数组（NumSlices=3）。
+     * slice 与 PBRBaseAlbedo 一一对齐。R8 不强制读，附录 B 可选启用。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PlanetTopology|R8")
+    TObjectPtr<UTexture2DArray> PBRBaseRoughness;
+
+    /**
+     * R8：3 张共享基础 PBR 套件的 Height 数组（Displacement，NumSlices=3）。
+     * R8.5 自研球面网格的径向位移用，R8 阶段挂上即可不必采样。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PlanetTopology|R8")
+    TObjectPtr<UTexture2DArray> PBRBaseHeight;
+
+    /**
+     * R8：是否启用水面层（半透明球皮）。默认 false；勾上后 Rebuild() 末尾会重建
+     * `WaterMeshComp`（一个挂在本 Actor RootComponent 下的 ProceduralMeshComponent
+     * 子组件），半径 = Radius + WaterSurfaceOffset。
+     *
+     * 设计说明（vs 早期 Spawn 独立 Actor 路径）：
+     *   早期方案是用 `WaterShellClass + SpawnActor` 在 OnConstruction 中创建独立
+     *   `APlanetWaterShell` Actor。该路径在 PIE 启动时存在生命周期错位坑——Editor
+     *   World 深拷贝到 PIE World 时，`OnConstruction` 中 SpawnActor 出来的临时子
+     *   Actor 的材质引用会丢失（变成默认棋盘格），退 PIE 后 Actor 一并被回收
+     *   （详见 [AgentWorkflow.md §3.10](../../Docs/AgentWorkflow.md)）。改为 Component
+     *   子对象后，PIE 拷贝跟随 Owner Actor 同步进行，无任何材质丢失风险。
+     *
+     * 验收期独立观察：
+     *   - bEnableWaterShell=false → 看地形 17 配方；
+     *   - bEnableWaterShell=true + Details 把 MeshComp.Visibility=false → 单独看水面。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|R8")
+    bool bEnableWaterShell = false;
+
+    /**
+     * R8：水面层材质（M_WaterShell）。Editor 中拖入资产；为空时水面 mesh 走默认
+     * checker 材质。详见 [R8_ParametricTint.md §4.5.3](../../Docs/R8_ParametricTint.md)。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|R8")
+    TObjectPtr<UMaterialInterface> WaterMaterial;
+
+    /**
+     * R8：水面 mesh 相对 Radius 的径向偏移（cm）。
+     * R8 阶段建议 0.0；R8.5 自研球面网格上线后可调（让水面贴合在 Elevation=0 等高面上）。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|R8",
+              meta = (ClampMin = "-1000.0", ClampMax = "1000.0"))
+    float WaterSurfaceOffset = 0.0f;
+
+    /**
+     * R8：是否启用 R8 placeholder 配方哈希（默认 true，R8 主验收期）。
+     *
+     *   true  → CellAttrLUT.R 写入 R8_PlaceholderRecipeIndex(CellId)（17 配方 Knuth 哈希），
+     *           3 张 Cell*LUT 由 §3.2.1 GR8Recipes 表派生；DebugView=Biome/None 走 R8 配方。
+     *   false → CellAttrLUT.R 沿用 W4 路径（Def->LayerIndex），3 张 Cell*LUT 全部填
+     *           中性默认值（Tint=(1,1,1), Sat=Bri=1, ...）。W4 联调通过后切到此模式可
+     *           看到「R8 4 通道 LUT 不参与微调」的纯 R7 视觉。
+     *
+     * W4 联调阶段：把 R8 placeholder 关掉，再让 LUT0.R 由 Def->LayerIndex 驱动；最终
+     * 让 3 张 Cell*LUT 由 Def->FTerrainMaterialParams 驱动（届时再去掉本开关）。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|R8")
+    bool bUseR8PlaceholderRecipes = true;
 
     /**
      * 是否开启光滑法线。
@@ -329,8 +426,47 @@ private:
      *   —— 这是 Knuth 整数哈希常数（黄金分割），保证相邻 CellId 也能落在不同 Layer。
      *
      * R7 接入 WorldGen 后，本函数会被替换为 "按 FCellGeoData[].TerrainTag 的 LayerIndex 填表"。
+     *
+     * R8：当 bUseR8PlaceholderRecipes=true 时，DebugView=Biome/None 默认分支改写 R 通道为
+     * R8_PlaceholderRecipeIndex(CellId)（17 配方），其它 DebugView 沿用 W2/W3/W4 语义。
      */
     void RebuildCellAttrLUT_(int32 NumCells);
+
+    /**
+     * R8：每 Cell 一个像素的 1×N 动态纹理（PF_FloatRGBA = FP16x4）。
+     *   - R 通道 = Tint.R（线性，[0, 4]）
+     *   - G 通道 = Tint.G
+     *   - B 通道 = Tint.B
+     *   - A 通道 = HueShift（弧度，[-π, +π]，R8 暂不读，预留）
+     *
+     * 由 RebuildCellTintLUT_ 创建并填充 placeholder 数据。Filter=Nearest、SRGB=false。
+     * 必须 FP16 而非 R8G8B8A8——线性 Tint 可能 > 1（HDR），且色调精度需要 > 8-bit。
+     */
+    UPROPERTY(VisibleAnywhere, Transient, Category = "PlanetTopology|R8")
+    TObjectPtr<UTexture2D> CellTintLUT;
+
+    /**
+     * R8：每 Cell 一个像素的 1×N 动态纹理（PF_FloatRGBA）。
+     *   R=Saturation Mul、G=Brightness Mul、B=RoughnessMin、A=RoughnessMax。
+     */
+    UPROPERTY(VisibleAnywhere, Transient, Category = "PlanetTopology|R8")
+    TObjectPtr<UTexture2D> CellHSVRoughLUT;
+
+    /**
+     * R8：每 Cell 一个像素的 1×N 动态纹理（PF_FloatRGBA）。
+     *   R=NormalStrength、G=HeightScale（R8.5 用）、B=SpecularBoost、A=TriplanarScale。
+     */
+    UPROPERTY(VisibleAnywhere, Transient, Category = "PlanetTopology|R8")
+    TObjectPtr<UTexture2D> CellNSpecLUT;
+
+    /** R8：构建/刷新 CellTintLUT（1×NumCells、PF_FloatRGBA）。每次 Rebuild() 都会调用一次。 */
+    void RebuildCellTintLUT_(int32 NumCells);
+
+    /** R8：构建/刷新 CellHSVRoughLUT（1×NumCells、PF_FloatRGBA）。 */
+    void RebuildCellHSVRoughLUT_(int32 NumCells);
+
+    /** R8：构建/刷新 CellNSpecLUT（1×NumCells、PF_FloatRGBA）。 */
+    void RebuildCellNSpecLUT_(int32 NumCells);
 
     /**
      * R4：构建/刷新 CellDirLUT（1×NumCells、PF_A32B32G32R32F）。每次 Rebuild() 都会调用一次。
@@ -346,4 +482,59 @@ private:
      * 导致 dot 距离判别失效）。FP32 在 sub=3 时只占 642×16 = ~10 KB，常驻 GPU L2 cache。
      */
     void RebuildCellDirLUT_(int32 NumCells);
+
+    // ===== R8 水面层（Component 子对象路径，详见 §4.5 / AgentWorkflow §3.10）=====
+
+    /**
+     * R8 水面层 ProceduralMesh 子组件。挂在 RootComponent（MeshComp）下，
+     * 与 Owner Actor 一起被构造 / 销毁 / PIE 深拷贝——无独立 Actor 生命周期坑。
+     *
+     * 几何路径：复用一颗独立的 sub=3 FSphereTopology（WaterTopology）。
+     * 与 R8 主 mesh 几何 1:1 对齐——R8.5 自研球面网格上线后可改为共享同一颗 Topology。
+     */
+    UPROPERTY(VisibleAnywhere, Category = "PlanetTopology|R8")
+    TObjectPtr<UProceduralMeshComponent> WaterMeshComp;
+
+    /**
+     * 水面层独立的拓扑实例（固定 sub=3）。只在首次 Rebuild_Water 时 lazy-build，
+     * 之后复用——sub 不变 → 顶点位置只是按 (Radius+WaterSurfaceOffset) 缩放。
+     */
+    TUniquePtr<FSphereTopology> WaterTopology;
+
+    /**
+     * R8：构建/刷新水面层 mesh 与材质。每次 Rebuild() 末尾调用：
+     *   - bEnableWaterShell=false → ClearAllMeshSections + 设隐形；
+     *   - bEnableWaterShell=true  → 用 (Radius+WaterSurfaceOffset) 重铺 sub=3 球皮 +
+     *                                 SetMaterial(0, WaterMaterial)。
+     */
+    void RebuildWaterMesh_();
+
+    // ===== Editor PIE 退出后材质恢复钩子（详见 AgentWorkflow §3.11）=====
+
+    /**
+     * `FWorldDelegates::OnPostWorldCleanup` 委托句柄。仅 Editor 构建路径下注册；
+     * 在 PostInitProperties 中订阅，在 BeginDestroy 中取消订阅，避免 dangling。
+     *
+     * **触发场景**：PIE 会话结束、PIE World 已 Cleanup 完毕。此时 Editor 中的
+     *   `MID` 与 `MeshComp` 渲染层的材质引用因为 PIE 期间深拷贝替换而处于失效状态
+     *   （Editor MeshComp 的 SceneProxy 拿不到合法 material → fallback 默认白材质）。
+     *   该委托回调会在 Editor World 内重新跑一次 `Rebuild()`，把 MID 重建并 SetMaterial。
+     *
+     * 详见 Docs/AgentWorkflow.md §3.11 "PIE 退出后 MID/Material 引用失效"。
+     */
+    FDelegateHandle PostWorldCleanupHandle;
+
+    /**
+     * `FWorldDelegates::OnPostWorldCleanup` 委托回调。
+     *
+     * @param World            被 cleanup 的 UWorld 实例
+     * @param bSessionEnded    是否游戏会话结束（PIE 退出 / Standalone 退出 = true；切关卡/退编辑器 = false）
+     * @param bCleanupResources 是否清理资源（一般为 true）
+     *
+     * 处理逻辑：
+     *   - 仅当 World 是 PIE/Game World 且不是本 Actor 所在 World 时触发恢复
+     *   - 本 Actor 自己 World 被 cleanup 时跳过（即将销毁，不能再 Rebuild）
+     *   - 仅 Editor 构建路径下生效（WITH_EDITOR）
+     */
+    void OnPostWorldCleanup_(class UWorld* World, bool bSessionEnded, bool bCleanupResources);
 };

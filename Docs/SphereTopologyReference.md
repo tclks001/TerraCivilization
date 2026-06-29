@@ -847,62 +847,85 @@ sub=5: 10242 cell 20480 corner/tri 30720 edge
 | **C1. CCW frontface（左手系）** | [`D3D12State.cpp` L356](../../../Program%20Files/Epic%20Games/UE_5.8/Engine/Source/Runtime/D3D12RHI/Private/D3D12State.cpp)：`RasterizerDesc.FrontCounterClockwise = true;`（每个 RasterizerState 创建时硬编码、对所有材质生效） | UE5 是**左手坐标系**（X 前 / Y 右 / Z 上），且全局规定**屏幕空间下逆时针的三角形 = 正面**。默认 `CullMode = CM_CW`（[`D3D12State.cpp` L34`](../../../Program%20Files/Epic%20Games/UE_5.8/Engine/Source/Runtime/D3D12RHI/Private/D3D12State.cpp)：`CM_CW → D3D12_CULL_MODE_BACK`），即**剔除 BACK、保留 CCW frontface**——这与 UE 命名习惯反直觉，但源码事实如此。 |
 | **C2. 漫反射 N·L 同侧** | [`ForwardLightingCommon.ush` L387-392](../../../Program%20Files/Epic%20Games/UE_5.8/Engine/Shaders/Private/ForwardLightingCommon.ush)：`float NoL = saturate(dot(N, L));` | 顶点法线 `N` 与该路径定义的光向 `L` **同侧**（`dot(N, L) > 0`）才贡献漫反射；反侧（`dot(N, L) ≤ 0`）经 `saturate` clamp 为 0 → 漆黑。**所有 lit 路径**（Forward/Mobile/Lumen/PathTracing/Furnace test 6 处全部命中同一公式）共用此约定，单面材质下没有 two-sided 自动翻转。 |
 
-### 11.2 关键推论：左手系 CCW 三角形的"几何 face normal"指向何处？
+### 11.2 关键事实：左手系 CCW 三角形的"几何 face normal"指向何处？
 
-数学事实：
+数学事实（**经 R8 阶段用户实测修订**）：
 
 ```
 对一个三角形 (P0, P1, P2)：
-  · 右手叉乘 cross_RH(P1-P0, P2-P0) 与左手叉乘 cross_LH(P1-P0, P2-P0) 方向相反
-  · UE 渲染管线在左手系下推断的 face normal = cross_LH 方向
-  · 等价地：face_normal_LH = -cross_RH
+  · 叉积 cross(P1-P0, P2-P0) 的代数定义是 (a_y·b_z - a_z·b_y, ...) —— 同一个公式，
+    在左 / 右手坐标系下数值结果完全相同（输入坐标分量数值相同 → 输出分量数值相同）。
+  · 手性只决定"该数值结果如何被几何解读"——但点的位置不变，所以"叉积指向哪个空间点"
+    也不变。**不存在"cross_LH = -cross_RH"这种关系**。
 
 若该三角形从相机视角呈 CCW（即被保留为 frontface）：
-  · 该 face normal 指向"远离相机的一侧"
-  · 对**球外渲染的球面 mesh**，这恰好是**指向球心**的方向
+  · 叉积方向遵循"CCW 方向的右手定则" —— 拇指方向 = 朝远离相机的反向、即朝向相机
+    背后 …… 等等，重新推：从相机看 CCW 排列的三角形，叉积指向**朝向相机**
+    （右手定则：四指从 P1-P0 弯向 P2-P0，拇指迎面对相机）。
+  · 对**球外渲染的球面 mesh**（相机在球外、面 CCW from outside），叉积指向**朝外**
+    （朝相机、即背离球心方向）。
 ```
 
-**所以**：在 UE5 中，对一个从球外被相机看到的、绕序为 CCW from outside 的球面三角形，**它的"UE 心目中的几何 face normal" = 指向球心方向**——而不是几何外法线（朝外）方向。
+**所以**：在 UE5 中，对一个从球外被相机看到的、绕序为 CCW from outside 的球面三角形，**它的"UE 心目中的几何 face normal" = 朝外**（背离球心）。
 
-这是一个**与几何直觉相反**的事实。直觉会说"球面外法线 = 顶点位置归一化（朝外）"，但 UE 的 lit shading 默认假设你写入的顶点法线**与该三角形的 face_normal_LH 同向**（朝内）；写反了 `dot(N, L)` 大多数像素会落在 ≤ 0 一侧 → 整球漆黑。
+这与几何直觉**完全一致**（"球面外法线 = 顶点位置归一化朝外"）。`saturate(dot(N, L))` 路径正常工作的前提是顶点法线写朝外——朝光源半球的像素 dot > 0 受光，背光半球 dot ≤ 0 入阴影。
 
 ### 11.3 工程指引
 
-**任何时候不要用原始数据（如球面顶点位置 `UnitCenter`）直接写出顶点法线**——除非你真的明白自己在做什么（例如已确认该方向与 UE 的 face_normal_LH 一致）。否则法线必须满足以下二者之一：
+球外渲染的球面 mesh，顶点法线**应取 UnitCenter（朝外）**——这是与几何直觉、UE5 漫反射公式、SLW 反射模型**全部同向**的写法。
 
 | 路径 | 实现 | 适用 |
 | --- | --- | --- |
-| **A. 自动生成（首选）** | 把 `Vertices / Triangles / UVs` 喂给 `KismetProceduralMeshLibrary::CalculateTangentsForMesh`，让 UE 自己按 `cross(P1-P0, P2-P0)` 累加得到顶点法线——结果**严格遵循 UE 的几何约定** | PMC（[`PlanetTopologyDebugMesh.cpp`](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp) 已采用）、StaticMesh 烘焙 |
-| **B. 显式叉积计算** | cpp / shader 端用 `cross(P1-P0, P2-P0).GetSafeNormal()` 得到面法线，必要时**确认方向后**再赋给顶点。**不要凭直觉判断 cross 方向**——左右手系下结果相反 | PTG（R11+ 自定义球皮生成，必须验证后才能复用） |
+| **A. 显式取 UnitCenter（首选，球面 mesh 专属）** | 直接 `Normal = Cell.UnitCenter`（朝外）。Tangents 留空（Lit 默认材质不消费 Tangent；如需法线贴图再单独算 World→Tangent basis） | PMC IsoSphere 调试 mesh（[`PlanetTopologyDebugMesh.cpp`](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp) `Rebuild` / `RebuildWaterMesh_` 已采用） |
+| **B. 自动生成（仅限"顶点共享"几何）** | 把 `Vertices / Triangles / UVs` 喂给 `KismetProceduralMeshLibrary::CalculateTangentsForMesh`。⚠ **仅在 mesh 顶点跨三角形共享**时光滑——本项目"每 Corner 展开 3 独立顶点（不共享）"的拓扑下该工具等价于 flat shading，会让阴影边界沿三角形棱面呈锯齿（[AgentWorkflow §3.13 / §3.14](AgentWorkflow.md)）| StaticMesh 烘焙、共享顶点 PMC |
+| **C. 显式叉积计算** | cpp / shader 端用 `cross(P1-P0, P2-P0).GetSafeNormal()` 得到面法线 —— **数值上等价于 +UnitCenter**（朝外） | PTG（R11+ 自定义球皮生成，可作为对照验证）|
 
-**禁止**：直接写 `Normal = UnitCenter`（朝外）或 `Normal = (P - PlanetCenter).Normalize()`（朝外）等"直觉外法线"——在 UE 左手系 CCW 约定下这是**反向的**，Lit 模式会整球漆黑。如确实需要等价于"朝外法线"的视觉效果，应改为 `Normal = -UnitCenter`（朝内）——但仍**强烈推荐路径 A** 而不是这种容易踩错的手填。
+**重要**：**不要再相信"球外渲染应该法线朝内（-UnitCenter）"这条** —— 那是早期版本对 UE5 左右手系叉积的误解（详见 §11.4）。**球外渲染就是朝外法线**，与几何直觉一致。
 
-### 11.4 关联踩坑历史（R7 Lit 漆黑根因复盘）
+### 11.4 关联踩坑历史与文档修订
 
-R7 阶段把 R6 哈希色换成 Triplanar 真实地表纹理，材质从 Emissive 改为 BaseColor + Default Lit，**首次让顶点法线参与光照**。当时 [`PlanetTopologyDebugMesh.cpp`](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp) 中手填法线为 `+UnitCenter`（朝外，符合几何直觉），Lit 模式整球漆黑。
+#### 11.4.1 早期错误结论的来源（已修订）
 
-错误归因路径（已避免重蹈）：
-1. ❌ 怀疑材质槽位挂错 → 检查后正常
-2. ❌ 怀疑 Texture Object Parameter 位置 A 空槽 → 检查后正常
-3. ❌ 怀疑相机在球内、Actor 负 Scale、材质 Pixel Depth Offset → 全部排除
-4. ❌ 怀疑绕序错误 → 一度修改 `Triangles.Add` 引入 `bFlipWinding`"朝外校正"块，反而出现"看到内壁、相机移动反向"等更严重的视觉错误（已撤销）
-5. ✅ 用 `KismetProceduralMeshLibrary::CalculateTangentsForMesh` 自动法线 + 用户实测三角形是 CCW from outside → 确认 UE 几何约定要求法线朝内
-6. ✅ 在 UE 源码中验证 [`D3D12State.cpp` L356 `FrontCounterClockwise = true`](../../../Program%20Files/Epic%20Games/UE_5.8/Engine/Source/Runtime/D3D12RHI/Private/D3D12State.cpp) 与 [`ForwardLightingCommon.ush` L387-392 `saturate(dot(N, L))`](../../../Program%20Files/Epic%20Games/UE_5.8/Engine/Shaders/Private/ForwardLightingCommon.ush)，闭环
+R7 阶段把 R6 哈希色换成 Triplanar 真实地表纹理，材质从 Emissive 改为 BaseColor + Default Lit，**首次让顶点法线参与光照**。当时报告"手填 `+UnitCenter` 整球漆黑、改用 KismetTangents 自动法线后正常"，由此推断"UE5 球外渲染需要朝内法线"——并写入早期版本的 §11.2 / §11.3。
 
-**最终修法**：[`PlanetTopologyDebugMesh.cpp`](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp) Rebuild 中删除手算法线代码，全权交给 `KismetProceduralMeshLibrary::CalculateTangentsForMesh`。
+**该结论已于 R8 阶段被新证据证伪**：
+
+| 证据 | 来源 | 结论 |
+| --- | --- | --- |
+| R8 主 mesh 顶点法线填 `+UnitCenter` → Lit 正常受光 | R8 用户实测（PIE + Editor 双确认） | 球外渲染 = 法线朝外 |
+| R8 主 mesh 顶点法线填 `-UnitCenter` → 整球漆黑 | R8 用户实测（同一段代码 sign 翻转复现） | 朝内法线 = `dot(N, L) ≤ 0` 全像素阴影 |
+| R8 水面 mesh `+UnitCenter` → SLW 反射正常 | R8 §3.13 修复后实测 | SLW 同样要求朝外 |
+| 数学复推（§11.2）| 叉积代数公式与坐标系手性无关 | 早期"cross_LH = -cross_RH"推导有误 |
+
+#### 11.4.2 R7 当时为什么"手填 +UnitCenter 漆黑"？
+
+真实根因**不是"UE 要求朝内"**——而是 R7 当时存在**其他被同时修复的问题**，KismetTangents 替换路径凑巧把"法线方向 + 其他问题"一起解决，导致归因偏差。可能候选：
+
+- R7 当时 cpp 写入路径里 `Normals.Add(NA)` 的 `NA` 局部变量类型 / sign 在 build 后被某个序列化路径反转
+- R7 当时材质 Default Lit 的 PS 端 Normal 引脚被错误连接（如连了未归一化向量、连了 Tangent Space 而非 World Space）
+- R7 当时绕序处于"被 `bFlipWinding` 误用"中间状态（§11.4.1 第 4 步提到"一度修改 Triangles.Add 引入 bFlipWinding 朝外校正"），KismetTangents 接管后根据当时绕序算出朝内 → 凑巧"修复"漆黑
+
+具体哪一条已无法溯源（git history 早期未沉淀），但**结论清楚**：**"球外渲染应朝外"是 UE5 渲染管线的真实约定**，不应再被 §11 早期版本误导。
+
+#### 11.4.3 文档修订记录
+
+| 日期 | 修订条目 | 触发证据 |
+| --- | --- | --- |
+| R7 期 | §11 初版："球外渲染应朝内、`-UnitCenter` 才对" | R7 漆黑被错误归因 |
+| R8 期 | §11.2 / §11.3 / §11.5 / §11.6 全部反转："球外渲染应朝外、`+UnitCenter`" | R8 用户实测 sign 翻转复现 + 数学复推 |
 
 ### 11.5 与下游模块的契约
 
 | 下游 | 契约 |
 | --- | --- |
-| **PMC（IsoSphere 调试 mesh，R1~R10）** | 顶点法线由 `KismetTangents` 自动生成；不要手填 `+UnitCenter`（朝外）；如确实必须手填，必须 `-UnitCenter`（朝内）并加注释解释 |
-| **PTG（R11+ 生产 mesh）** | spherified-cube 法线必须按 face_normal_LH 朝向（对球外渲染 = 朝球心）；R11 切换前必须显式验证：在 Buffer Visualization → World Normal viewmode 下，球的右半（朝光源一侧）应在 lit 后呈现"亮面"颜色（验证 N·L > 0） |
-| **R8+ WorldGen 法线烘焟** | 若 `FCellGeoData` 引入"per-cell 法线"字段（如山地法线扰动），必须明确该法线是"几何外法线方向"还是"UE face normal 方向"；若是前者，下游材质消费时必须 `* -1` 或 cpp 端写入时取负 |
-| **R8.5 cpp 顶点位移** | 任何沿径向的位移（`Pos = Dir·(R + Σ wᵢ · Elevᵢ · HeightScale)`）**不改变** UE 几何 face normal 方向（仍为 cross_LH）；切向位移会破坏 face_normal 与 vertex_normal 的一致性，必须重新烘焟法线 |
+| **PMC（IsoSphere 调试 mesh，R1~R10）** | 顶点法线**直接写 `+UnitCenter`（朝外）**，Tangents 留空。不调 KismetTangents——本路径每 Corner 展开 3 独立顶点，KismetTangents 等价 flat shading（[AgentWorkflow §3.13 / §3.14](AgentWorkflow.md)）|
+| **PTG（R11+ 生产 mesh）** | 顶点法线 = 朝外（球面外法）。R11 切换前必须显式验证：在 Buffer Visualization → World Normal viewmode 下，球面右半（朝光源一侧）应在 lit 后呈现"亮面"颜色（验证 `dot(N, L) > 0`）|
+| **R8+ WorldGen 法线烘焟** | 若 `FCellGeoData` 引入"per-cell 法线"字段（如山地法线扰动），应统一为"几何外法线方向"（朝外），下游材质 / mesh 直接消费，无需 sign flip |
+| **R8.5 cpp 顶点位移** | 任何沿径向的位移（`Pos = Dir·(R + Σ wᵢ · Elevᵢ · HeightScale)`）**不改变** 顶点法线方向（仍朝外）；切向位移会破坏 face_normal 与 vertex_normal 的一致性，必须重新烘焟法线 |
 
 ### 11.6 一句话速记
 
-> **"UE5 是左手系 + CCW frontface（[`D3D12State.cpp:356`](../../../Program%20Files/Epic%20Games/UE_5.8/Engine/Source/Runtime/D3D12RHI/Private/D3D12State.cpp)）+ `saturate(dot(N, L))` 同侧光照（[`ForwardLightingCommon.ush:387-392`](../../../Program%20Files/Epic%20Games/UE_5.8/Engine/Shaders/Private/ForwardLightingCommon.ush)）；球外渲染时顶点法线应该指向球心而非球外。任何时候尽量不要用原始数据直接写法线——除非你真的明白自己在做什么——否则法线必须自动生成或由三角形叉积计算得到。"**
+> **"UE5 是左手系 + CCW frontface（[`D3D12State.cpp:356`](../../../Program%20Files/Epic%20Games/UE_5.8/Engine/Source/Runtime/D3D12RHI/Private/D3D12State.cpp)）+ `saturate(dot(N, L))` 同侧光照（[`ForwardLightingCommon.ush:387-392`](../../../Program%20Files/Epic%20Games/UE_5.8/Engine/Shaders/Private/ForwardLightingCommon.ush)）；球外渲染的球面 mesh，顶点法线 = `+UnitCenter`（朝外）—— 与几何直觉、SLW 反射、漫反射公式全部同向。早期版本曾误推为'朝内'，已于 R8 期实测修订。"**
 
 ---
 
