@@ -54,43 +54,44 @@ namespace
         float  OverlayBlend;     // 0=纯 base，>0 叠加 Forest
         float  NormalStr;
         float  TriScale;
+        float  HeightScaleCM;    // R8.2 新增：SHFRM 高度场缩放（cm，0~50）；详见 R8.2 §4.1
     };
 
     static const FR8Recipe GR8Recipes[17] = {
-        // 0  Plain.Grass
-        { 0, 0.40f, 0.70f, 0.30f, 1.0f, 1.0f,  0.5f, 0.8f,  0.15f, 1.0f, 1.0f },
-        // 1  Plain.Savanna
-        { 0, 0.70f, 0.60f, 0.30f, 0.9f, 1.1f,  0.6f, 0.9f,  0.0f,  1.0f, 1.0f },
-        // 2  Forest.Temperate
-        { 0, 0.30f, 0.55f, 0.25f, 1.1f, 0.9f,  0.5f, 0.8f,  0.65f, 1.2f, 1.0f },
-        // 3  Forest.Tropical
-        { 0, 0.20f, 0.50f, 0.20f, 1.3f, 0.85f, 0.4f, 0.7f,  0.85f, 1.5f, 1.0f },
-        // 4  Forest.Taiga
-        { 0, 0.25f, 0.40f, 0.30f, 0.7f, 0.85f, 0.5f, 0.8f,  0.55f, 1.2f, 1.0f },
-        // 5  Wetland
-        { 0, 0.30f, 0.50f, 0.35f, 1.0f, 0.85f, 0.2f, 0.5f,  0.0f,  0.8f, 1.0f },
-        // 6  Desert.Sand
-        { 0, 0.95f, 0.85f, 0.60f, 0.9f, 1.2f,  0.7f, 0.95f, 0.0f,  0.5f, 0.5f },
-        // 7  Desert.Rocky
-        { 1, 0.70f, 0.60f, 0.45f, 0.7f, 1.0f,  0.7f, 0.95f, 0.0f,  1.0f, 1.0f },
-        // 8  Coast.Beach
-        { 0, 0.95f, 0.90f, 0.70f, 0.7f, 1.15f, 0.7f, 0.95f, 0.0f,  0.5f, 0.5f },
-        // 9  Coast.Rocky
-        { 1, 0.55f, 0.55f, 0.50f, 0.5f, 0.9f,  0.6f, 0.9f,  0.0f,  1.2f, 1.5f },
-        // 10 Mountain.Hill
-        { 1, 0.55f, 0.50f, 0.42f, 0.7f, 0.9f,  0.6f, 0.9f,  0.30f, 1.2f, 1.5f },
-        // 11 Mountain.Peak
-        { 1, 0.50f, 0.48f, 0.45f, 0.4f, 0.85f, 0.7f, 0.95f, 0.0f,  1.5f, 2.0f },
-        // 12 Mountain.Snow
-        { 1, 0.92f, 0.94f, 0.98f, 0.2f, 1.4f,  0.1f, 0.4f,  0.0f,  1.0f, 1.5f },
-        // 13 Tundra
-        { 0, 0.70f, 0.70f, 0.65f, 0.3f, 1.05f, 0.7f, 0.95f, 0.0f,  0.8f, 1.0f },
-        // 14 Glacier
-        { 1, 0.85f, 0.92f, 0.98f, 0.4f, 1.45f, 0.1f, 0.3f,  0.0f,  0.5f, 2.0f },
-        // 15 Ocean.Shallow
-        { 0, 0.20f, 0.50f, 0.70f, 1.5f, 0.8f,  0.05f, 0.2f, 0.0f,  0.3f, 1.5f },
-        // 16 Ocean.Deep
-        { 0, 0.05f, 0.15f, 0.40f, 1.5f, 0.5f,  0.05f, 0.2f, 0.0f,  0.2f, 2.0f },
+        // 0  Plain.Grass         （草根 + 浅碎石，2 cm）
+        { 0, 0.40f, 0.70f, 0.30f, 1.0f, 1.0f,  0.5f, 0.8f,  0.15f, 1.0f, 1.0f, 20.0f },
+        // 1  Plain.Savanna       （干草地，1.5 cm）
+        { 0, 0.70f, 0.60f, 0.30f, 0.9f, 1.1f,  0.6f, 0.9f,  0.0f,  1.0f, 1.0f, 15.0f },
+        // 2  Forest.Temperate    （苔藓 + 树根 + 落叶，3 cm）
+        { 0, 0.30f, 0.55f, 0.25f, 1.1f, 0.9f,  0.5f, 0.8f,  0.65f, 1.2f, 1.0f, 30.0f },
+        // 3  Forest.Tropical     （浓密苔藓，3.5 cm）
+        { 0, 0.20f, 0.50f, 0.20f, 1.3f, 0.85f, 0.4f, 0.7f,  0.85f, 1.5f, 1.0f, 35.0f },
+        // 4  Forest.Taiga        （针叶林落叶层，3 cm）
+        { 0, 0.25f, 0.40f, 0.30f, 0.7f, 0.85f, 0.5f, 0.8f,  0.55f, 1.2f, 1.0f, 30.0f },
+        // 5  Wetland             （湿地浅草，1 cm）
+        { 0, 0.30f, 0.50f, 0.35f, 1.0f, 0.85f, 0.2f, 0.5f,  0.0f,  0.8f, 1.0f, 10.0f },
+        // 6  Desert.Sand         （沙波纹，0.5 cm）
+        { 0, 0.95f, 0.85f, 0.60f, 0.9f, 1.2f,  0.7f, 0.95f, 0.0f,  0.5f, 0.5f,  5.0f },
+        // 7  Desert.Rocky        （戈壁岩缝，4 cm）
+        { 1, 0.70f, 0.60f, 0.45f, 0.7f, 1.0f,  0.7f, 0.95f, 0.0f,  1.0f, 1.0f, 40.0f },
+        // 8  Coast.Beach         （沙滩平整；D8.2.6 海岸线特殊处理，强制 0）
+        { 0, 0.95f, 0.90f, 0.70f, 0.7f, 1.15f, 0.7f, 0.95f, 0.0f,  0.5f, 0.5f,  0.0f },
+        // 9  Coast.Rocky         （岩石海岸，4.5 cm）
+        { 1, 0.55f, 0.55f, 0.50f, 0.5f, 0.9f,  0.6f, 0.9f,  0.0f,  1.2f, 1.5f, 45.0f },
+        // 10 Mountain.Hill       （丘陵岩裂，4 cm）
+        { 1, 0.55f, 0.50f, 0.42f, 0.7f, 0.9f,  0.6f, 0.9f,  0.30f, 1.2f, 1.5f, 40.0f },
+        // 11 Mountain.Peak       （峰顶岩裂，5 cm 上限）
+        { 1, 0.50f, 0.48f, 0.45f, 0.4f, 0.85f, 0.7f, 0.95f, 0.0f,  1.5f, 2.0f, 50.0f },
+        // 12 Mountain.Snow       （雪面平整，0.5 cm）
+        { 1, 0.92f, 0.94f, 0.98f, 0.2f, 1.4f,  0.1f, 0.4f,  0.0f,  1.0f, 1.5f,  5.0f },
+        // 13 Tundra              （苔原，1.5 cm）
+        { 0, 0.70f, 0.70f, 0.65f, 0.3f, 1.05f, 0.7f, 0.95f, 0.0f,  0.8f, 1.0f, 15.0f },
+        // 14 Glacier             （冰川接近镜面，0.3 cm）
+        { 1, 0.85f, 0.92f, 0.98f, 0.4f, 1.45f, 0.1f, 0.3f,  0.0f,  0.5f, 2.0f,  3.0f },
+        // 15 Ocean.Shallow       （D8.2.6：海面 mesh 接管，强制 0）
+        { 0, 0.20f, 0.50f, 0.70f, 1.5f, 0.8f,  0.05f, 0.2f, 0.0f,  0.3f, 1.5f,  0.0f },
+        // 16 Ocean.Deep          （D8.2.6：海面 mesh 接管，强制 0）
+        { 0, 0.05f, 0.15f, 0.40f, 1.5f, 0.5f,  0.05f, 0.2f, 0.0f,  0.2f, 2.0f,  0.0f },
     };
     static_assert(UE_ARRAY_COUNT(GR8Recipes) == 17, "R8 must have exactly 17 recipes");
 
@@ -104,15 +105,16 @@ namespace
     // 中性默认配方（W4 联调期 bUseR8PlaceholderRecipes=false 时填入 Cell*LUT，
     //   让 R8 4 通道 LUT 不参与微调，HLSL 端等价于纯 R7 视觉）。
     static const FR8Recipe GR8NeutralRecipe = {
-        /*BaseTexIdx*/  0,
-        /*Tint*/       1.0f, 1.0f, 1.0f,
-        /*Sat*/        1.0f,
-        /*Bri*/        1.0f,
-        /*RoughMin*/   0.5f,
-        /*RoughMax*/   0.8f,
-        /*OvlBlend*/   0.0f,
-        /*NormalStr*/  1.0f,
-        /*TriScale*/   1.0f,
+        /*BaseTexIdx*/    0,
+        /*Tint*/         1.0f, 1.0f, 1.0f,
+        /*Sat*/          1.0f,
+        /*Bri*/          1.0f,
+        /*RoughMin*/     0.5f,
+        /*RoughMax*/     0.8f,
+        /*OvlBlend*/     0.0f,
+        /*NormalStr*/    1.0f,
+        /*TriScale*/     1.0f,
+        /*HeightScaleCM*/ 0.0f,    // R8.2 中性：关 SHFRM
     };
 }
 
@@ -682,11 +684,20 @@ void APlanetTopologyDebugMesh::Rebuild()
             if (PBRBaseAlbedo)    { MID->SetTextureParameterValue(TEXT("PBRBaseAlbedo"),    PBRBaseAlbedo);    }
             if (PBRBaseNormal)    { MID->SetTextureParameterValue(TEXT("PBRBaseNormal"),    PBRBaseNormal);    }
             if (PBRBaseRoughness) { MID->SetTextureParameterValue(TEXT("PBRBaseRoughness"), PBRBaseRoughness); }
-            // PBRBaseHeight: R8 阶段 HLSL 不读，但材质可能挂参数槽——挂上避免 fallback 警告
+            // PBRBaseHeight: R8.2 起激活 SHFRM——HLSL 端读取。R8.0/R8.1 阶段也仍挂上避免 fallback 警告。
             if (PBRBaseHeight)    { MID->SetTextureParameterValue(TEXT("PBRBaseHeight"),    PBRBaseHeight);    }
             if (CellTintLUT)      { MID->SetTextureParameterValue(TEXT("CellTintLUT"),      CellTintLUT);      }
             if (CellHSVRoughLUT)  { MID->SetTextureParameterValue(TEXT("CellHSVRoughLUT"),  CellHSVRoughLUT);  }
             if (CellNSpecLUT)     { MID->SetTextureParameterValue(TEXT("CellNSpecLUT"),     CellNSpecLUT);     }
+
+            // R8.2 新增注入：SHFRM 参数（详见 Docs/R8.2_SphericalHeightFieldRaymarching.md §4.4）。
+            //   - GlobeRadiusCM：球半径，HLSL 用 length(P - PlanetCenter) - GlobeRadiusCM 算径向高度
+            //   - MaxRaymarchDepthCM：raymarch 沿视线最大深度（cm，R8.2 默认 75 = HeightScale 上限 50 × 1.5）
+            //   - MaxRaymarchSteps：线性步数（R8.2 默认 16；HLSL 中是写死的常量，本参数仅提供 Editor 侧可见）
+            // PlanetCenter 在 R4 阶段已注入（本函数开头那一行），此处不重复。
+            MID->SetScalarParameterValue(TEXT("GlobeRadiusCM"),       Radius);
+            MID->SetScalarParameterValue(TEXT("MaxRaymarchDepthCM"),  MaxRaymarchDepthCM);
+            MID->SetScalarParameterValue(TEXT("MaxRaymarchSteps"),    static_cast<float>(MaxRaymarchSteps));
         }
 
         // 注意：不能写 `MID ? (UMaterialInterface*)MID : Material` —— Material 是
@@ -721,6 +732,7 @@ void APlanetTopologyDebugMesh::Rebuild()
                 TEXT("triplanarsharpness"), TEXT("tilescale"),
                 TEXT("pbrbasealbedo"),                                              // R8 替代 terrainalbedoarray
                 TEXT("celltintlut"), TEXT("cellhsvroughlut"), TEXT("cellnspeclut"), // R8 新增 3 LUT
+                TEXT("pbrbaseheight"),                                              // R8.2 新增：SHFRM 高度场
             };
             bool bAnyR8Compliant = false;
 
@@ -812,7 +824,7 @@ void APlanetTopologyDebugMesh::Rebuild()
             {
                 UE_LOG(LogPlanetTopologyDebugMesh, Error,
                     TEXT("[PlanetTopologyDebugMesh] Material '%s' has %d Custom nodes but NONE is R8-compliant. ")
-                    TEXT("Expected one Custom with inputs: UV0,UV1,UV2,UV3,WorldPos,PlanetCenter,CellAttrLUT,CellDirLUT,EdgeWidth,NoiseAmplitude,NoiseScale,TriplanarSharpness,TileScale,PBRBaseAlbedo,CellTintLUT,CellHSVRoughLUT,CellNSpecLUT. ")
+            TEXT("Expected one Custom with inputs: UV0,UV1,UV2,UV3,WorldPos,PlanetCenter,CellAttrLUT,CellDirLUT,EdgeWidth,NoiseAmplitude,NoiseScale,TriplanarSharpness,TileScale,PBRBaseAlbedo,CellTintLUT,CellHSVRoughLUT,CellNSpecLUT,PBRBaseHeight. ")
                     TEXT("See R8_ParametricTint.md §4 for the exact wiring."),
                     *BaseMat->GetName(), CustomFound);
             }
@@ -1491,8 +1503,11 @@ void APlanetTopologyDebugMesh::RebuildCellNSpecLUT_(int32 NumCells)
     for (int32 c = 0; c < NumCells; ++c)
     {
         const FR8Recipe& R = R8_PickRecipe(bUseR8PlaceholderRecipes, c);
+        // R8.2 激活：LUT3.G 存 [0, 1] 归一化 HeightScale，HLSL 端用 lut3.g * MaxRaymarchDepthCM 还原 cm。
+        //   归一化上界 50.0f = R8.2 §4.2 拍板的 HeightScaleCM 上限（Mountain.Peak）。
+        const float HScaleNormalized = FMath::Clamp(R.HeightScaleCM / 50.0f, 0.0f, 1.0f);
         Dst[c * 4 + 0] = FFloat16(R.NormalStr);
-        Dst[c * 4 + 1] = FFloat16(0.0f);          // HeightScale: R8.5 写入；R8 暂用 0
+        Dst[c * 4 + 1] = FFloat16(HScaleNormalized);   // R8.2 SHFRM HeightScale（0..1，HLSL 端还原 cm）
         Dst[c * 4 + 2] = FFloat16(1.0f);          // SpecularBoost: 中性 1.0
         Dst[c * 4 + 3] = FFloat16(R.TriScale);
     }

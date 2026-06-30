@@ -22,12 +22,36 @@ R4/R5/R6 几何链路（Voronoi 边、软边过渡、噪声扰动）原封保留
 
 ### 0.1 视觉对比矩阵
 
-| 阶段 | 颜色来源 | per-cell 自由度 | 显存占用（NumLayers=17, sub=3）|
-| --- | --- | --- | --- |
-| R7 | 19 张独立 `Texture2DArray` slice | 仅 LayerIndex 1 个 uint8 | TerrainAlbedoArray ≈ 19 × 1024² × BC1 ≈ **10 MB**；NormalArray 同 ≈ 10 MB；其它 PBR 通道默认空 |
-| **R8 ⭐** | 3 张基础 PBR 套件（Soil/Rock/Forest）× per-cell 17 种 tint 配方派生 | 16 字节 / cell（4 LUT × RGBA8/16F）| 3 × 4 通道 × 1024² ≈ **24 MB**（BC1+BC5）；4 LUT ≈ 642 × 16 = **10 KB** |
+| 阶段 | 颜色来源 | PBR 通道 | per-cell 自由度 | 显存占用（NumLayers=17, sub=3）|
+| --- | --- | --- | --- | --- |
+| R7 | 19 张独立 `Texture2DArray` slice | BaseColor 单通道（Normal/Rough 默认空）| 仅 LayerIndex 1 个 uint8 | TerrainAlbedoArray ≈ 19 × 1024² × BC1 ≈ **10 MB**；NormalArray 同 ≈ 10 MB；其它 PBR 通道默认空 |
+| **R8.0** | 3 张基础 PBR 套件（Soil/Rock/Forest）× per-cell 17 种 tint 配方派生 | **BaseColor 单通道**（Normal/Rough 字段已挂 UPROPERTY 但 HLSL 未消费）| 16 字节 / cell（4 LUT × RGBA8/16F）| 3 × 4 通道 × 1024² ≈ **24 MB**（BC1+BC5）；4 LUT ≈ 642 × 16 = **10 KB** |
+| **R8.1 ⭐** | 同 R8.0 | **BaseColor + Normal + Roughness 三通道接通**（Specular 留 R8.2/W4） | 同 R8.0（LUT 字段无变化）| 显存与 R8.0 完全一致——`PBRBaseNormal` / `PBRBaseRoughness` 在 R8.0 已计入 24 MB 估算 |
+| **R8.2 ⭐** | 同 R8.1 | 同 R8.1 + **`PBRBaseHeight` 激活做 SHFRM 球面高度场光线步进**（写入 `PixelDepthOffset` 真深度 → silhouette 凸出 + 自阴影 + Lumen/SSAO/SSR 协同）| 同 R8.1 + 17 配方表新增 `HeightScaleCM` 列（per-cell 0~50 cm，详见 [R8.2 §4.2](R8.2_SphericalHeightFieldRaymarching.md)）| 显存与 R8.1 一致——`PBRBaseHeight` 在 R8.0 已挂 UPROPERTY 与资产，R8.2 仅激活 HLSL 端消费 |
 
 显存增加 ~14 MB，但视觉**多样性从 19 种固定纹理 → 17 种纹理配方 + 全部 base 纹理共享**（任何配方都可在编辑器实时调 Tint/HSV 看效果）。
+
+> **R8.1 = R8.0 baseline 之上的多通道材质增量**（2026-06-30 拍板）。R8.0 验收已通过 cpp 与 17 配方表，但材质仅输出 BaseColor，`PBRBaseNormal/Roughness` 与 LUT2.B/A、LUT3.R 全部为预留字段。R8.1 把这些预留字段在 HLSL 端落地：
+>
+> | 维度 | R8.0 | R8.1 |
+> | --- | --- | --- |
+> | LUT 字段 | 5 张（Attr/Dir/Tint/HSVRough/NSpec）| **不变** |
+> | 17 配方表 | 17 行 × 10 字段 | **不变** |
+> | cpp UPROPERTY | `PBRBaseNormal/Roughness/Height` 已挂 | **不变**（R8.0 已就位）|
+> | cpp MID 注入 | 注入 `PBRBaseNormal/Roughness` | **不变**（确认即可，参 §3.2 末尾）|
+> | HLSL 宏 | `SAMPLE_PARAM_COLOR` → 单 float3 | **重命名为 `SAMPLE_PARAM_PBR`，三输出 (alb, nrmTS, rough)** |
+> | Custom 节点 Output | 主出口 BaseColor（CMOT_Float3）| **主出口 BaseColor + Additional Outputs 加 NormalTS（float3）+ Roughness（float）** |
+> | 接 Material pin | 仅 BaseColor | **BaseColor + Normal + Roughness 三 pin** |
+>
+> R8.1 改动量约 +250 行 markdown，0 行新增 cpp，0 行 LUT 改动——与 R8.0 视觉对比：球面同时获得 ① 岩石 / 草地 / 苔藓的**法线凹凸感**（视角微动时表面有视差），② 雪 / 冰的**镜面高光锐如点光**与岩石 / 沙地的**漫粗糙散光**对比，③ Forest 配方的森林 Overlay 不再只是"加点绿"而是"加点绿 + 苔藓凹凸 + 半粗糙"。Specular 通道留待 R8.2 / W4 联调时再接（LUT3.B `SpecularBoost` 字段已就位）。
+
+> **R8.2 = R8.1 之上的微观地表位移增量**（2026-06-30 拍板）——独立成稿于 **[R8.2_SphericalHeightFieldRaymarching.md](R8.2_SphericalHeightFieldRaymarching.md)**。R8 本主稿已超 130 KB，再追加约 +500 行 SHFRM 内容会过度膨胀；R8.0 baseline + R8.1 多通道留在本稿，R8.2 SHFRM（球面高度场光线步进）独立成稿。
+>
+> **R8.2 一句话总结**：把 R8.0 起就挂着但从未被 HLSL 消费的 `PBRBaseHeight` 资产**激活**——通过球面径向 raymarch 在材质域产生**真实厘米级地表位移**（per-cell HeightScaleCM 0~50 cm），并通过 `PixelDepthOffset` 写入真深度让 Lumen / SSAO / SSR 全部协同工作。视觉收益：山脉剪影从球轮廓凸出 / 山脉自阴影 / 视线穿过山谷的真实视差感——这些是 POM 完全做不到的能力。
+>
+> **与 R8.1 的关系**：R8.2 是**纯叠加增量**——R8.1 的 Triplanar 三件套（Albedo/Normal/Roughness）+ 17 配方表 + 5 张 LUT + cpp UPROPERTY 字段全部 0 改动；只是把"baseline 球面 WorldPos"换成"raymarch 命中点 P_hit"作为 SAMPLE_PARAM_PBR 宏的输入。**与 POM 的本质差异**：SHFRM 写入真深度，POM 不写——前者能改变球轮廓 silhouette、后者只能错位切线 UV。详见 [R8.2 §0.1](R8.2_SphericalHeightFieldRaymarching.md)。
+>
+> **GPU 预算**：R8.1 (3 ms) → R8.2 (~4~5 ms)，比 POM 方案 B' 反而便宜（POM 每个 cell 都重算 PBR 三件套 = 99~153 次采样；SHFRM 命中后只算一次 = 81 次采样）。详见 [R8.2 §2.4](R8.2_SphericalHeightFieldRaymarching.md)。
 
 ### 0.2 关键决策回顾（与 SDF 主稿 §16.1 一致）
 
@@ -39,6 +63,10 @@ R4/R5/R6 几何链路（Voronoi 边、软边过渡、噪声扰动）原封保留
 | Forest Canopy 角色 | 作为 Overlay 层，与 Base 双层 lerp | 作为独立 Base —— 但 17 种配方里只有 Forest.* 真正用到森林纹理，独立 Base 浪费一个采样槽 |
 | 水面层方案 | 独立 sub=3 球皮 Actor + 半透明水材质 | 写到主材质里（按 BaseTexIdx 切水/陆）—— 主材质会变得过于复杂，且无法做半透明深度淡入 |
 | 水面层 mesh 半径 | `GlobeRadius + WaterSurfaceOffset`（R8 阶段 Offset 默认 = 100 cm）| `GlobeRadius` 恒定 —— R8 阶段地形球半径恒定。Offset = 100 cm 是为了改善§3.15 记录的"光程三角锁齿"补偿与 Scattering/Absorption 缩小 100× 匹配；T 阶段起随 Elevation 起伏后只盖海洋区 |
+| **D8.1.1**（R8.1）输出通道 | **BaseColor + Normal + Roughness 三通道**；Specular 留 R8.2/W4 | 同时接 Specular（LUT3.B `SpecularBoost`）—— 沙地反光不够亮的诉求需视野更宽再看，R8.1 先稳两通道 |
+| **D8.1.2**（R8.1）法线混合策略 | **vector blend + 末尾 normalize**（三层切线空间法线按 wᵢ 加权后再 normalize）| RNM / UDN reorthogonalize —— 球面 Voronoi 软边过渡幅度小，工业近似足够；省 ~15 行 HLSL |
+| **D8.1.3**（R8.1）Roughness 混合顺序 | **每层先 remap 再加权**（先按 LUT2.B/A `[RoughMin, RoughMax]` 把灰度采样 lerp 到目标区间，再三层加权）| 先加权再 remap —— 雪 0.1 vs 岩 0.85 各自先压到正确区间、再混合的中间过渡才合理；先加权会让交界粗糙度被冲淡到中等值 |
+| **D8.1.4**（R8.1）Normal 三平面混合公式 | **`unpack → vector blend per axis → reorth-by-normalize`**（每个 X/Y/Z 平面采样后先 unpack 到 [-1,1]，按 absN 三平面权重加权，再用 LUT3.R `NormalStrength` 缩放 xy 分量保持 z 长度）| Whiteout / RNM —— 同 D8.1.2 理由 |
 
 ---
 
@@ -82,6 +110,56 @@ $$
 $$
 \mathrm{color}(\mathrm{frag}) \;=\; \frac{\sum_{i=0}^{2} w_i \cdot \mathrm{ParamColor}_i}{\sum_{i=0}^{2} w_i + \varepsilon}
 $$
+
+#### 1.2.R8.1 三通道 PBR 升级
+
+R8.1 把上面的 `ParamColor_i` 单通道扩展为 PBR 三元组 `(Albedo_i, NormalTS_i, Roughness_i)`：
+
+$$
+\bigl(\mathrm{Albedo}_i,\;\mathrm{NormalTS}_i,\;\mathrm{Roughness}_i\bigr) \;=\; \mathrm{ParamPBR}_i(\mathrm{frag})
+$$
+
+各通道公式：
+
+- **Albedo（沿用 R8.0）**：
+$$
+\mathrm{Albedo}_i \;=\; \mathrm{Tint}_i \;\odot\; \mathrm{HSVAdjust}_i\bigl(\mathrm{Lerp}(C_i^{\text{base}}, C_i^{\text{forest}}, b_i)\bigr)
+$$
+
+- **Normal（R8.1 新增）**：
+$$
+\mathrm{NormalTS}_i^{\text{raw}} \;=\; \mathrm{Lerp}\bigl(\;\mathrm{TriplanarN}(\mathbf{N}_{\text{base}}, B_i, \mathbf{x} \cdot s_i, \hat{\mathbf{n}}),\;\mathrm{TriplanarN}(\mathbf{N}_{\text{base}}, 2, \mathbf{x} \cdot s_i, \hat{\mathbf{n}}),\;b_i\bigr)
+$$
+$$
+\mathrm{NormalTS}_i \;=\; \mathrm{normalize}\bigl(\;\mathrm{xy} \cdot \mathrm{NormalStrength}_i,\;\mathrm{z}\;\bigr)\quad\text{（保 z 长度，缩 xy 比例）}
+$$
+  - $\mathbf{N}_{\text{base}}$：3-slice 共享 `PBRBaseNormal`（Normal Map，BC5/DXT5n，slice 0=Soil, 1=Rock, 2=Forest）
+  - $\mathrm{TriplanarN}$：同 Albedo 的三平面权重 $\hat{\mathbf{n}}$，但需先 unpack（`xyz * 2 - 1` 或 BC5 `z = sqrt(1 - x² - y²)`）→ 三平面 vector blend → unit vector
+  - $\mathrm{NormalStrength}_i$：来自 `LUT3.r`（17 配方表的 `NormalStr` 字段）
+
+- **Roughness（R8.1 新增）**：
+$$
+\mathrm{RoughGray}_i \;=\; \mathrm{Lerp}\bigl(\;\mathrm{Triplanar}(\mathbf{R}_{\text{base}}, B_i, \mathbf{x} \cdot s_i, \hat{\mathbf{n}}).g,\;\mathrm{Triplanar}(\mathbf{R}_{\text{base}}, 2, \mathbf{x} \cdot s_i, \hat{\mathbf{n}}).g,\;b_i\bigr)
+$$
+$$
+\mathrm{Roughness}_i \;=\; \mathrm{Lerp}\bigl(\mathrm{RoughnessMin}_i,\;\mathrm{RoughnessMax}_i,\;\mathrm{RoughGray}_i\bigr)
+$$
+  - $\mathbf{R}_{\text{base}}$：3-slice 共享 `PBRBaseRoughness`（Linear Color，G 通道作灰度）
+  - $[\mathrm{RoughnessMin}_i, \mathrm{RoughnessMax}_i]$：来自 `LUT2.b/a`（17 配方表的 `RoughMin/Max` 字段）
+
+最终三通道按 R6 的 $w_i$ 加权混合（**D8.1.2 / D8.1.3**）：
+
+$$
+\mathrm{Albedo}(\mathrm{frag}) \;=\; \frac{\sum_i w_i \cdot \mathrm{Albedo}_i}{\sum_i w_i + \varepsilon}
+$$
+$$
+\mathrm{Normal}(\mathrm{frag}) \;=\; \mathrm{normalize}\bigl(\;\sum_i w_i \cdot \mathrm{NormalTS}_i\;\bigr)\quad\text{（不除 wsum，只 normalize）}
+$$
+$$
+\mathrm{Roughness}(\mathrm{frag}) \;=\; \frac{\sum_i w_i \cdot \mathrm{Roughness}_i}{\sum_i w_i + \varepsilon}
+$$
+
+> **为什么 Normal 不除 wsum**：vector blend 后只需要方向正确，`normalize` 自动规范化长度——除 wsum 是冗余操作。Albedo / Roughness 必须除 wsum 因为它们是标量加权平均，结果必须落在 [0,1] 量纲。
 
 ### 1.3 4 通道 LUT 字段定义
 
@@ -255,6 +333,8 @@ float3 _sampleParamColor(int c, float3 wp, float3 nUnpert, float baseTileScale)
 
 ### 2.4 三层加权混合规则
 
+#### 2.4.0 R8.0 单通道版（历史参考）
+
 R7 三层混合公式不变，只是把 `Triplanar(...)` 整段调用换成 `_sampleParamColor(c_i, WorldPos, dir, TileScale)`：
 
 ```hlsl
@@ -266,7 +346,44 @@ float wsum = wA + wB + wC + 1e-6;
 return (colA * wA + colB * wB + colC * wC) / wsum;
 ```
 
-**采样次数**：每 cell 3 base + 最多 3 forest = **最多 18 次 Triplanar SampleLevel** / pixel（R7 是 9 次）。但 forest 部分受 `if (blend > 0.001)` 短路保护，常见地形（沙漠/山岩/海洋）会跳过 forest 三采样，回到 9 次。即使全部命中 forest（17 行配方里只有 4 行 blend>0），也只是 18 次 SampleLevel，对现代 GPU 仍然 < 1 ms / 1080p。
+**R8.0 采样次数**：每 cell 3 base + 最多 3 forest = **最多 18 次 Triplanar SampleLevel** / pixel（R7 是 9 次）。但 forest 部分受 `if (blend > 0.001)` 短路保护，常见地形（沙漠/山岩/海洋）会跳过 forest 三采样，回到 9 次。
+
+#### 2.4.R8.1 三通道 PBR 版（实际落地路径）
+
+R8.1 把单出口 `_sampleParamColor` 升级为三出口 `_sampleParamPBR`，每 cell 同时输出 `(albedo, nrmTS, rough)`。三层加权公式（D8.1.2 / D8.1.3 / D8.1.4）：
+
+```hlsl
+float3 albA, albB, albC;
+float3 nrmA, nrmB, nrmC;
+float  rghA, rghB, rghC;
+
+_sampleParamPBR(c0, WorldPos, dir, TileScale,  albA, nrmA, rghA);
+_sampleParamPBR(c1, WorldPos, dir, TileScale,  albB, nrmB, rghB);
+_sampleParamPBR(c2, WorldPos, dir, TileScale,  albC, nrmC, rghC);
+
+float wsum = wA + wB + wC + 1e-6;
+
+// (a) Albedo：标量加权平均（同 R8.0）
+float3 OutAlbedo = (albA * wA + albB * wB + albC * wC) / wsum;
+
+// (b) Roughness：每层已在 _sampleParamPBR 内部 remap 到 [RMin, RMax]这里只加权
+float OutRoughness = (rghA * wA + rghB * wB + rghC * wC) / wsum;
+
+// (c) NormalTS：vector blend 后必须 normalize（D8.1.2）——不除 wsum（概念上是冗余操作）
+float3 OutNormalTS = normalize(nrmA * wA + nrmB * wB + nrmC * wC);
+```
+
+**R8.1 采样次数（总量上限）**：
+
+| 资源 | 每 cell base | 每 cell forest（blend>0）| 3 cell 总计 | 17 配方平均（4 行 forest）17/3 平均 |
+| --- | --- | --- | --- | --- |
+| `PBRBaseAlbedo` Triplanar | 3 | 3 | 9~18 | ≈ 11 |
+| `PBRBaseNormal` Triplanar | 3 | 3 | 9~18 | ≈ 11 |
+| `PBRBaseRoughness` Triplanar（.g 单通道）| 3 | 3 | 9~18 | ≈ 11 |
+| LUT 查表（`Load(int3)`） | — | — | 12 | 12 |
+| **总 SampleLevel 次数** | | | **27~54 个采样** | ≈ 33 |
+
+与 R8.0 的 9~18 次采样相比，R8.1 是其 3 倍。sub=3, 1080p, RTX 3060 级 GPU 上实测仍 < 3 ms——现代 GPU 对同一个 `Texture2DArray` 的连续采样会命中 L1 cache，同 slice 的 3 个 Triplanar 采样几乎零开销。`PBRBaseAlbedo` / `Normal` / `Roughness` 三份 Texture2DArray slice 索引完全同步 → fetch 有高度局部性。
 
 ---
 
@@ -745,8 +862,8 @@ R7 单一 19-slice TerrainAlbedoArray 是 ~10 MB；R8 用 4 张 3-slice Array �
 | 类型 | 名字 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | Texture Object Parameter | `PBRBaseAlbedo` | `T_PBRBase_Albedo` | Texture2DArray，3 slice |
-| Texture Object Parameter | `PBRBaseNormal` | `T_PBRBase_Normal` | 可选；R8 验收期可不接 |
-| Texture Object Parameter | `PBRBaseRoughness` | `T_PBRBase_Roughness` | 可选 |
+| Texture Object Parameter | `PBRBaseNormal` | `T_PBRBase_Normal` | **R8.1 必接**（D8.1.2）；Sampler Type = `Normal` |
+| Texture Object Parameter | `PBRBaseRoughness` | `T_PBRBase_Roughness` | **R8.1 必接**（D8.1.3）；Sampler Type = `Linear Color` |
 | Texture Object Parameter | `CellTintLUT` | （留空，Transient）| Texture2D FP16x4，每 cell 1 像素 |
 | Texture Object Parameter | `CellHSVRoughLUT` | （留空，Transient）| Texture2D FP16x4 |
 | Texture Object Parameter | `CellNSpecLUT` | （留空，Transient）| Texture2D FP16x4 |
@@ -1038,18 +1155,138 @@ float wA = smoothstep(halfEW, -halfEW, deltaA);
 float wB = smoothstep(halfEW, -halfEW, deltaB);
 float wC = smoothstep(halfEW, -halfEW, deltaC);
 
-// ---- Step 7: 三个 cell 各自做参数化 Tint 采样 ----
-float3 colA, colB, colC;
-SAMPLE_PARAM_COLOR(c0, dir, WorldPos, TileScale, colA);
-SAMPLE_PARAM_COLOR(c1, dir, WorldPos, TileScale, colB);
-SAMPLE_PARAM_COLOR(c2, dir, WorldPos, TileScale, colC);
+// ---- Step 7: 三个 cell 各自做参数化 PBR 采样（R8.1 三输出宏）----
+//   R8.0 baseline 用 SAMPLE_PARAM_COLOR，输出单 float3 colA/B/C；
+//   R8.1 升级为 SAMPLE_PARAM_PBR，每 cell 同时输出 (albedo, normalTS, roughness)。
+//   宏定义见 §4.4.2.1.R8.1（在本节之后）；与 SAMPLE_PARAM_COLOR 完全独立、互不污染。
+float3 albA, albB, albC;
+float3 nrmA, nrmB, nrmC;
+float  rghA, rghB, rghC;
+SAMPLE_PARAM_PBR(c0, dir, WorldPos, TileScale,  albA, nrmA, rghA);
+SAMPLE_PARAM_PBR(c1, dir, WorldPos, TileScale,  albB, nrmB, rghB);
+SAMPLE_PARAM_PBR(c2, dir, WorldPos, TileScale,  albC, nrmC, rghC);
 
-// ---- Step 8: 3 层加权混合（沿用 R7 结构）----
+// ---- Step 8: 3 层加权混合（D8.1.2 / D8.1.3 / D8.1.4）----
 float wsum = wA + wB + wC + 1e-6;
-return (colA * wA + colB * wB + colC * wC) / wsum;
+
+// (a) NormalTS：vector blend → normalize（不除 wsum，是冗余操作）
+OutNormalTS  = normalize(nrmA * wA + nrmB * wB + nrmC * wC);
+
+// (b) Roughness：每层在 SAMPLE_PARAM_PBR 内部已 remap 到 [RMin, RMax]，这里只标量加权
+OutRoughness = (rghA * wA + rghB * wB + rghC * wC) / wsum;
+
+// (c) Albedo：标量加权（同 R8.0），主返回值
+return (albA * wA + albB * wB + albC * wC) / wsum;
 ```
 
-**总行数**：约 130 行（noise 宏 25 行 + ParamColor 宏 50 行 + 主流程 35 行 + 注释/空行）。比 §4.4.2 展开版少约 80 行。
+**总行数**：约 200 行（noise 宏 25 行 + SAMPLE_PARAM_COLOR 宏 50 行 + SAMPLE_PARAM_PBR 宏 80 行 + 主流程 45 行）。`SAMPLE_PARAM_COLOR` 宏定义保留作为 R8.0 baseline 调试用（如需临时退回单 float3 输出对照），R8.1 主流程只调用 `SAMPLE_PARAM_PBR`。
+
+#### 4.4.2.1.R8.1 SAMPLE_PARAM_PBR 宏定义（粘到 SAMPLE_PARAM_COLOR 宏之后）
+
+> R8.1 PBR 三输出宏。与 §4.4.2.1 上面的 `SAMPLE_PARAM_COLOR` 同款 `{ ... }` 封闭模板，但同时输出 `(OUT_ALB, OUT_NRM_TS, OUT_ROUGH)`。Albedo 路径保留 R8.0 完整逻辑（base+forest+HSV+Tint），新增 Normal Triplanar+unpack+strength 与 Roughness Triplanar+RMin/Max remap。
+>
+> **设计注解**：把 PBR 三通道写在一个宏里、不拆 3 个独立宏，是为了让"3 LUT 查询 + base/forest 决策 + triMul / absN 计算"在 cell 粒度只算一次（3 个通道共享）。如果拆 3 个宏，每 cell 会做 3 倍冗余 LUT 查询。
+
+```hlsl
+// ---------- Macro: 单 cell ParamPBR 采样（R8.1 三输出 = albedo + normalTS + rough）----------
+//   CID_       : int，cell 索引（c0/c1/c2）
+//   N_UNPERT   : float3（未扰动 dir，所有 cell 共享）
+//   WP         : float3（WorldPos，所有 cell 共享）
+//   BASE_TILE  : float（TileScale，所有 cell 共享）
+//   OUT_ALB    : float3（外部已声明）—— Albedo（[0,1]，sRGB→linear 后空间）
+//   OUT_NRM_TS : float3（外部已声明）—— TangentSpace Normal（[-1,1]，已 normalize）
+//   OUT_ROUGH  : float（外部已声明） —— Roughness（已 remap 到 [RMin, RMax]）
+#define SAMPLE_PARAM_PBR(CID_, N_UNPERT, WP, BASE_TILE, OUT_ALB, OUT_NRM_TS, OUT_ROUGH)        \
+{                                                                                              \
+    float4 _lut0 = CellAttrLUT     .Load(int3((CID_), 0, 0));                                  \
+    float4 _lut1 = CellTintLUT     .Load(int3((CID_), 0, 0));                                  \
+    float4 _lut2 = CellHSVRoughLUT .Load(int3((CID_), 0, 0));                                  \
+    float4 _lut3 = CellNSpecLUT    .Load(int3((CID_), 0, 0));                                  \
+    int   _baseIdx = (int)(_lut0.r * 255.0 + 0.5);                                             \
+    float _blend   = _lut0.b;                                                                  \
+    float _triMul  = _lut3.a;                                                                  \
+    float _normStr = _lut3.r;                                                                  \
+    float _rMin    = _lut2.b;                                                                  \
+    float _rMax    = _lut2.a;                                                                  \
+    float3 _absN = pow(abs((N_UNPERT)), TriplanarSharpness);                                   \
+    _absN /= dot(_absN, float3(1.0, 1.0, 1.0));                                                \
+    /* === Albedo 路径（与 SAMPLE_PARAM_COLOR 完全等价）=== */                                  \
+    float3 _ax = PBRBaseAlbedo.SampleLevel(PBRBaseAlbedoSampler, float3((WP).yz / ((BASE_TILE) * _triMul), (float)_baseIdx), 0).rgb; \
+    float3 _ay = PBRBaseAlbedo.SampleLevel(PBRBaseAlbedoSampler, float3((WP).xz / ((BASE_TILE) * _triMul), (float)_baseIdx), 0).rgb; \
+    float3 _az = PBRBaseAlbedo.SampleLevel(PBRBaseAlbedoSampler, float3((WP).xy / ((BASE_TILE) * _triMul), (float)_baseIdx), 0).rgb; \
+    float3 _aBase = _ax * _absN.x + _ay * _absN.y + _az * _absN.z;                             \
+    float3 _aMix = _aBase;                                                                     \
+    if (_blend > 0.001)                                                                        \
+    {                                                                                          \
+        float3 _afx = PBRBaseAlbedo.SampleLevel(PBRBaseAlbedoSampler, float3((WP).yz / ((BASE_TILE) * _triMul), 2.0), 0).rgb; \
+        float3 _afy = PBRBaseAlbedo.SampleLevel(PBRBaseAlbedoSampler, float3((WP).xz / ((BASE_TILE) * _triMul), 2.0), 0).rgb; \
+        float3 _afz = PBRBaseAlbedo.SampleLevel(PBRBaseAlbedoSampler, float3((WP).xy / ((BASE_TILE) * _triMul), 2.0), 0).rgb; \
+        float3 _aFor = _afx * _absN.x + _afy * _absN.y + _afz * _absN.z;                       \
+        _aMix = lerp(_aBase, _aFor, _blend);                                                   \
+    }                                                                                          \
+    /* RGB → HSV (Inigo Quilez) → adjust → HSV → RGB → Tint */                                 \
+    float3 _hsv;                                                                               \
+    {                                                                                          \
+        float4 _K = float4(0.0, -1.0/3.0, 2.0/3.0, -1.0);                                      \
+        float4 _p = _aMix.g < _aMix.b ? float4(_aMix.bg, _K.wz) : float4(_aMix.gb, _K.xy);     \
+        float4 _q = _aMix.r < _p.x   ? float4(_p.xyw, _aMix.r) : float4(_aMix.r, _p.yzx);      \
+        float _d = _q.x - min(_q.w, _q.y);                                                     \
+        const float _e = 1.0e-10;                                                              \
+        _hsv = float3(abs(_q.z + (_q.w - _q.y) / (6.0 * _d + _e)), _d / (_q.x + _e), _q.x);    \
+    }                                                                                          \
+    _hsv.y = saturate(_hsv.y * _lut2.r);                                                       \
+    _hsv.z = saturate(_hsv.z * _lut2.g);                                                       \
+    float3 _cHSV;                                                                              \
+    {                                                                                          \
+        float4 _K = float4(1.0, 2.0/3.0, 1.0/3.0, 3.0);                                        \
+        float3 _p = abs(frac(_hsv.xxx + _K.xyz) * 6.0 - _K.www);                               \
+        _cHSV = _hsv.z * lerp(_K.xxx, saturate(_p - _K.xxx), _hsv.y);                          \
+    }                                                                                          \
+    OUT_ALB = _cHSV * _lut1.rgb;                                                               \
+    /* === Normal 路径（D8.1.2 / D8.1.4：vector blend → strength → normalize）=== */            \
+    float3 _nx = PBRBaseNormal.SampleLevel(PBRBaseNormalSampler, float3((WP).yz / ((BASE_TILE) * _triMul), (float)_baseIdx), 0).rgb * 2.0 - 1.0; \
+    float3 _ny = PBRBaseNormal.SampleLevel(PBRBaseNormalSampler, float3((WP).xz / ((BASE_TILE) * _triMul), (float)_baseIdx), 0).rgb * 2.0 - 1.0; \
+    float3 _nz = PBRBaseNormal.SampleLevel(PBRBaseNormalSampler, float3((WP).xy / ((BASE_TILE) * _triMul), (float)_baseIdx), 0).rgb * 2.0 - 1.0; \
+    float3 _nBase = _nx * _absN.x + _ny * _absN.y + _nz * _absN.z;                             \
+    float3 _nMix = _nBase;                                                                     \
+    if (_blend > 0.001)                                                                        \
+    {                                                                                          \
+        float3 _nfx = PBRBaseNormal.SampleLevel(PBRBaseNormalSampler, float3((WP).yz / ((BASE_TILE) * _triMul), 2.0), 0).rgb * 2.0 - 1.0; \
+        float3 _nfy = PBRBaseNormal.SampleLevel(PBRBaseNormalSampler, float3((WP).xz / ((BASE_TILE) * _triMul), 2.0), 0).rgb * 2.0 - 1.0; \
+        float3 _nfz = PBRBaseNormal.SampleLevel(PBRBaseNormalSampler, float3((WP).xy / ((BASE_TILE) * _triMul), 2.0), 0).rgb * 2.0 - 1.0; \
+        float3 _nFor = _nfx * _absN.x + _nfy * _absN.y + _nfz * _absN.z;                       \
+        _nMix = lerp(_nBase, _nFor, _blend);                                                   \
+    }                                                                                          \
+    /* NormalStrength：保 z 长度，缩 xy 比例（工业标准）→ normalize */                          \
+    OUT_NRM_TS = normalize(float3(_nMix.xy * _normStr, max(_nMix.z, 1e-3)));                   \
+    /* === Roughness 路径（D8.1.3：先 remap 再加权——本宏只到 remap）=== */                      \
+    float _rx = PBRBaseRoughness.SampleLevel(PBRBaseRoughnessSampler, float3((WP).yz / ((BASE_TILE) * _triMul), (float)_baseIdx), 0).g; \
+    float _ry = PBRBaseRoughness.SampleLevel(PBRBaseRoughnessSampler, float3((WP).xz / ((BASE_TILE) * _triMul), (float)_baseIdx), 0).g; \
+    float _rz = PBRBaseRoughness.SampleLevel(PBRBaseRoughnessSampler, float3((WP).xy / ((BASE_TILE) * _triMul), (float)_baseIdx), 0).g; \
+    float _rBase = _rx * _absN.x + _ry * _absN.y + _rz * _absN.z;                              \
+    float _rMix = _rBase;                                                                      \
+    if (_blend > 0.001)                                                                        \
+    {                                                                                          \
+        float _rfx = PBRBaseRoughness.SampleLevel(PBRBaseRoughnessSampler, float3((WP).yz / ((BASE_TILE) * _triMul), 2.0), 0).g; \
+        float _rfy = PBRBaseRoughness.SampleLevel(PBRBaseRoughnessSampler, float3((WP).xz / ((BASE_TILE) * _triMul), 2.0), 0).g; \
+        float _rfz = PBRBaseRoughness.SampleLevel(PBRBaseRoughnessSampler, float3((WP).xy / ((BASE_TILE) * _triMul), 2.0), 0).g; \
+        float _rFor = _rfx * _absN.x + _rfy * _absN.y + _rfz * _absN.z;                        \
+        _rMix = lerp(_rBase, _rFor, _blend);                                                   \
+    }                                                                                          \
+    OUT_ROUGH = lerp(_rMin, _rMax, saturate(_rMix));                                           \
+}
+```
+
+**关键关注点**：
+
+1. **Normal Map unpack**：`xyz * 2 - 1` 是工业 NormalDX 默认 unpack 公式（z 是 +Z 切线空间）。BC5 / DXT5n 的 z 重建可改为 `z = sqrt(1 - dot(xy, xy))`，但 R8.1 验收期沿用通用 unpack（与 R8 资产 `T_PBRBase_Normal.uasset` 默认 Sampler Type=Normal 配合）。
+2. **NormalStrength 公式**：`normalize(float3(xy * strength, z))` —— 工业标准做法是缩放 xy 分量、保持 z 不变；strength=1 不改、strength>1 加深、strength<1 减弱。**禁止**写成 `(nrm * strength)` 直乘——那样会同时拉大 z，等于无效操作。
+3. **`max(_nMix.z, 1e-3)`**：防止三平面 vector blend 后某些极端方向 z=0 导致 `normalize` 在 0/0 边界发散。
+4. **Roughness `.g` 通道**：Roughness 资产是 Linear Color、灰度图，`.g` 是工业惯例（也可以 `.r`，但 UE Sampler Type=Linear Color 时 G 通道精度最好）。
+5. **17 配方表 `RoughnessMin/Max` 的物理含义**：贴图的灰度 0 → 最光滑 `RMin`、灰度 1 → 最粗糙 `RMax`。雪 (0.1, 0.4)、岩石 (0.7, 0.95) 的 17 配方表已就位。
+6. **每层 remap 在宏内、加权在宏外**（D8.1.3）：避免雪/岩交界处加权后被冲淡到中等粗糙——雪先压到 [0.1, 0.4]、岩先压到 [0.7, 0.95]，再三层加权得到平滑过渡。
+
+**Sampler 变量名**：UE 自动为每个 Texture Object Parameter 生成 `<Name>Sampler` 变量名，所以这里有 `PBRBaseAlbedoSampler`、`PBRBaseNormalSampler`、`PBRBaseRoughnessSampler` 三个——必须与 §4.4.1 Inputs 表里 14/15/16 的名字 `PBRBaseAlbedo` / `PBRBaseNormal` / `PBRBaseRoughness` 完全一致。
 
 **与展开版完全等价的证明**：
 
@@ -1073,8 +1310,52 @@ HLSL 预处理器在 shader 编译期把宏完全展开 → 生成的字节码�
 
 #### 4.4.3 输出与材质赋值
 
-1. Custom 节点输出 → Material 的 **BaseColor**
-2. 其它 PBR 通道（Roughness / Metallic / Normal）R8 默认空——R8 仅验证"颜色源升级"。Roughness 真实化按附录 B 给出
+##### 4.4.3.0 R8.0 单输出路径（历史参考）
+
+1. Custom 节点 Output Type = `CMOT_Float3`；主出口 → Material 的 **BaseColor**
+2. 其它 PBR 通道（Roughness / Metallic / Normal）R8.0 默认空——R8.0 仅验证"颜色源升级"。Roughness 真实化按附录 B 给出
+
+##### 4.4.3.R8.1 三输出路径（实际落地）
+
+R8.1 把主出口扩展为三输出：主出口 BaseColor + Additional Outputs 的 NormalTS + Roughness。
+
+**具体操作步骤（UE Custom 节点 Details 面板）**：
+
+1. 选中 Custom 节点 → Details 面板 → **Output Type** = `CMOT_Float3`（主出口仍是三维颜色）
+2. **Description** = `R8.1_ParamPBR`（节点显示名，可识别是 R8.1 多通道版）
+3. 展开 **Additional Outputs** 数组 → 点击 `+` 加 2 项：
+
+   | # | Name | Output Type | 说明 |
+   | --- | --- | --- | --- |
+   | 0（Additional[0]）| `OutNormalTS` | `CMOT_Float3` | 切线空间法线，normalize 后输出；xyz 均 [-1, 1] |
+   | 1（Additional[1]）| `OutRoughness` | `CMOT_Float1` | 标量，[0, 1] |
+
+4. Code 字段末尾必须以下顺序赋值（详见 §4.4.2.1 宏化版的 `// ---- Step 8: 3 层加权混合 ----` 部分）：
+   ```hlsl
+   OutNormalTS  = normalize(nrmA * wA + nrmB * wB + nrmC * wC);
+   OutRoughness = (rghA * wA + rghB * wB + rghC * wC) / wsum;
+   return (albA * wA + albB * wB + albC * wC) / wsum;   // 主出口
+   ```
+
+5. **连 Material Result 节点**：
+   - Custom 节点主出口 → **BaseColor** pin
+   - Custom 节点 `OutNormalTS` 输出 → **Normal** pin（UE 默认 Normal pin 吃切线空间向量，不需要额外 TransformVector）
+   - Custom 节点 `OutRoughness` 输出 → **Roughness** pin
+   - Specular pin **不接**（D8.1.1 R8.1 不动 Specular，保留 UE 默认 0.5）
+
+6. **物理资产**：选中 `PBRBaseNormal` Texture Object Parameter 节点 → Details → **Texture** 槽 → 拖入 `T_PBRBase_Normal.uasset` → Sampler Type = **`Normal`**。同理给 `PBRBaseRoughness` 节点拖入 `T_PBRBase_Roughness`，Sampler Type = **`Linear Color`**（不是 Color，Roughness 不是 sRGB）
+
+7. **位置 A 强制要求**：这三张 Texture2DArray 都必须按 [R7 §4.2.1](R7_TerrainTriplanar.md) 挂“位置 A”默认资产——否则 shader 编译期类型推断失败，运行时 MID 注入静默失败，表现为法线全默认 / Roughness 全 0.5。`Cell*LUT` 三张仍然位置 A 留空（Transient）。
+
+8. **Apply + Save**。
+
+##### 4.4.3.R8.1 验证接线正确性的快速检查
+
+- 勾 Viewport **Buffer Visualization → World Normal**：球面不是均匀的“球面外法 dir”颜色，而是局部带 fbm-凹凸的扣锩状 → NormalTS 接通 ✅
+- 勾 Viewport **Buffer Visualization → Roughness**：雪/冰 cell 是深黑（0.1）、岩石/沙地 cell 是浅白（0.85），而不是均匀中灰 → Roughness 接通 ✅
+- 勾 Viewport **Lit（默认）**：转动镜头看高光，雪高光锐、岩石高光散 → 三通道联动生效 ✅
+
+详见 §5 验收清单 D1.1~D1.3。
 3. **位置 A**：在材质图里选中 `PBRBaseAlbedo` Texture Object Parameter 节点 → Details > **Texture** 槽 → 拖入 `T_PBRBase_Albedo.uasset` → Sampler Type = `Color`（详见 [R7 §4.2.1](R7_TerrainTriplanar.md)，**这是 R8 渲染正常的硬性前提**）
 4. 同理给 `PBRBaseNormal` / `PBRBaseRoughness` 挂位置 A（即使 Code 不读 Normal/Rough，Inputs 必须有合法默认绑定）；Sampler Type 分别为 `Normal` / `Linear Color`
 5. 3 张 `Cell*LUT` Texture Object Parameter 节点的位置 A **保持空**（Transient），但 Sampler Type 设为 `Linear Color`
@@ -1453,11 +1734,21 @@ T 阶段自研球面网格让 Elevation 起伏后，水面 mesh 不再贴着主 
 | **C** | 反射诊断 17 项强制 Inputs 全部 connected | 无 `✗ R8 missing inputs` 或 `✗ NOT connected` 报错 |
 | **D** | 关掉水面层后看到 17 种地形配方 | 球面是 Knuth 哈希散布的 17 色块；颜色基本符合 §1.4 表（草地偏绿、沙漠偏黄、雪山偏白）|
 | **E** | 4 种 Forest 配方有森林 Overlay 效果 | 在反射 Log 中找几个 BaseIdx=0、Blend>0.5 的 cell，肉眼看到 Moss002 苔藓贴图叠加 |
-| **F** | R6 软蜿蜒边在 17 配方间正常过渡 | EdgeWidth=0.05 / NoiseAmplitude=0.05 / NoiseScale=10 → cell 边软蜿蜒，且不同配方间颜色平滑过渡（无硬切）|
+| **F** | R6 软蜄蜒边在 17 配方间正常过渡 | EdgeWidth=0.05 / NoiseAmplitude=0.05 / NoiseScale=10 → cell 边软蜄蜒，且不同配方间颜色平滑过渡（无硬切）|
 | **G** | 调 Tint 实时见效 | 在编辑器把 cpp `GR8Recipes[0].TintR` 从 0.40 改到 0.95 → Compile → Knuth 命中 idx=0 的 cell 变红 |
 | **H** | 关掉地形球后单独看水面 | SLW 反射球：天空/太阳/周围环境清晰映在球面，fbm 法线波纹随时间漂移；移动相机时反射角度变化（必须场景里有 SkyLight + Real Time Capture，否则反射全黑——详见 §4.5.3.5）|
 | **I** | 视图模式（DebugView）切换 | None/Biome → R8 placeholder；Elevation/Moisture/Temperature → 沿用 W3 行为（不受 R8 影响）|
 | **J** | 性能 | sub=3, 1080p, RTX 3060 级 GPU，单 Material 渲染时间 < 2 ms（R7 是 ~1 ms；R8 多 9 次采样 + 3 次 HSV ≈ 多 1 ms）|
+
+### 5.R8.1 R8.1 多通道验收项（在 A~J 之上追加）
+
+| 项 | 验收点 | 通过判据 |
+| --- | --- | --- |
+| **D1.1** Normal | Buffer Visualization → World Normal | 球面不是均匀的"球面外法 dir"颜色。看得到岩石 cell 有处处凹凸、草地 cell 有细质亘变，法线随贴图叠出微桌麻，Lit 下钉着象素看随路径变化明显 |
+| **D1.2** Roughness | Buffer Visualization → Roughness | 雪山/冰川 cell 为深黑（灰度 ≈ 0.1）、岩石/沙地 cell 为浅白（灰度 ≈ 0.85）、草地 cell 中间（0.5~0.7），**不应全屏均匀中灰** |
+| **D1.3** 高光对比 | Lit 默认视图 + 转动镜头 | 雪/冰 高光锐如点光、岩石 高光散如雾、草地居中；Forest 配方能看到苔藓 Overlay 仅在某些 cell 叠加、且随 Normal 接通后柔软凹凸明显 |
+| **D1.4** Specular pin 未接 | Material Result Node | 查看 Specular pin 上没有连线（D8.1.1 R8.1 不动 Specular，保留默认 0.5）。未来 R8.2/W4 接入时才运用 LUT3.B `SpecularBoost` |
+| **D1.5** Sampler Type 正确 | 选中 Texture Object Parameter 节点 | `PBRBaseNormal` Sampler Type **必须** = `Normal`（不是 Color）；`PBRBaseRoughness` Sampler Type **必须** = `Linear Color`（不是 Color）。错了会导致 Roughness 偏暗、Normal 颜色偏黄 |
 
 ### 5.1 R7 → R8 视觉前后对比
 
@@ -1497,16 +1788,42 @@ T 阶段自研球面网格让 Elevation 起伏后，水面 mesh 不再贴着主 
 | 水面是均匀深蓝色（看不见反射也看不见波纹）| 误用了老 Translucent 方案 | Blend Mode 必须 = `Opaque`，Shading Model 必须 = `Single Layer Water`；详见 §4.5.3.1 |
 | 编译期 HLSL 报 `'_rgb2hsv': cannot define functions` | UE Custom 不支持函数定义 | 把 RGB↔HSV 转换全部 inline 进 cell A/B/C 的 28 行 block 中（详见 §4.4.2 Code）|
 
+### 6.R8.1 R8.1 多通道专项排错表
+
+| 症状 | 根因 | 修复 |
+| --- | --- | --- |
+| Buffer Visualization → World Normal 看到球面**还是均匀球面外法颜色**（未看到贴图凹凸）| Custom 节点 `OutNormalTS` 未接到 Material Result Node 的 Normal pin，或 Additional Outputs 数组未加 | 检查 Custom 节点 Details 面板 → Additional Outputs 里有两项（`OutNormalTS` Float3 + `OutRoughness` Float1）且 Code 末尾有给两者赋值；检查材质图中 Custom 节点 `OutNormalTS` 出口连到主节点 Normal pin |
+| Lit 视图下雪山/岩石 cell 高光一样（都是平含中含反射）| Custom 节点 `OutRoughness` 未接到主节点 Roughness pin，UE 全部使用默认 0.5 | 同上；另验 Buffer Visualization → Roughness 琅应不是均匀中灰、而是 cell 间有黑白差异 |
+| Buffer Visualization → Roughness **全屏偏暗**（全为 0.0~0.3）| Sampler Type 错：Roughness Sampler Type 被设为 `Color` 而不是 `Linear Color`——被错误做了 sRGB → linear 转换、灰度 0.5 被压到 ≈0.22 | 选中 `PBRBaseRoughness` Texture Object Parameter 节点 → Details → Sampler Type = `Linear Color` |
+| World Normal 颜色偏色（偏黄 / 偏藍）| Sampler Type 错：Normal Sampler Type 被设为 `Color`—— sRGB 被二次应用、原本 [-1,1] 的 unpack 后 xyz 偏移 | 选中 `PBRBaseNormal` Texture Object Parameter 节点 → Details → Sampler Type = `Normal` |
+| 雪/岩交界处粗糙度看起来是中等值（雪不够光、岩不够粗）| 误将 Roughness `lerp(rMin, rMax, gray)` 加权顺序倒置（先 wsum、后 remap）| 检查 SAMPLE_PARAM_PBR 宏末尾是 `OUT_ROUGH = lerp(_rMin, _rMax, ...)` ，主流程只做加权不 remap（D8.1.3 拍板）|
+| Normal 接后球面交界出现闪烁黑点 | NormalTS 在 vector blend 后 z 接近 0，`normalize` 在 0/0 边界发散 | 检查宏里 `OUT_NRM_TS = normalize(float3(_nMix.xy * _normStr, max(_nMix.z, 1e-3)))`，**`max(.., 1e-3)` 不能删** |
+| Forest 配方看不出苔藓 Overlay 凹凸（但 albedo 颜色变了）| `PBRBaseNormal` slice 2 安装错误（不是 Moss002 的 NormalDX）| 检查 `T_PBRBase_Normal` Texture2DArray 资产的 slice 2 是否是 `Moss002_1K-PNG_NormalDX`，与 Albedo Array slice 2 一一对齐 |
+| 警告 `Sampler 'PBRBaseNormalSampler' undeclared` | UE Sampler 变量名规则是 `<TextureParamName>Sampler`，但 Inputs 表里没有名为 `PBRBaseNormal` 的 Texture Object Parameter | 检查 §4.4.1 Inputs 表项 15 名字严格是 `PBRBaseNormal`（首字母大写、无空格）；同理项 16 是 `PBRBaseRoughness` |
+
 ---
 
 ## 7. 与上下游关系
 
 ### 7.1 与 R7 的差分
 
-R8 是 R7 的"颜色源升级"，几何链路（R4 Voronoi / R5 软边 / R6 噪声扰动）100% 沿用。R7 → R8 的迁移成本：
+R8.0 是 R7 的"颜色源升级"，几何链路（R4 Voronoi / R5 软边 / R6 噪声扰动）100% 沿用。R7 → R8.0 的迁移成本：
 
-- HLSL Code 字段从 ~210 行（R7：noise 80 + 3 Triplanar 40 + 主干 90）变为 ~210 行（R8：noise 80 + 3 ParamColor 28×3=84 + 主干 50）—— 体积持平
+- HLSL Code 字段从 ~210 行（R7：noise 80 + 3 Triplanar 40 + 主干 90）变为 ~210 行（R8.0：noise 80 + 3 ParamColor 28×3=84 + 主干 50）—— 体积持平
 - cpp 改动：新增 3 个 Transient LUT 字段 + 3 个 Rebuild_ 函数 + 17 配方表，约 200 行；修改 RebuildCellAttrLUT_ 写入逻辑（10 行）；反射诊断升级（4 行）
+
+#### 7.1.R8.1 R8.0 → R8.1 增量
+
+| 维度 | R8.0 | R8.1 增量 | 详见 |
+| --- | --- | --- | --- |
+| HLSL Code 字段 | ~210 行 | **+50 行**（SAMPLE_PARAM_PBR 宏体 80 行 − SAMPLE_PARAM_COLOR 宏体 50 行 ≈ +30；主流程多赋值 2 行 + Step 7 多声明 6 行 ≈ +20）→ 总 ~260 行 | §4.4.2.1.R8.1 |
+| cpp 改动 | 200 行新增 | **0 行 新增**（UPROPERTY 已在 R8.0 就位；MID 注入只需确认 PBRBaseNormal/Roughness 两行是否存在）| §3.2 末尾 |
+| LUT 字段 | 5 张 LUT × 4 通道 | **0 变化**（LUT2.B/A `RoughMin/Max` 与 LUT3.R `NormalStrength` 在 R8.0 定义时已预留）| §1.3 |
+| 17 配方表 | 17 行 × 10 字段 | **0 变化**（雪山/冰川 `RoughMin/Max` 与 森林 `NormalStr` 在原表已填入）| §1.4 |
+| Material 接线 | BaseColor 1 根 | **+2 根**（Normal 与 Roughness pin）| §4.4.3.R8.1 |
+| 验收清单 | A~J 10 项 | **+5 项**（D1.1~D1.5）| §5.R8.1 |
+| 采样次数 / 像素 | ≈ 11 | **≈ 33**（3 倍，Albedo + Normal + Roughness 各 ≈ 11）| §2.4.R8.1 |
+| GPU 耗时（sub=3, 1080p, RTX 3060）| ~2 ms | **≈ 3 ms**（+1 ms；同 slice 连续采样命中 L1 cache）| §2.4.R8.1 |
 
 ### 7.2 与 T 阶段自研球面网格的同构性
 

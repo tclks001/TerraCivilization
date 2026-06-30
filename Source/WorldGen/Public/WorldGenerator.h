@@ -34,7 +34,7 @@ public:
     const TArray<FCellGeoData>& GetCellData()    const { return CellData; }
     const TArray<FPlateInfo>&   GetPlates()      const { return Plates; }
     const TArray<int32>&        GetBaseCellIds() const { return BaseCellIds; }
-
+    
     /** W2 起暴露：Debug 视图按 PlateId 染色用；以及供下游模块（W3 板块边界判定等）只读访问。 */
     const TArray<int32>&        GetPlateIdField() const { return PlateIdField; }
 

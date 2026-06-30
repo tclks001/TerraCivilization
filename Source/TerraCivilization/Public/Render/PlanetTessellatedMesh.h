@@ -143,6 +143,33 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|R8")
     bool bUseR8PlaceholderRecipes = true;
 
+    /**
+     * R8.2：SHFRM raymarch 沿视线最大深度（cm）。
+     *
+     *   T 阶段几何域已通过 cpp 顶点位移完成 macro Elevation（公里级）；
+     *   R8.2 在材质域追加 micro SHFRM（厘米级）。两者量纲完全正交，无需互改。
+     *
+     *   HLSL 端把 LUT3.G [0,1] 归一化值乘以本参数还原为实际 HeightScaleCM。
+     *   默认 75 = HeightScaleCM 上限 50（Mountain.Peak）× 1.5 倍冗余。
+     *
+     *   详见 Docs/R8.2_SphericalHeightFieldRaymarching.md §4.6 / §8.2 D8.2.7。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|R8.2",
+              meta = (ClampMin = "10.0", ClampMax = "500.0"))
+    float MaxRaymarchDepthCM = 75.0f;
+
+    /**
+     * R8.2：raymarch 线性步数（Editor 侧可见值）。
+     *
+     *   ⚠ HLSL Custom 节点 `[unroll]` 必须编译期常量，所以 R8.2 的 HLSL 写死 16 步。
+     *   本 UPROPERTY 仅作为 MID Scalar Parameter 暴露给 Editor 面板。
+     *
+     *   详见 Docs/R8.2_SphericalHeightFieldRaymarching.md §4.6。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|R8.2",
+              meta = (ClampMin = "4", ClampMax = "32"))
+    int32 MaxRaymarchSteps = 16;
+
     /** R8：3-slice BaseColor 数组（Soil / Rock / Forest，详见 R8 §3.1）。 */
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|R8")
     TObjectPtr<UTexture2DArray> PBRBaseAlbedo;

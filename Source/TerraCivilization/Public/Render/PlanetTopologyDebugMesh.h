@@ -357,6 +357,37 @@ public:
     bool bUseR8PlaceholderRecipes = true;
 
     /**
+     * R8.2：SHFRM raymarch 沿视线最大深度（cm）。
+     *
+     *   HLSL 端把 LUT3.G [0,1] 归一化值乘以本参数还原为实际 HeightScaleCM；
+     *   也作为 raymarch 主循环 `P(t) = WorldPos - rayDir * (t * MaxRaymarchDepthCM)` 的 t=1 处距离。
+     *
+     *   默认 75 = HeightScaleCM 上限 50（Mountain.Peak）× 1.5 倍冗余——保证最高山脉也能命中。
+     *   调小 → SHFRM 雪山幅度按比例压缩；调大 → 山脉幅度按比例放大（同时雪山等小幅度配方相对变弱）。
+     *
+     *   详见 Docs/R8.2_SphericalHeightFieldRaymarching.md §4.6。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|R8.2",
+              meta = (ClampMin = "10.0", ClampMax = "500.0"))
+    float MaxRaymarchDepthCM = 75.0f;
+
+    /**
+     * R8.2：raymarch 线性步数（编辑器 Editor 侧可见值）。
+     *
+     *   ⚠ 注意：HLSL Custom 节点 `[unroll]` 必须编译期常量，所以 R8.2 的 HLSL 写死 16 步。
+     *   本 UPROPERTY 仅作为 MID Scalar Parameter 暴露给 Editor 面板，给美术调试时
+     *   "看见这个值"——HLSL 实际采用的步数仍是写死的 16。
+     *
+     *   未来若要改成动态步数，HLSL 端 `[unroll]` → `[loop]` + `for (int step = 1; step <= MaxRaymarchSteps; step++)`，
+     *   但会损失编译期优化、常态成本 +5%。本期接受死 16 步的限制。
+     *
+     *   详见 Docs/R8.2_SphericalHeightFieldRaymarching.md §4.6。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|R8.2",
+              meta = (ClampMin = "4", ClampMax = "32"))
+    int32 MaxRaymarchSteps = 16;
+
+    /**
      * 是否开启光滑法线。
      * 关闭时每三角形使用面法线（Flat Shading），可以清楚看到正二十面体细分的三角形结构；
      * 开启时把每个顶点的法线设为该 Cell 的 UnitCenter，得到光滑球面（但同顶点位置 = Cell 中心，

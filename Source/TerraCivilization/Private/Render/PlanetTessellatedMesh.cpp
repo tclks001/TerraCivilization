@@ -592,8 +592,17 @@ void APlanetTessellatedMesh::RebuildCellNSpecLUT_(int32 NumCells)
     {
         const TerraCivilization::R8::FRecipe& R =
             TerraCivilization::R8::PickRecipe(bUseR8PlaceholderRecipes, c);
+        // R8.2 激活：LUT3.G 存 [0, 1] 归一化 HeightScale，HLSL 端用 lut3.g * MaxRaymarchDepthCM 还原 cm。
+        //
+        //   T 阶段与 R8.2 的位移分层（D8.2.7）：
+        //     - 几何域 macro Elevation（~500 cm 公里级）走 cpp 顶点位移（已由 MeshDisplacementBuilder 完成）
+        //     - 材质域 micro SHFRM（~50 cm 厘米级）走 GPU raymarch（本 LUT 提供 HeightScale）
+        //   二者在量纲上完全正交，同时处于不同管线阶段、互不覆盖。
+        //
+        //   归一化上界 50.0f = R8.2 §4.2 拍板的 HeightScaleCM 上限（Mountain.Peak）。
+        const float HScaleNormalized = FMath::Clamp(R.HeightScaleCM / 50.0f, 0.0f, 1.0f);
         Dst[c * 4 + 0] = FFloat16(R.NormalStr);
-        Dst[c * 4 + 1] = FFloat16(0.0f);          // HeightScale: T 阶段径向位移走 cpp，不读 GPU
+        Dst[c * 4 + 1] = FFloat16(HScaleNormalized);   // R8.2 SHFRM HeightScale（0..1，HLSL 端还原 cm）
         Dst[c * 4 + 2] = FFloat16(1.0f);          // SpecularBoost: 中性 1.0
         Dst[c * 4 + 3] = FFloat16(R.TriScale);
     }
@@ -823,6 +832,15 @@ void APlanetTessellatedMesh::ApplyTerrainMaterial_(int32 NumCells)
         if (CellTintLUT)      NewMID->SetTextureParameterValue(TEXT("CellTintLUT"),      CellTintLUT);
         if (CellHSVRoughLUT)  NewMID->SetTextureParameterValue(TEXT("CellHSVRoughLUT"),  CellHSVRoughLUT);
         if (CellNSpecLUT)     NewMID->SetTextureParameterValue(TEXT("CellNSpecLUT"),     CellNSpecLUT);
+
+        // R8.2 注入：SHFRM 参数（详见 Docs/R8.2_SphericalHeightFieldRaymarching.md §4.4）。
+        //   - GlobeRadiusCM：球半径，HLSL 用 length(P - PlanetCenter) - GlobeRadiusCM 算径向高度
+        //   - MaxRaymarchDepthCM：raymarch 沿视线最大深度（cm，R8.2 默认 75 = HeightScale 上限 50 × 1.5）
+        //   - MaxRaymarchSteps：线性步数（R8.2 默认 16；HLSL 中是写死的常量，本参数仅提供 Editor 侧可见）
+        // 注意：T 阶段的 GlobeRadiusCM 取自 actor UPROPERTY GlobeRadiusCM；R8 actor 取自 Radius。
+        NewMID->SetScalarParameterValue(TEXT("GlobeRadiusCM"),       GlobeRadiusCM);
+        NewMID->SetScalarParameterValue(TEXT("MaxRaymarchDepthCM"),  MaxRaymarchDepthCM);
+        NewMID->SetScalarParameterValue(TEXT("MaxRaymarchSteps"),    static_cast<float>(MaxRaymarchSteps));
     }
 
     TerrainMID = NewMID;
@@ -848,7 +866,7 @@ void APlanetTessellatedMesh::DiagnoseR8Material_() const
     const TConstArrayView<TObjectPtr<UMaterialExpression>> Exprs = BaseMat->GetExpressions();
     int32 CustomFound = 0;
 
-    // 与 R8 actor 完全一致的 17 期望 inputs（小写比较）
+    // 与 R8 actor 完全一致的 18 期望 inputs（小写比较）——R8.2 追加 pbrbaseheight
     const TArray<FString> ExpectedR8Inputs = {
         TEXT("uv0"), TEXT("uv1"), TEXT("uv2"), TEXT("uv3"),
         TEXT("worldpos"), TEXT("planetcenter"),
@@ -858,6 +876,7 @@ void APlanetTessellatedMesh::DiagnoseR8Material_() const
         TEXT("triplanarsharpness"), TEXT("tilescale"),
         TEXT("pbrbasealbedo"),
         TEXT("celltintlut"), TEXT("cellhsvroughlut"), TEXT("cellnspeclut"),
+        TEXT("pbrbaseheight"),                                              // R8.2 新增：SHFRM 高度场
     };
     bool bAnyR8Compliant = false;
 
