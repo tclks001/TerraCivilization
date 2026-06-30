@@ -30,7 +30,7 @@
 > ⚠ **WorldGen 与 GridRender(SDF) 已分别拥有独立主设计稿**：
 > - 程序化地理生成 → [WorldGenDesign.md](WorldGenDesign.md)（W1~W8 子阶段）
 > - 球面 SDF 多层地表渲染（材质 / 着色公式） → [SphericalSDFTerrainDesign.md](SphericalSDFTerrainDesign.md)（R1~R13 子阶段）
-> - 自研球面网格（几何 / 顶点位移 / 双拓扑解耦） → [TessellatedMeshDesign.md](TessellatedMeshDesign.md)（**T 阶段（TessellatedMesh）主稿**，三足鼎立的"几何域"代表，子里程碑 T1~T5 逐文件验收）
+> - 自研球面网格（几何 / 顶点位移 / 双拓扑解耦） → [TessellatedMeshDesign.md](TessellatedMeshDesign.md)（**T 阶段（TessellatedMesh）主稿**，三足鼎立的"几何域"代表，子里程碑 T1~T6 逐文件验收，T6=LOD 由原 SDF Roadmap R10 迁入）
 > - 球面拓扑几何含义（FCell/FCorner/FCellEdge/FRenderTri 字段详解）→ [SphereTopologyReference.md](SphereTopologyReference.md)（基础设施参考稿）
 >
 > 三步走里程碑：`R8 (✅ 材质参数化 + SLW) → T (⏳ 自研球面网格 / TessellatedMesh) → W4 (⏳ Biome 真实查表)`。T 阶段主稿与 SDF 主稿通过"几何 / 材质"硬切分共存。

@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Templates/UniquePtr.h"
+#include "WorldGenSettings.h"   // T4：UPROPERTY 直接持有 FWorldGenSettings → 完整类型可见
 #include "PlanetTessellatedMesh.generated.h"
 
 class UProceduralMeshComponent;
@@ -14,6 +15,7 @@ class UTexture2D;
 class UTexture2DArray;
 class FSphereTopology;
 class FMeshDisplacementBuilder;
+class FWorldGenerator;   // T4：TUniquePtr<FWorldGenerator>，避免在头文件 include "WorldGenerator.h"
 
 /**
  * APlanetTessellatedMesh
@@ -26,8 +28,8 @@ class FMeshDisplacementBuilder;
  * 子里程碑 T1~T5（逐文件验收）：
  *   - T1 ✅：FMeshDisplacementBuilder + 双拓扑骨架
  *   - T2 ✅：BuildVertexToCoarseTris + ComputeVertexElevationCM + 自检 PASS
- *   - T3（本里程碑）：5 张 LUT + 17 参数 MID + 共享顶点 mesh + 水面 SLW + PIE 退出钩子
- *   - T4：接入 FCellGeoData.Elevation
+ *   - T3 ✅：5 张 LUT + 17 参数 MID + 共享顶点 mesh + 水面 SLW + PIE 退出钩子
+ *   - T4（本里程碑）：接入 FCellGeoData.Elevation 真实数据源（详见 Docs/T4_RealElevation.md）
  *   - T5：整体验收清单 A~J
  *
  * 设计稿锚点：
@@ -166,6 +168,26 @@ public:
     TObjectPtr<UTexture2DArray> TerrainNormalArray;
 
     //----------------------------------------------------------
+    // T4：WorldGen 流水线参数（详见 Docs/T4_RealElevation.md §3.2）
+    //----------------------------------------------------------
+
+    /**
+     * D19：WorldGen 流水线参数（RandomSeed / PlateCount / SeaLevel / TerrainSet / DebugView 等都在内部）。
+     * 改动后 OnConstruction 自动重跑 Generator->Generate() → ComputeCellElevation_ 取新 Elevation。
+     * 与 APlanetTopologyDebugMesh 的 WorldGenSettings 字段语义完全一致（两 actor 各跑各自的实例）。
+     */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|WorldGen")
+    FWorldGenSettings WorldGenSettings;
+
+    /**
+     * D21：true → 退回 T3 余弦 ramp（赤道 +1，两极 -1，回归对照路径）；
+     *      false（默认）→ 走 Generator->GetCellData()[c].Elevation 真实数据。
+     * 联调期排查 mesh 形变异常时一键回到 T3 baseline。
+     */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|WorldGen")
+    bool bUsePlaceholderElevation = false;
+
+    //----------------------------------------------------------
     // 生命周期
     //----------------------------------------------------------
     virtual void OnConstruction(const FTransform& Transform) override;
@@ -273,6 +295,18 @@ private:
 
     /** 顶点位移预计算器（T2 起填充实际算法）。 */
     TUniquePtr<FMeshDisplacementBuilder> Displacement;
+
+    /**
+     * D18 / D20：WorldGen 主类实例。Rebuild() 中按顺序：
+     *   RebuildTopologies_ → new Displacement + BuildVertexToCoarseTris → RunSelfCheckT2
+     *     → Generator.Reset() → MakeUnique<FWorldGenerator>(CellTopology, Settings) → Generate()
+     *     → 5x LUT → RebuildTerrainMesh_（内部消费 ComputeCellElevation_ → Generator->GetCellData()）
+     *
+     * 生命周期必须于 CellTopology 之后、于 ComputeCellElevation_ 之前
+     * （详见 Docs/T4_RealElevation.md §1 D20）。
+     * 与 APlanetTopologyDebugMesh::Generator 字段语义完全一致。
+     */
+    TUniquePtr<FWorldGenerator> Generator;
 
     //----------------------------------------------------------
     // T3：5 张动态 LUT + MID（运行期重建）

@@ -8,7 +8,7 @@
 >
 > **本稿与 R8 材质零绑定**——R8 阶段写的全部 HLSL Custom 节点（参数化 Tint、Triplanar 三平面采样、4 通道材质 LUT）在 T 阶段 mesh 切换后**零改动复用**，只需 cpp 端把"Cell Id + 三方权重"通过 Vertex Color / Custom UV 灌进顶点缓冲。
 >
-> **子里程碑命名风格**：与 [R4_VoronoiBoundary.md](R4_VoronoiBoundary.md) / [W1 系列] 一致，使用 `T1` ~ `T5` 逐文件验收（不再写 `R8.5.1` 这类冗长标题）。
+> **子里程碑命名风格**：与 [R4_VoronoiBoundary.md](R4_VoronoiBoundary.md) / [W1 系列] 一致，使用 `T1` ~ `T6` 逐文件验收（不再写 `R8.5.1` 这类冗长标题）。T6 = LOD（基于二十面体边递归细分 + 按需 TriTree 增删，详见 §5.4），由原 SDF Roadmap 的 R10 迁入。
 
 ---
 
@@ -394,14 +394,15 @@ R8 阶段的顶点缓冲在 [`APlanetTopologyDebugMesh::Rebuild`](../Source/Terr
 
 ## 5. 工程落地步骤
 
-### 5.1 子里程碑切分（T1 ~ T5，逐文件验收）
+### 5.1 子里程碑切分（T1 ~ T6，逐文件验收）
 
 ```mermaid
 graph LR
     T1[T1: FMeshDisplacementBuilder + 双拓扑骨架] --> T2[T2: VertexToCoarseTris 构建 + dot 权重 + 算术平均]
     T2 --> T3[T3: APlanetTessellatedMesh 主验收 actor + Mesh + Water 双子组件]
     T3 --> T4[T4: 接 FCellGeoData.Elevation + Editor 验收]
-    T4 --> T5[T5: 整体验收清单 A~J]
+    T4 --> T5[T5: 整体验收清单 A~J（无 LOD 静态 mesh）]
+    T5 --> T6[T6: 边递归细分 LOD + 按需 TriTree 增删（原 R10）]
 ```
 
 | 里程碑 | 主体改动文件 | 验收特征 |
@@ -409,8 +410,9 @@ graph LR
 | **T1** | 新增 `MeshDisplacementBuilder.h/.cpp`；`APlanetTessellatedMesh.h/.cpp` 雏形（仅持有双 `FSphereTopology` 实例 + 空 builder） | 编译通过；OnConstruction 时 Output Log 打印 `CellTopo: 642 cells / MeshTopo: 2562 verts / 5120 tris` |
 | **T2** | 实现 `BuildVertexToCoarseTris` + `ComputeVertexElevationCM` + `FindCoarseTriIdByCells_` | 单元测试：随机 100 个 mesh 顶点权重和 (w0+w1+w2) ∈ [0.99, 1.01]；`VertexToCoarseTriIds[v].Num()` ∈ [1, 6] |
 | **T3** | `APlanetTessellatedMesh` 主验收 actor 完整化：`TerrainMeshComp` + `WaterMeshComp` 两个 ProceduralMesh 子组件、`RebuildAll_/RebuildTerrainMesh_/RebuildWaterMesh_` 实现 + 5 张 LUT + 17 参数 MID 注入 + PIE 退出材质恢复钩子（详见 **[T3_TerrainMeshRender.md](T3_TerrainMeshRender.md)**） | Editor 中 Spawn actor → 看到 sub=4 的彩色球皮（placeholder elevation = 余弦 ramp，赤道凸起两极凹陷）；勾 `bEnableWaterShell` 看到水面层正常渲染 |
-| **T4** | 接入 `FCellGeoData.Elevation` 真实数据源；Editor 中可手动改单个 cell 高度 → 立即看到对应 mesh 顶点抬升 | `FCellGeoData[0].Elevation = 1.0` → cell 中心附近 mesh 顶点抬升 ≈ `ElevationScaleCM` cm |
+| **T4** | 接入 `FCellGeoData.Elevation` 真实数据源；Editor 中改 `WorldGenSettings.RandomSeed` / `PlateCount` 立即看到 mesh 山脉重新分布（详见 **[T4_RealElevation.md](T4_RealElevation.md)**） | `WorldGenSettings.RandomSeed = 42` → 山脉重新分布；`bUsePlaceholderElevation = true` 退回 T3 余弦 ramp；改 `ElevationScaleCM` 山势线性缩放 |
 | **T5** | 验收清单 A~J 全部勾过；同步文档（本稿、SDF 主稿 §16 占位、AgentWorkflow） | 详见 §5.3 |
+| **T6** | LOD：边递归细分 + 按需 TriTree 增删 + 高 sub fbm 实时顶点；原 SDF Roadmap R10 迁入本稿 | 详见 §5.4——具体实现细节落地时再讨论；本稿仅作初稿验收锚点 |
 
 ### 5.2 文件落点
 
@@ -431,7 +433,7 @@ Docs/
 └── ...
 ```
 
-> T 阶段**保留** `APlanetTopologyDebugMesh` 不删——它是 R8 验收的基准 actor，W4 联调期可用作"T 阶段修了什么 / 没修什么"的回归对照。R10 LOD 落地后再考虑统一下线。
+> T 阶段**保留** `APlanetTopologyDebugMesh` 不删——它是 R8 验收的基准 actor，W4 联调期可用作"T 阶段修了什么 / 没修什么"的回归对照。T6 LOD 落地后再考虑统一下线。
 
 ### 5.3 验收清单 A~J（依 [AgentWorkflow.md §5](AgentWorkflow.md#5-阶段验收清单) 模板）
 
@@ -447,6 +449,279 @@ Docs/
 | H | 顶点法线 = `+UnitCenter` 朝外、Lit 正常 | 继承 R8 §3.14 修复——昼夜分割线无三角棱面锯齿 |
 | I | 水面层 SLW 反射不变 | 与 R8 阶段 `APlanetTopologyDebugMesh::WaterMeshComp` 视觉完全一致；进出 PIE 不丢材质 |
 | J | 文档同步 | TechnicalDesign.md / AgentWorkflow.md / SphericalSDFTerrainDesign.md §16 占位 三处链接已更新指向本稿 |
+
+### 5.4 T6：LOD 思路初稿（基于二十面体边递归细分 + 按需 TriTree 增删）
+
+> 拍板时间：2026-06-30。本节是**思路验收锚点**，不构成实现合约——具体落地（CPU vs GPU、fbm vs Material Height 采样、skirt vs T 接缝处理等）等到真正动手时再分子里程碑讨论。
+>
+> **本节由原 SDF 设计稿 R10 迁入**——LOD 在功能职责上属于 mesh 构建（几何域），不属于 SDF 着色（材质域），与 T 阶段主稿的"自研球面网格"承诺天然一脉相承。SDF 主稿 §11.3 R10 行已折叠为指向本节的占位。
+
+#### 5.4.1 设计目标
+
+| 维度 | 目标 |
+| --- | --- |
+| **几何质量** | 镜头远离时整球退化为 LOD 0 静态 mesh；镜头拉近某地块时该地块沿"二十面体递归细分"路径细化，相邻地块自动出现"过渡三角形"消接缝 |
+| **运行时成本** | **不维护**一份始终很细的 MeshTopology——按需 `new`/`delete` 局部 TriTree 节点，使内存占用与可见 LOD 范围相关而非整球 sub 等级相关 |
+| **顶点位置** | 高 LOD 层级的新增顶点用 fbm（或其他高频源）实时生成，无需提前预算；T2/T3 的"父 cell 重心权重 + 三 Cell 高度插值"路径作为低频基底 |
+| **与 R8 材质零绑定** | 仍走"独立顶点 + 三角形级 c 一致"模式（[T3 §3.6](T3_TerrainMeshRender.md)），LOD 不动 R8 PS 端的 c0/c1/c2 契约 |
+
+#### 5.4.2 LOD 0 = MeshSub 与 CellSub 关系（重要拍板）
+
+用户提问：「能不能做 `MeshSubdivisionLevel < CellSubdivisionLevel`？」
+
+**答：不能**——这是 T 阶段建立的 c 三角形级常量契约的**硬约束**：
+
+- T3 [§3.6.5](T3_TerrainMeshRender.md) 的 `FindCoarseCellsForMeshTri_(MeshTriIdx)` 通过 `MeshTopology->PrimalTriTreeNodes[T]->Father` 沿父链爬升 `MeshSub - CellSub` 步拿粗 Cell 三角形 (cA, cB, cC)
+- 该路径前提是 mesh 渲染三角形 T 是 cell 三角形的**子三角形**（一个 mesh 三角形完全包含在一个粗 Cell 三角形内部），仅当 `MeshSub >= CellSub` 时成立
+- 若 `MeshSub < CellSub`：一个 mesh 三角形会跨越**多个**粗 Cell 三角形，PS 端球面 Voronoi 仲裁需要的候选 cell 数量从 3 增长到 4/5/6，**超出 R8 PS 端 17-input Custom 节点的 c0/c1/c2 固定三候选契约**
+- 这是契约级约束、不是性能权衡，绕不过去
+
+**T6 拍板**：
+
+```
+LOD 0（最远视距）= MeshSub = CellSub，整球渲染（性能不会差太多——sub=3 仅 1280 三角形）
+LOD 1+（视距拉近）= 在 LOD 0 基础上，对镜头视野内的部分 mesh 三角形递归细分
+```
+
+#### 5.4.3 边递归细分模型（核心 LOD 几何规则）
+
+递归对象**是边、不是面**——这是消接缝的根本——任何一个三角形看到自己 3 条边的细分状态后，按下表展开成 1/2/4 个子三角形：
+
+| 该三角形被细分边数 | 子三角形数 | 形状 | 用途 |
+| --- | --- | --- | --- |
+| **0**（3 边都不细分） | 1（自身） | 原三角形 | LOD 范围之外，整体不动 |
+| **1**（仅一条边细分） | 2（近似直角三角形）| 把细分边的中点连到对面顶点 | **过渡三角形**——接到"邻居有细分但自己不细分"的位置 |
+| **2**（两条边细分） | 3（一个三角形 + 一个四边形拆 2）| 四边形按对角线拆 | **过渡三角形**——接到"邻居正在细分一半"的位置 |
+| **3**（三边都细分） | 4（4 个近似正三角形，与 `FSphereTopology::SubdividePrimalOnce` 拓扑一致） | 中点连成倒置内三角 + 3 个角三角 | **递归核心**——只有这个形态可以继续向下递归（因为子三角形也是"近似正三角形"，结构与父级同构） |
+
+**关键性质**：
+
+- 只有 "3 边都细分" 的近似正三角形可以**继续向下递归**——其余 1/2 边细分的三角形是**叶子级过渡三角形**，不能再分（强行分会破坏"近似正三角"形状，下一级递归就乱了）
+- 这正是"递归对象是边"的物理含义：边的细分状态由 LOD 区域决定，三角形的细分形态是**边状态推导出的副产品**
+- 由此自然消除接缝：相邻三角形共享同一条边，看到的边细分状态相同 → 两侧顶点位置一致
+
+#### 5.4.4 按需 TriTree 增删
+
+T 阶段当前 [§3](#3-顶点位移核心算法d3--d4-拍板路径) 用一个静态 sub=4 的 `FSphereTopology` 实例作为 MeshTopology——所有 5120 个三角形 + 2562 个共享顶点 + `PrimalTriTreeNodes` 都常驻内存。
+
+T6 改为**懒分配**：
+
+```
+- LOD 0: MeshTopology 静态构建 sub=CellSub（如 sub=3，1280 个 Tri）的 root 层 TriTreeNodes
+- LOD 1+: 对 LOD 0 中的每个被镜头"拉近"的根三角形 T_root，沿 T_root 的子树**按需 new** TriTreeNode：
+    · 若 T_root 进入近距离 LOD 阈值 → 给 T_root 创建 4 个 Child（即调用一次 SubdividePrimalOnce 但只对单个三角形做）
+    · 子三角形再进入更近 LOD 阈值 → 继续 new 子节点
+- 当地块离开镜头视野 / LOD 退化时：**delete** 对应子树（保留 LOD 0 root 不变）
+```
+
+这样：
+
+- 内存随**当前可见 LOD 范围**而非整球 sub 等级而增长
+- LOD 切换时只 new/delete 局部树，**不需要 rebuild 整个 MeshTopology**——T 阶段当前的 `RebuildAll_` 整体重建路径在 T6 后改为"局部 patch"，避免高 sub 时全量重算 fbm 的卡顿
+- TriTree 的父子结构与 LOD 拓扑结构**1:1 对应**——这正是 [FSphereTopology::SubdividePrimalOnce](#) 已有的 4 子结构的运行时化
+
+#### 5.4.5 高 LOD 顶点的位置来源（待落地决策）
+
+用户提到两个候选方案，都不在本稿拍板，记录为开放问题：
+
+**方案 A：CPU 端 fbm 实时生成**
+
+```
+for 每个新创建的边中点顶点 V_mid：
+    P_macro = (P_endpoint_a + P_endpoint_b) * 0.5
+    Dir = normalize(P_macro - PlanetCenter)
+    H_macro = T2 §3.4 dot 权重插值（基于 V_mid 所属的粗 Cell 三角形 cA/cB/cC）
+    H_micro = fbm(Dir, frequency, octaves)   // 高频细节
+    P_final = Dir * (R + H_macro + H_micro)
+```
+
+- ✅ 与 T2/T3 路径完全一致，新增顶点照样 fit 进"独立顶点 + 三角形级 c 一致"模式
+- ✅ 法线 / 切向仍直取 `+UnitCenter`（D5 / D17 复用）
+- ❓ fbm 在高 LOD（如 sub=8、165888 三角形）下 CPU 成本是否能在 OnConstruction 16 ms 内吃下
+
+**方案 B：从 R8 PBR 材质的 Height 通道在 GPU 端采样**
+
+- ✅ 与材质美术资产共源——LOD 形变和材质 POM/Normal 完全一致
+- ❌ 走 GPU 后 mesh 顶点位置回传 CPU 不可行；要么改为 GPU compute shader 写 vertex buffer（巨大重构），要么放弃 CPU 碰撞 / Gameplay 查询（违反 [TechnicalDesign.md §1](TechnicalDesign.md) 中 Gameplay 直接读取 mesh 顶点的承诺）
+- ❓ R8 R6_BoundaryNoise 已用过 fbm 类噪声做边缘扰动，材质 Height 通道也是基于 fbm；语义上方案 A 用 CPU 端的 fbm 等价代替 GPU 端的 fbm，差异主要是**采样点是否与材质完全锁相**
+
+**T6 拍板期的初步倾向**：方案 A，原因是与 T 阶段已有 CPU 顶点位移路径一致、不引入 GPU compute 复杂度、保证 Gameplay 模块可读 mesh 顶点。但落地前需要做 fbm 性能预算。
+
+#### 5.4.6 LOD 阈值与触发
+
+（落地时讨论；本稿仅占位）
+
+- 镜头 → 球心距离触发整球 LOD 等级（最远 = LOD 0、近 = LOD k）
+- 单个根三角形 → 镜头距离触发该三角形子树细分等级
+- 视锥剔除：球背面三角形不参与 LOD（节省树构建）
+- LOD 滞后区（hysteresis）：避免镜头在阈值处来回时频繁 new/delete
+
+#### 5.4.7 与 R8 材质 / T3 c 三角形级常量契约的兼容性
+
+所有 T6 新增 / 细分出的 mesh 渲染三角形仍按 T3 [§3.6](T3_TerrainMeshRender.md) 的"独立顶点 + 三角形 3 顶点写同一组 (cA, cB, cC)"模式装填——`FindCoarseCellsForMeshTri_` 接受新创建的 TriTreeNode 同样能爬升找到所属粗 Cell 三角形（因为新节点的 `Father` 链一直延伸到 sub=3 的 root，root 的 `CellIds[0..2]` 即粗 Cell 三角形 (cA, cB, cC)）。
+
+这意味着：
+
+- T6 不动 R8 PS 端的任何 HLSL
+- T6 不动 T3 的 `RebuildTerrainMesh_` 顶点装填语义
+- T6 仅替换"MeshTopology 静态全量" → "MeshTopology 按 LOD 懒分配"，是几何域的纯增量
+
+#### 5.4.8 风险与待解决问题（落地前需明确）
+
+| # | 风险 / 问题 | 落地期处理 |
+| --- | --- | --- |
+| 1 | 过渡三角形（1/2 边细分）的 PrimalTriTreeNode 是否仍存在 `Father` 链？— 它们不是"二十面体严格 4 子结构"的产物 | 落地期：要么给过渡三角形特殊节点类型、要么仍按 4 子但其中部分子节点不分配位置 |
+| 2 | LOD 切换瞬间的视觉跳变（顶点突然出现 / 消失）| 可选 morph：对新创建顶点在若干帧内从父位置 lerp 到 fbm 位置 |
+| 3 | Gameplay 模块需要查询 cell 高度时使用哪个 LOD？| 不影响——Gameplay 查询的是 `FCellGeoData.Elevation`（cell 级），与 mesh LOD 无关 |
+| 4 | 物理碰撞 mesh 是否随 LOD 切换？| 落地期决定：可走"碰撞用静态 LOD 0 mesh"的简化路径 |
+| 5 | 跨 cell 边界的 fbm 是否会撕裂？— 不同 cell 的 fbm seed 若不同会产生缝 | 落地期：fbm 输入用 normalize(WorldPos)，整球共享 seed，跨 cell 自然连续 |
+
+#### 5.4.9 验收锚点（本稿等到 T6 落地讨论时具化）
+
+本稿到此为止——T6 实际落地时新建 [T6_LODTessellation.md](T6_LODTessellation.md) 子稿，按 T3 的格式（D-决策表 + §3 核心算法 + §5 子里程碑切分 + §6 风险点）重新拍板。
+
+本节作为**思路存档**，确保 T 阶段的整体设计闭环包含 LOD（不会因为后续推迟到 W 阶段后再做而遗失架构连贯性）。
+
+#### 5.4.10 附录：FTriTreeNode 索引代数公式（齐根快照模型）
+
+> **背景**：T6 的 LOD 数据结构选型涉及"是否把 `FTriTreeNode*` 指针重构为代数下标"的工程决策（详见 §5.4.8 风险点 #1 与 [AgentWorkflow §3.16](AgentWorkflow.md)）。本节先把"齐根快照"（即 T 阶段当前 sub=N 静态 mesh）下的精确公式推导和验证记录下来；T6 真正落地时再评估这套公式能否扩展到"残缺树"（按需 new/delete 的 LOD 拓扑）。
+>
+> **拍板时间**：2026-06-30。**算法验证脚本**：[Scripts/verify_tritree_indexing.py](../Scripts/verify_tritree_indexing.py)，sub=0~5 全部 PASS。
+
+##### 数据结构现状回顾
+
+参考 [FSphereTopology.cpp](../Source/Grid/Private/FSphereTopology.cpp) 的填充流程：
+
+```
+BuildIcosahedronUnit:
+    创建 20 个根 FTriTreeNode → 同时存入 TriTreeRoots[] 和 PrimalTriTreeNodes[]
+
+SubdividePrimalOnce 每次调用：
+    遍历当前 PrimalTriTreeNodes 旧叶子层
+    对每个旧叶子 Parent（在数组中的下标 = Index）创建 4 子并赋 Parent->Children
+    NewPrimalTriTreeNodes 按 (Index*4+0, Index*4+1, Index*4+2, Index*4+3) 顺序追加
+    最后整体替换：PrimalTriTreeNodes = MoveTemp(NewPrimalTriTreeNodes)
+        ← 旧叶子层被移出 PrimalTriTreeNodes（仍由 Parent->Children 指针持有）
+```
+
+**最终态**（sub=N 调用 SubdividePrimalOnce N 次后）：
+
+| 节点类型 | 数量 | 存储位置 | 在 PrimalTriTreeNodes 的下标？ |
+|---|---|---|---|
+| 根（第 0 层）| 20 | `TriTreeRoots[0..19]` | ❌ 不在 |
+| 中间层（第 1..N-1 层）| Σ 20·4ᵈ for d∈[1, N-1] | 仅由 `Father / Children` 指针持有 | ❌ 不在 |
+| 最深叶子（第 N 层）| 20·4ⁿ | `PrimalTriTreeNodes[0..20·4ⁿ-1]` | ✅ 唯一在数组中的层 |
+
+> **核心事实**：`FTriTreeNode` 不是单棵 4 叉树，而是 **20 棵独立的 4 叉树森林**。`PrimalTriTreeNodes` 数组只持有"森林所有最深叶子的扁平串联"。
+
+##### 视角 A（实际实现）：森林根索引 + 子树局部 4 叉堆下标
+
+给定 `PrimalTriTreeNodes` 中的下标 `idx`（`0 <= idx < 20 * 4^N`）：
+
+```
+LeavesPerRoot = 4^N
+RootId        = idx / LeavesPerRoot         (∈ [0, 20)，对应 TriTreeRoots[RootId])
+LocalLeafIdx  = idx % LeavesPerRoot         (在该 root 子树中是第几个叶子)
+```
+
+**爬升 K 步**（沿 Father 指针向上）：
+
+```
+K == 0       → 自身（PrimalTriTreeNodes[idx]）
+K == N       → 根节点（TriTreeRoots[RootId]，**不在** PrimalTriTreeNodes）
+0 < K < N    → 中间层节点，**不在任何数组里**——只能通过 Father 链访问
+                其'在 root 子树第 (N-K) 层的局部 4 叉堆下标' = LocalLeafIdx / 4^K
+```
+
+**同层兄弟**（同父 4 子）：
+
+```
+SiblingBase = (idx / 4) * 4              (4 个 sibling 的起始下标)
+LocalK      = idx % 4                    (该叶子是父的第 LocalK 个 child)
+SiblingIdx[k] = SiblingBase + k          (k = 0..3)
+```
+
+##### 视角 B（用户洞察）：森林全局 BFS 编号 + 跳过上层
+
+把森林**所有层节点**按 `(深度, 同层位置)` 字典序平铺到一个全局编号空间：
+
+```
+第 0 层（root 层）  : 全局编号 [0 .. 19]              (20 个根)
+第 1 层             : 全局编号 [20 .. 99]              (80 = 20*4 个)
+第 d 层             : 全局编号 [Offset(d) .. Offset(d+1) - 1]
+                       其中 Offset(d) = Σ 20*4^i for i ∈ [0, d) = 20*(4^d - 1) / 3
+第 N 层（叶子层）   : 全局编号 [Offset(N) .. Offset(N+1) - 1]，共 20*4^N 个
+```
+
+设第 `d` 层某节点的全局编号为 `G`，记 `LayerLocalIdx = G - Offset(d)`：
+
+```
+子节点（在第 d+1 层）全局编号:
+    ChildG[k] = Offset(d+1) + LayerLocalIdx * 4 + k       (k = 0..3)
+父节点（在第 d-1 层）全局编号:
+    FatherG   = Offset(d-1) + LayerLocalIdx / 4
+```
+
+> **关键修正**：用户初稿描述"0 号节点（root 0）的 4 个子节点是 12, 13, 14, 15"——**记错了根数**。正二十面体实际有 **20 个根面**，所以正确的 4 子全局编号是 `Offset(1) + 0*4 + 0..3 = 20, 21, 22, 23`。这是用户公式表达正确但常数记错的典型——脚本验证已修正。
+
+**与视角 A 的等价关系**：把第 N 层叶子的全局编号减去 `Offset(N)`，即得到它在 `PrimalTriTreeNodes` 中的下标——也就是说 `LayerLocalIdx[N层]` ≡ `PrimalTriTreeNodes 下标` ≡ `RootId * 4^N + LocalLeafIdx`。
+
+##### sub=3 具体示例（来自验证脚本）
+
+```
+PrimalTriTreeNodes 长度  = 1280 = 20 * 4^3
+TriTreeRoots 长度        = 20
+LeavesPerRoot            = 64
+
+视角 A：PrimalTriTreeNodes 数组分段
+  [   0 ..   63]  = root 0 子树的 64 个叶子
+  [  64 ..  127]  = root 1 子树的 64 个叶子
+  [ 128 ..  191]  = root 2 子树的 64 个叶子
+  ...
+  [1216 .. 1279]  = root 19 子树的 64 个叶子
+
+视角 B：森林全局 BFS 编号偏移
+  第 0 层（depth=0）：偏移      0，节点数    20    全局 [0..19]
+  第 1 层（depth=1）：偏移     20，节点数    80    全局 [20..99]
+  第 2 层（depth=2）：偏移    100，节点数   320    全局 [100..419]
+  第 3 层（depth=3）：偏移    420，节点数  1280    全局 [420..1699]
+
+视角 A 爬升示例：idx = 130
+  RootId       = 130 / 64 = 2          → TriTreeRoots[2] 是最终根
+  LocalLeafIdx = 130 % 64 = 2
+  K=1: 中间节点（不在数组里），root 2 子树第 2 层局部下标 = 2 / 4 = 0
+  K=2: 中间节点（不在数组里），root 2 子树第 1 层局部下标 = 2 / 16 = 0
+  K=3: 到达 TriTreeRoots[2]（局部下标 0 = root 自己）
+```
+
+##### 重要约束：跨 root 不能爬到公共父节点
+
+视角 A / B 都隐含一条硬约束：
+
+> 给定两个不同 root 的叶子（如 `idx_a = 0` 在 root 0 子树、`idx_b = 64` 在 root 1 子树），它们沿 Father 链爬升 N 步分别到达 `TriTreeRoots[0]` 和 `TriTreeRoots[1]` 后**就停止了**——不存在"根之上的虚拟父节点"，再爬一步会 `Father == nullptr`。
+
+这意味着 [`FSphereTopologyQuery::FindNearestCell`](../Source/Grid/Private/FSphereTopologyQuery.cpp) 的根选择阶段**必须**遍历全部 20 个 `TriTreeRoots` 比较 `Center · UnitPos`——这一步无法用代数公式跳过。
+
+##### T6 重构利弊总结
+
+| 维度 | 评估 |
+|---|---|
+| 视角 A / B 在**齐根快照**下的数学正确性 | ✅ 严格成立（脚本验证 sub=0~5 PASS） |
+| 把 `FTriTreeNode*` 指针替换为 `int32 Idx` 的可行性 | ✅ 齐根模型下完全可行——所有 Children/Father 关系都是 O(1) 代数公式 |
+| 收益：消除 RAII 风险（new/delete + 拷贝构造浅拷贝隐患）| 🟢 中等——目前未爆，但 LOD 落地后会放大 |
+| 收益：内存局部性 | 🟡 sub=3/4 下不可见，sub≥6 时显著 |
+| 代价：`FCell.UnitCenter` 仍需独立存储（不能从下标推） | 🟢 不影响——`Center` 字段可在 `Build()` 时按数组顺序填充 |
+| **致命约束**：T6 LOD"残缺树"（按需 new/delete 子树）会破坏"森林同层连续"假设 | 🔴 高——需要权衡三种方案 |
+
+**T6 落地期需要拍板的三种数据结构方案**：
+
+| 方案 | 数据结构 | 代数公式适用性 |
+|---|---|---|
+| A. 齐根 + 激活标记 | `TArray<FTriTreeNode>` 大小恒等于齐根 sub=Lmax | ✅ 视角 A/B 公式不变；牺牲内存换简单性 |
+| B. 紧凑数组 + 显式 int32 下标字段 | `TArray<FTriTreeNode>` 大小 = 当前 active 节点数 | ⚠ 半适用——退化为"int32 下标版的指针"，公式仅在齐根快照内成立 |
+| C. PathKey TMap | `TMap<uint64 PathKey, FTriTreeNode>`，PathKey = root_id × 4^N + local_idx | ✅ 视角 A 公式直接成为 PathKey 算法；hash 查找有 cache 损失 |
+
+**当前结论**：本稿 §5.4.10 仅记录"齐根快照"的正确公式作为 T6 落地参考。**重构本身推迟到 T6 实施期一并讨论**——避免提前锁死设计空间。
 
 ---
 

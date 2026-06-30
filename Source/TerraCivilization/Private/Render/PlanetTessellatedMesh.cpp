@@ -7,6 +7,10 @@
 #include "FSphereTopology.h"
 #include "FCorner.h"
 
+// T4：WorldGen 接入——仅在 cpp 侧 include（头文件仅使用前向声明）
+#include "WorldGenerator.h"
+#include "CellGeoData.h"
+
 #include "Engine/Texture2D.h"
 #include "Engine/Texture2DArray.h"
 #include "Engine/World.h"
@@ -124,6 +128,25 @@ void APlanetTessellatedMesh::RebuildAll_()
     // T2 验收自检（Output Log 打印 PASS/FAIL）。
     Displacement->RunSelfCheckT2();
 
+    // ===== T4：在所有 LUT / mesh 灌装之前先跑 WorldGen 流水线 =====
+    //
+    // 与 R8 actor 在 RebuildAll_ 中的同款时序（PlanetTopologyDebugMesh.cpp L597~L605）：
+    //   Generator.Reset() → MakeUnique<FWorldGenerator>(CellTopology, Settings) → Generate()
+    //
+    // ⚠ 必须用 CellTopology（玩法层 sub=3 / 642 cells），不是 MeshTopology（渲染层 sub=4）。
+    //    WorldGen 在 cell 拓扑上算板块/海陆/三标量场——cell 数 = 642 是 WorldGen 的契约
+    //    （详见 WorldGenDesign.md §4.2）。FCellGeoData[].Elevation 也是 cell 级、不是顶点级。
+    //
+    // 详见 Docs/T4_RealElevation.md §4.2。
+    {
+        Generator.Reset();
+        if (CellTopology.IsValid())
+        {
+            Generator = MakeUnique<FWorldGenerator>(CellTopology.Get(), WorldGenSettings);
+            Generator->Generate();
+        }
+    }
+
     // T3：5 张 LUT 必须在 ApplyTerrainMaterial_ 之前完成（§2 执行序列硬约束）。
     const int32 NumCells = CellTopology ? CellTopology->Cells.Num() : 0;
     RebuildCellAttrLUT_(NumCells);
@@ -187,21 +210,62 @@ void APlanetTessellatedMesh::LogTopologyStats_() const
 }
 
 // ===================================================================
-//  T3 §3.5：ComputeCellElevation_ —— D12 余弦 ramp（T4 切真实数据）
+//  T3 §3.5 / T4 §4.3：ComputeCellElevation_
+//
+//  T4 三段式数据源检测（D22）：
+//    1) bUsePlaceholderElevation=true   → 强制 placeholder（D21 回归对照）
+//    2) Generator 未 ready              → fallback placeholder（父稿 §6 风险点 5）
+//    3) 否则走 Generator->GetCellData()[c].Elevation 真实数据
+//
+//  Placeholder = 赤道 +1、两极 -1 的余弦 ramp（详见 D12），与 T3 本封语义一致。
 // ===================================================================
 void APlanetTessellatedMesh::ComputeCellElevation_(TArray<float>& OutElev) const
 {
     const int32 NumCells = CellTopology ? CellTopology->Cells.Num() : 0;
     OutElev.SetNumUninitialized(NumCells);
 
-    // T3 placeholder：D12 赤道（|z| ≈ 0）抬高、两极（|z| ≈ 1）凹陷
-    // 取值范围 [-1, +1]：赤道 = +1，两极 = -1
-    // T4 阶段引入 WorldGenerator 后此处切换为真实 FCellGeoData[c].Elevation。
-    for (int32 c = 0; c < NumCells; ++c)
+    // D22 三段式数据源检测
+    const bool bUseReal =
+        !bUsePlaceholderElevation
+        && Generator.IsValid()
+        && Generator->GetCellData().Num() == NumCells;
+
+    if (bUseReal)
     {
-        const FVector& U = CellTopology->Cells[c].UnitCenter;
-        const float AbsZ = FMath::Abs(static_cast<float>(U.Z));
-        OutElev[c] = 1.0f - 2.0f * AbsZ;
+        // T4 主路径：直接消费 FCellGeoData.Elevation（[-1, +1]）
+        const TArray<FCellGeoData>& Cells = Generator->GetCellData();
+        for (int32 c = 0; c < NumCells; ++c)
+        {
+            OutElev[c] = Cells[c].Elevation;
+        }
+        UE_LOG(LogPlanetTess, Verbose,
+            TEXT("[Tess] ComputeCellElevation: WorldGen real path (NumCells=%d)"), NumCells);
+    }
+    else
+    {
+        // Fallback：T3 placeholder（赤道 +1，两极 -1）
+        // 触发条件：编辑器初次打开 / WorldGen 失败 / bUsePlaceholderElevation=true
+        for (int32 c = 0; c < NumCells; ++c)
+        {
+            const FVector& U = CellTopology->Cells[c].UnitCenter;
+            const float AbsZ = FMath::Abs(static_cast<float>(U.Z));
+            OutElev[c] = 1.0f - 2.0f * AbsZ;
+        }
+
+        if (bUsePlaceholderElevation)
+        {
+            UE_LOG(LogPlanetTess, Log,
+                TEXT("[Tess] ComputeCellElevation: PLACEHOLDER (bUsePlaceholderElevation=true)"));
+        }
+        else
+        {
+            UE_LOG(LogPlanetTess, Warning,
+                TEXT("[Tess] ComputeCellElevation: PLACEHOLDER fallback "
+                     "(Generator.IsValid=%d, GotCells=%d, Expected=%d)"),
+                Generator.IsValid() ? 1 : 0,
+                Generator.IsValid() ? Generator->GetCellData().Num() : -1,
+                NumCells);
+        }
     }
 }
 

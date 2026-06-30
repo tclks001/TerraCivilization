@@ -1598,7 +1598,7 @@ R8+ 要预算下一期的 ms 增量、显存占用、Sampler 资源占用。
 - **不依赖 W4**：BaseTexIdx 仍走 R3 Knuth 哈希 placeholder
 
 ### T 阶段（TessellatedMesh、自研球面网格无 LOD，详见 [TessellatedMeshDesign.md](TessellatedMeshDesign.md)）
-- 子里程碑 T1~T5 逐文件验收（与 R4 / W1 验收风格对齐）
+- 子里程碑 T1~T6 逐文件验收（与 R4 / W1 验收风格对齐；T6 = LOD，详见 [TessellatedMeshDesign.md §5.4](TessellatedMeshDesign.md)）
 - 主验收 actor `APlanetTessellatedMesh` 同时持有两个独立 `FSphereTopology` 实例：逻辑层 `CellTopology`（默认 sub=3）+ 渲染层 `MeshTopology`（默认 sub=4，独立可调）
 - cpp 端顺 mesh 顶点预计算：`Cells[v].CornerIds` 拿 5/6 个粗 mesh 三角形 → `FTriTreeNode->Father` 上爬 `MeshSub - CellSub` 次 → 得到粗 CellTopology 三角形 → 三 Cell `dot` 权重线性插值 → 多重三角形取算术平均
 - 径向位移：`Pos = Dir·(R + H_macro)`，不进 GPU WPO
@@ -1614,9 +1614,14 @@ R8+ 要预算下一期的 ms 增量、显存占用、Sampler 资源占用。
 - 加 Decor / Owner / Fog 三套独立 LUT（在 R8 4 通道 LUT 基础上扩展）
 - 反射诊断 Inputs 升级到 ≈20–23 项
 
-### R10（自研网格 LOD）
-- 远 sub+0、中 sub+1、近 sub+2、超近 sub+3
-- 拼缝（T-junction）用 skirt 法解决；可选 morph 过渡避免 LOD 跳变
+### T6（自研网格 LOD，原 R10 已迁至 [TessellatedMeshDesign.md §5.4](TessellatedMeshDesign.md)）
+- 基于二十面体递归细分（边递归，非面递归）；LOD 0 = MeshSub = CellSub（硬约束、不可反）
+- 按需 new/delete `FTriTreeNode` 子树，不维护全量高 sub MeshTopology；LOD 切换仅局部 patch不重建整 mesh
+- 高 LOD 顶点位置拍板倾向 CPU 端 fbm（与 T2/T3 已有路径一致），与 R8 材质 Height 采样二选一的决策留 T6 落地期
+- 仍走 [T3 §3.6](T3_TerrainMeshRender.md) 的"独立顶点 + 三角形 3 顶点写同一组 (cA, cB, cC)"模式，R8 PS 端零改动
+
+### R10（已迁出）
+- 原计划的 "R10 自研网格 LOD" 已于 2026-06-30 拍板迁至 T 阶段主稿为 T6。概念上 LOD 是几何域职责不是 SDF 著色职责。
 
 ### R11（高亮描边）
 - 接入 §15 高亮描边带 + 选中 / 鼠标悬停的 LUT 联动
@@ -1645,4 +1650,4 @@ R8+ 要预算下一期的 ms 增量、显存占用、Sampler 资源占用。
 
 - 创建于：R7 完成后（19 个真实地表 layer 的 Triplanar 通路验收通过）
 - 下次更新：T 阶段完成后（自研球面网格与 PTG 路线废弃需補充新章节）
-- 长期目标：作为 R10/R11 阶段的 "AI 协作 baseline"
+- 长期目标：作为 T6/R11 阶段的 "AI 协作 baseline"
