@@ -29,10 +29,13 @@
 
 > ⚠ **WorldGen 与 GridRender(SDF) 已分别拥有独立主设计稿**：
 > - 程序化地理生成 → [WorldGenDesign.md](WorldGenDesign.md)（W1~W8 子阶段）
-> - 球面 SDF 多层地表渲染 → [SphericalSDFTerrainDesign.md](SphericalSDFTerrainDesign.md)（R1~R13 子阶段）
+> - 球面 SDF 多层地表渲染（材质 / 着色公式） → [SphericalSDFTerrainDesign.md](SphericalSDFTerrainDesign.md)（R1~R13 子阶段）
+> - 自研球面网格（几何 / 顶点位移 / 双拓扑解耦） → [TessellatedMeshDesign.md](TessellatedMeshDesign.md)（**T 阶段（TessellatedMesh）主稿**，三足鼎立的"几何域"代表，子里程碑 T1~T5 逐文件验收）
 > - 球面拓扑几何含义（FCell/FCorner/FCellEdge/FRenderTri 字段详解）→ [SphereTopologyReference.md](SphereTopologyReference.md)（基础设施参考稿）
 >
-> 两者通过 `FCellGeoData[]` 单向契约解耦：WorldGen 仅写 `TerrainTag/Elevation/.../bIsPentagon`；GridRender 经 `UTerrainDefinition::LayerIndex` 间接只读消费。本节仅维护**全模块拓扑视图**——具体设计思路、算法、HLSL 全部在子稿中。
+> 三步走里程碑：`R8 (✅ 材质参数化 + SLW) → T (⏳ 自研球面网格 / TessellatedMesh) → W4 (⏳ Biome 真实查表)`。T 阶段主稿与 SDF 主稿通过"几何 / 材质"硬切分共存。
+>
+> 数据流契约：WorldGen 通过 `FCellGeoData[]` 单向输出，GridRender 经 `UTerrainDefinition::LayerIndex` 间接只读消费 + T 阶段直接消费 `Elevation` 字段做径向位移。本节仅维护**全模块拓扑视图**——具体设计思路、算法、HLSL 全部在子稿中。
 
 ```mermaid
 graph TD
@@ -77,7 +80,7 @@ graph TD
 | `Grid`（已存在） | Runtime | Core/CoreUObject/Engine | 球面拓扑、邻接、查询 | （本稿 §2） |
 | `TerrainTags` | Runtime | Core/GameplayTags | GameplayTag 静态定义 + DataAsset 资产类型 | （本稿 §3） |
 | `WorldGen` | Runtime | Grid/TerrainTags | 程序化地理：板块/高程/温湿度/生物群系/河流/基地 | [WorldGenDesign.md](WorldGenDesign.md) |
-| `GridRender` | Runtime | Grid/TerrainTags/WorldGen/RHI/RenderCore | 球面 ProceduralMesh + SDF 材质参数注入；R8 起使用参数化 Tint（3-base + 4 通道 LUT），R8.5 起切到自研球面网格并消费 `FCellGeoData.Elevation` 做径向位移；W4 联调后读 `FCellGeoData → LayerIndex` 火 LUT | [SphericalSDFTerrainDesign.md](SphericalSDFTerrainDesign.md) |
+| `GridRender` | Runtime | Grid/TerrainTags/WorldGen/RHI/RenderCore | 球面 ProceduralMesh + SDF 材质参数注入；R8 起使用参数化 Tint（3-base + 4 通道 LUT），T 阶段（TessellatedMesh）起切到自研球面网格并消费 `FCellGeoData.Elevation` 做径向位移；W4 联调后读 `FCellGeoData → LayerIndex` 火 LUT | 材质 / 着色：[SphericalSDFTerrainDesign.md](SphericalSDFTerrainDesign.md)；几何 / 顶点位移：[TessellatedMeshDesign.md](TessellatedMeshDesign.md) |
 | `Gameplay` | Runtime | Grid/TerrainTags/WorldGen/GAS | Unit/Building/Faction/Turn 数据模型；只读 `FCellGeoData.TerrainTag/OwnerId/bIsPentagon` | （本稿 §6） |
 | `GameplaySystem` | Runtime | Gameplay/Grid | 移动、寻路、围吃判定、战斗、占领 | （本稿 §7） |
 | `GameCore` | Runtime | Gameplay/WorldGen/GridRender | GameMode/GameState/PlayerController/Pawn | （本稿 §5） |
@@ -87,7 +90,7 @@ graph TD
 | `TerraCivilizationEditor`（可选） | Editor | Gameplay/UnrealEd | 自定义资产、Tag 配置面板 | — |
 
 > **依赖项更新说明**（vs WorldGen 独立化之前）：
-> - `GridRender` 依赖列追加 `WorldGen`：R8.5 自研球面网格需消费 `FCellGeoData[].Elevation` 做径向位移；W4 联调后 `RebuildCellAttrLUT_()` 进一步读取 `FCellGeoData[].TerrainTag` 通过 `UTerrainDefinition` 查 `LayerIndex` + `FTerrainMaterialParams`。R8 阶段仍以 R3 Knuth 哈希 placeholder 驱动 BaseTexIdx，并不读 `FCellGeoData`。
+> - `GridRender` 依赖列追加 `WorldGen`：T 阶段（自研球面网格）需消费 `FCellGeoData[].Elevation` 做径向位移；W4 联调后 `RebuildCellAttrLUT_()` 进一步读取 `FCellGeoData[].TerrainTag` 通过 `UTerrainDefinition` 查 `LayerIndex` + `FTerrainMaterialParams`。R8 阶段仍以 R3 Knuth 哈希 placeholder 驱动 BaseTexIdx，并不读 `FCellGeoData`。
 > - `Gameplay` 依赖列追加 `WorldGen`：消费 `bIsPentagon`、`OwnerId`、`TerrainTag` 等字段。
 > - `WorldGen` 依赖列**保持不变**（仅 `Grid/TerrainTags`）：WorldGen 是上游模块，不依赖任何下游——这是 [WorldGenDesign.md §14.3](WorldGenDesign.md#143-跨模块调用时序) 的硬承诺。
 

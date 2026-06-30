@@ -24,9 +24,9 @@
 > | 读什么 | 仅 `FSphereTopology`（拓扑只读） | `FCellGeoData[].LayerIndex` → `Texture2DArray` slice |
 > | 改了不刷另一侧 | ✅ 算法/参数/Whittaker 表全部独立调整，渲染端无需改动 | ✅ HLSL/材质/Triplanar 全部独立调整，WorldGen 无需改动 |
 >
-> **核心承诺（2026-06-29 修订）**：从 W4 完成那一刻起 SDF 渲染端**已具备**把 BaseTexIdx 从 Knuth placeholder 切换为 `Def->LayerIndex` 真实查表的能力——但实际切换时机**推迟到 R8.5 联调阶段**（因为 R8 + R8.5 阶段需要先用 placeholder 观察 17 种地形配方与径向位移 + 水面层的视觉协调）。R8/R8.5/R9 SDF 端的核心算法（4 通道 LUT、参数化 tint、自研网格几何）的工作量与 WorldGen 完全无关。
+> **核心承诺（2026-06-29 / 2026-06-30 命名修订）**：从 W4 完成那一刻起 SDF 渲染端**已具备**把 BaseTexIdx 从 Knuth placeholder 切换为 `Def->LayerIndex` 真实查表的能力——但实际切换时机**推迟到 T 阶段联调阶段**（因为 R8 + T 阶段需要先用 placeholder 观察 17 种地形配方与径向位移 + 水面层的视觉协调）。R8/T/R9 SDF 端的核心算法（4 通道 LUT、参数化 tint、自研网格几何）的工作量与 WorldGen 完全无关。
 >
-> **跨期同构性**（2026-06-29 更新）：原 PTG 路线已废弃。当前生产路线是 SDF 主稿 §16 的**自研球面网格方案**——本稿数据结构与算法**对 IsoSphere（R1~R8）与自研球面网格（R8.5+）两条几何路径无差别**——`FCellGeoData` 永远以 `CellId` 作为主键，下游怎么渲染（IsoSphere primal mesh 还是自研 sub+2 渲染网格）、是否做径向位移、是否上 LOD，都不影响 WorldGen 的输出形态。
+> **跨期同构性**（2026-06-30 更新）：原 PTG 路线已废弃。当前生产路线是 [TessellatedMeshDesign.md](TessellatedMeshDesign.md) 的**自研球面网格方案**——本稿数据结构与算法**对 IsoSphere（R1~R8）与自研球面网格（T 阶段+）两条几何路径无差别**——`FCellGeoData` 永远以 `CellId` 作为主键，下游怎么渲染（IsoSphere primal mesh 还是自研独立 MeshTopology 渲染网格）、是否做径向位移、是否上 LOD，都不影响 WorldGen 的输出形态。
 
 ---
 
@@ -34,14 +34,14 @@
 
 **当前阶段**：**W4 cpp 完成，等待联调验收**。R1~R7 渲染管线已完成；W1 模块骨架 ✅、W2 板块构造 + 海陆分离 ✅、W3 三标量场（高程 + 湿度 + 温度）✅ 全部通过用户 PIE 验收；W4 cpp 已落地（`TerrainTags` 模块 + DataAsset 驱动的生物群系评分器）。
 
-> **路线调整（2026-06-29）**：原计划 "W4 → R8" 的串行依赖**已松绑**。新路线 "R8 (Tint 参数化) → R8.5 (自研球面网格) → W4 联调验收"——R8 + R8.5 阶段 SDF 端继续沿用 R3 Knuth 哈希 placeholder 观察 17 种地形配方在径向位移 + 水面遮挡下的视觉效果，然后再回头联调 W4 的 Whittaker 区间。WorldGen 模块自身的开发进度不变（W4 cpp 已完成、W5/W6 仍按原计划），仅是 "W4 验收" 这一动作被推迟到 R8.5 联调阶段。
+> **路线调整（2026-06-29 / 2026-06-30 命名修订）**：原计划 "W4 → R8" 的串行依赖**已松绑**。新路线 "R8 (Tint 参数化) → T (自研球面网格、TessellatedMesh) → W4 联调验收"——R8 + T 阶段 SDF 端继续沿用 R3 Knuth 哈希 placeholder 观察 17 种地形配方在径向位移 + 水面遮挡下的视觉效果，然后再回头联调 W4 的 Whittaker 区间。WorldGen 模块自身的开发进度不变（W4 cpp 已完成、W5/W6 仍按原计划），仅是 "W4 验收" 这一动作被推迟到 T 阶段联调阶段。
 
 | 子阶段 | 状态 | 一句话目标 |
 | --- | --- | --- |
 | **W1** | ✅ 完成 | 模块骨架 + `FCellGeoData` + `FWorldGenSettings`，编译通过 |
 | **W2** | ✅ 完成 | 板块构造（球面 Voronoi + 漂移向量）+ 海陆分离 |
 | **W3** | ✅ 完成 | 高程场（板块边界抬升/俯冲）+ 温湿度场（纬度 + 上风 SSSP + 高程）+ W3 测试材质 |
-| **W4**（合并 W7）| 🛠 cpp 完成（待 R8.5 联调验收）| `TerrainTags` 模块落地 + `UTerrainDefinition::ClimateRules` 评分器分类 + 写 `Def->LayerIndex` 入 LUT（联调时正式替换 R8 的 Knuth placeholder） |
+| **W4**（合并 W7）| 🛠 cpp 完成（待 T 阶段联调验收）| `TerrainTags` 模块落地 + `UTerrainDefinition::ClimateRules` 评分器分类 + 写 `Def->LayerIndex` 入 LUT（联调时正式替换 R8 的 Knuth placeholder） |
 | **W5** | ⏳ 待开始 | 河流/湖泊追踪（D8 on Hex/Pent 邻接） |
 | **W6** | ⏳ 待开始 | 12 五边形势力基地分配 + 缓冲带友好地形 |
 | ~~**W7**~~ | ✅ 合并入 W4 | （原计划：`UTerrainDefinition` / `UBiomeTable` DataAsset 化）——W4 一步到位后本阶段取消 |
@@ -465,7 +465,7 @@ flowchart TD
     S8 --> Done[FCellGeoData 数组]
 ```
 
-> **W4 验收锚点**：W1+W2+W3+S6 完成即可输出第一张可玩星球；W5/W6 是丰富度增强。**联调时机调整（2026-06-29）**：W4 完成后不立即接入 SDF 端 LayerIndex，而是等 R8（参数化 Tint）+ R8.5（自研球面网格）联调通过后再做最终接入——SDF 端在 R8/R8.5 阶段沿用 Knuth 哈希 placeholder 观察效果。
+> **W4 验收锐点**：W1+W2+W3+S6 完成即可输出第一张可玩星球；W5/W6 是丰富度增强。**联调时机调整（2026-06-29）**：W4 完成后不立即接入 SDF 端 LayerIndex，而是等 R8（参数化 Tint）+ T 阶段（自研球面网格）联调通过后再做最终接入——SDF 端在 R8/T 阶段沿用 Knuth 哈希 placeholder 观察效果。
 
 下面各 Step 仅给**简介 + 输入输出 + 验收**；详细算法/HLSL/cpp 落地放各 W-step 独立详稿（[W1_ModuleSkeleton.md](W1_ModuleSkeleton.md)、[W2_PlatesAndLandSea.md](W2_PlatesAndLandSea.md)、...）。
 
@@ -523,7 +523,7 @@ flowchart TD
   `Def->ScoreFor(Sample)` 递归遍历本 Def 的 `ClimateRules[]`（OR 语义），取最高得分。单条规则：`Placement 匹配` 且 `T/M/E 均落在区间内` → 返回 `Priority`；否则 0。包含“短路”语义的规则可设 `bIsShortCircuit=true`，命中后会折合到最高优先级（详见 W4 详稿）。
 - **输出**：`CellData[].TerrainTag` + LUT.R 直读 `Best->LayerIndex`（渲染端 GridRender 直接从 Def 读，WorldGen 不负责中转）
 - **资源**：`Resources` 可作为 `UTerrainDefinition::DefaultResources` 同步拷入（W4 仅拷贝，不阅读）
-- **W4 验收锚点（R8.5 联调时触发）**：在 R8 + R8.5 通过后，把 SDF 端 BaseTexIdx 从 R3 Knuth 哈希切换为 `Def->LayerIndex` 真实查表，球面呈现合理的“赤道沙漠/温带森林/极地冰原 + 12 五边形 + 大陆东岸森林 vs 西岸沙漠”分布；调试师可在编辑器里改 `T_Forest_Tropical.uasset` 的 `ClimateRules[0].Temperature` 区间从 [0.7,1.0] 改为 [0.6,1.0] 看到热带雨林立刻扩张
+- **W4 验收锐点（T 阶段联调时触发）**：在 R8 + T 阶段通过后，把 SDF 端 BaseTexIdx 从 R3 Knuth 哈希切换为 `Def->LayerIndex` 真实查表，球面呈现合理的“赤道沙漠/温带森林/极地冰原 + 12 五边形 + 大陆东岸森林 vs 西岸沙漠”分布；调试师可在编辑器里改 `T_Forest_Tropical.uasset` 的 `ClimateRules[0].Temperature` 区间从 [0.7,1.0] 改为 [0.6,1.0] 看到热带雨林立刻扩张
 
 ### 5.7 Step7 河流追踪
 
@@ -705,7 +705,7 @@ W2/W3 在 cpp 内显式实例化两个：`PlateNoise`（low-freq, 板块大格�
 - 加载：`FSphereTopology::Build(SubdivisionLevel)` → `FWorldGenerator(Topo, Settings).Generate()` → 完全还原 `FCellGeoData[]`
 - **运行时 mutate**（OwnerId/Building/Decor）单独序列化 `UBoardState`，与 WorldGen 输出**不混合**
 
-> **跨期不变量**：同一 `(Sub, Seed, Settings)` 三元组在 R8 / R8.5 / R9 / R10 / R11 任何阶段都生成完全相同的世界——这是回放、调试、玩家分享种子的基础。
+> **跨期不变量**：同一 `(Sub, Seed, Settings)` 三元组在 R8 / T / R9 / R10 / R11 任何阶段都生成完全相同的世界——这是回放、调试、玩家分享种子的基础。
 
 ---
 
@@ -722,7 +722,7 @@ W2/W3 在 cpp 内显式实例化两个：`PlateNoise`（low-freq, 板块大格�
 | ~~**W7**~~ | ✅ 合并入 W4 | （原计划：`UTerrainDefinition` / `UBiomeTable` DataAsset 化）——`UTerrainDefinition` 在 W4 已 DataAsset 化并携带 `ClimateRules[]`；`UPlateProfile` 推到 W6 随势力基地调优阶段处理（如需要） |
 | **W8** | ⏳ 待开始 | 编辑器调参面板（PropertyCustomization）+ 可视化 Debug 模式（板块染色 / 高程热图 / 河流叠加 / 风带箭头） | 在 Editor Viewport 一键切换 6 种 Debug 视图 |
 
-每阶段单独可验证，不会卡死。W1~W4 是 R8.5 联调验收的最小有效集（R8 自身只需 R3 Knuth placeholder 即可）；W5~W6 是丰富度；W8 是工具链（原 W7 DataAsset 化已合并进 W4）。
+每阶段单独可验证，不会卡死。W1~W4 是 T 阶段联调验收的最小有效集（R8 自身只需 R3 Knuth placeholder 即可）；W5~W6 是丰富度；W8 是工具链（原 W7 DataAsset 化已合并进 W4）。
 
 ### 11.1 当前进度记录
 
@@ -959,20 +959,20 @@ sequenceDiagram
 
 ### 14.4 跨期路径的同构性
 
-与 SDF 主稿 §16 一致：WorldGen 输出 `FCellGeoData` 永远以 `CellId` 为主键；SDF 端无论是 R1~R8 的 IsoSphere 还是 R8.5+ 的自研球面网格路线，**都通过同一份 LUT 消费 WorldGen 的输出**。
+与 [TessellatedMeshDesign.md](TessellatedMeshDesign.md) 一致：WorldGen 输出 `FCellGeoData` 永远以 `CellId` 为主键；SDF 端无论是 R1~R8 的 IsoSphere 还是 T 阶段+ 的自研球面网格路线，**都通过同一份 LUT 消费 WorldGen 的输出**。
 
 具体而言：
 
 | 阶段 | SDF 渲染路径 | WorldGen 端是否需要适配 |
 | --- | --- | --- |
 | R8（Tint 参数化）| IsoSphere primal + 4 通道 LUT + 17 种 tint 配方（仍用 Knuth placeholder） | ❌ 不需要——R8 不消费 WorldGen，验收时 Knuth 哈希派生 BaseTexIdx |
-| R8.5（自研球面网格）| 自研 sub+2 渲染网格 + cpp 端径向位移（消费 `Elevation`）| ⚠ 仅消费 `Elevation` 字段——W3 已就绪，无需新增 |
-| W4 联调验收 | 在 R8.5 上把 BaseTexIdx 从 Knuth placeholder 切换为 `Def->LayerIndex` | ❌ 不需要——这就是 W4 的原始目标 |
+| T 阶段（自研球面网格）| 独立 `MeshTopology = FSphereTopology(MeshSubdivisionLevel)` 渲染网格（默认 sub=4）+ cpp 端径向位移（消费 `Elevation`）| ⚠ 仅消费 `Elevation` 字段——W3 已就绪，无需新增 |
+| W4 联调验收 | 在 T 阶段上把 BaseTexIdx 从 Knuth placeholder 切换为 `Def->LayerIndex` | ❌ 不需要——这就是 W4 的原始目标 |
 | R9 多 LUT | 加 Decor/Owner/Fog 三 LUT | ❌ 不需要——多 LUT 是 SDF 端的事；WorldGen 只需在 W6 写 BaseFactionId |
 | R10 LOD | 自研球面网格 LOD（远 sub+0、近 sub+2、超近 sub+3） | ❌ 不需要——LOD 是 SDF 端的事 |
 | R11 高亮 | 接入 §15 高亮描边 + SelectLUT | ❌ 不需要——LUT 通道含义不变 |
 | ~~原 R11 PTG 路线~~ | ❌ 已废弃 | — |
-| ~~原 R12 WPO 顶点位移~~ | ❌ 已废弃（被 R8.5 cpp 端径向位移取代）| — |
+| ~~原 R12 WPO 顶点位移~~ | ❌ 已废弃（被 T 阶段 cpp 端径向位移取代）| — |
 | ~~原 R13 高亮~~ | ❌ 已废弃（编号改为 R11） | — |
 
 **结论**：从 W4 锁定 `FCellGeoData` 字段集那一刻起，**WorldGen 端永不为 SDF 端的迭代而改动**——这是双方解耦的硬承诺。
@@ -987,4 +987,4 @@ WorldGen 是 TerraCivilization 的"自然地理引擎"：**只对 `FSphereTopolo
 
 W1 启动时的第一份详稿是 [W1_ModuleSkeleton.md](W1_ModuleSkeleton.md)；后续 W2~W8 每个子阶段独立成稿，命名规则 `W<N>_<Topic>.md`，结构对齐 [AgentWorkflow.md](AgentWorkflow.md) §1.3 的 8 章 + 附录。
 
-> **致后续维护者**：如果 SDF 端要新增字段（如 R8.5 自研网格需要某个新 LUT 通道、或 R9 多 LUT 扩展），先回到 §14.1 LUT 字段对齐表里加一行；不要在 cpp 里"顺手"加。窄接口的承诺一旦破坏，下次重构会跨 5 个模块。
+> **致后续维护者**：如果 SDF 端要新增字段（如 T 阶段自研网格需要某个新 LUT 通道、或 R9 多 LUT 扩展），先回到 §14.1 LUT 字段对齐表里加一行；不要在 cpp 里"顺手"加。窄接口的承诺一旦破坏，下次重构会跨 5 个模块。

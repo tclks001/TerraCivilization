@@ -12,7 +12,7 @@
 >
 > ⚠ **WorldGen 已独立成稿**：每 Cell 的 `TerrainTag / Elevation / Moisture / PlateId / bIsCoast/...` 由独立的 [WorldGenDesign.md](WorldGenDesign.md) 主稿负责生成。本稿（SDF 渲染层）**从 W4 完成那一刻起**只读消费 `FCellGeoData[]`——通过 `UTerrainDefinition::LayerIndex` 间接拿到 `Texture2DArray` slice 索引，对 WorldGen 内部算法（板块构造、Whittaker 表、河流追踪等）一无所知，亦不依赖。两侧通过 §4.1 / §14.1 的 LUT 字段表锁死契约。
 >
-> ⚠ **R8/R8.5/W4 顺序拍板（2026-06-29）**：原计划 "W4 → R8 → 球面网格" 改为 **"R8 (Tint 参数化) → R8.5 (自研球面网格无 LOD) → W4 (Biome 分类) → R9+"**。R8 不再前置依赖 W4——验收时继续沿用 R3 Knuth 哈希 placeholder 观察 17 种地形配方的视觉效果；W4 推迟到 R8 + 球面网格联调通过后再调，因为有了真实地形位移与水面遮挡后调 Whittaker 区间反而更直观。详见 §11 Roadmap 表。
+> ⚠ **R8/T/W4 顺序拍板（2026-06-29 / 2026-06-30 命名修订）**：原计划 "W4 → R8 → 球面网格" 改为 **"R8 (Tint 参数化) → T (自研球面网格 / TessellatedMesh) → W4 (Biome 分类) → R9+"**。R8 不再前置依赖 W4——验收时继续沿用 R3 Knuth 哈希 placeholder 观察 17 种地形配方的视觉效果；W4 推迟到 R8 + T 联调通过后再调，因为有了真实地形位移与水面遮挡后调 Whittaker 区间反而更直观。详见 §11 Roadmap 表与独立 [TessellatedMeshDesign.md](TessellatedMeshDesign.md)。
 >
 > ---
 >
@@ -23,9 +23,9 @@
 > | 路径 | 渲染 mesh | 适用阶段 | 核心权重来源 |
 > | --- | --- | --- | --- |
 > | **§1~§13 IsoSphere 直渲方案** | IsoSphere primal mesh（顶点 = Cell 中心） | **R1~R8（参数化 Tint 验收）** | 硬件免费的重心坐标 |
-> | **§16 自研球面网格方案** ⭐ | 正二十面体细分（SubdivisionLevel + 2）primal mesh，自行管控顶点位移与法线 | **R8.5 起的生产路线** | 顶点 → 最近 3 Cell + acos 三方权重（与 §14.7 同公式） |
+> | **§16 自研球面网格方案** ⭐ | 独立 `MeshTopology = FSphereTopology(MeshSubdivisionLevel)` 默认 sub=4，与逻辑 `CellTopology` 独立可调；cpp 端顺顶点完成位移 | **T 阶段起的生产路线（详见 [TessellatedMeshDesign.md](TessellatedMeshDesign.md)）** | 顶点 → 多重父三角形 → 三 Cell `dot` 权重线性插值 → 多重算术平均 |
 >
-> **生产路线是 §16 的自研球面网格方案**——之前曾考虑的 "PTG（ProceduralTerrainGenerator 插件）几何层集成" 方案（§14 历史章节）已**作废**：自研网格能与 WorldGen 的 `Elevation` 直接对接做径向位移、与 SDF 软边权重共享同一组 `acos / w[3]` 公式、不必绑死 PTG 插件的 spherified-cube 几何与碰撞黑盒。R8 阶段仍跑在 IsoSphere 上验证参数化材质，R8.5 把 mesh 切到自研网格并与 R8 材质联调，之后 W4/R9/R10 全部跑在自研网格上。
+> **生产路线是 §16 的自研球面网格方案**——之前曾考虑的 "PTG（ProceduralTerrainGenerator 插件）几何层集成" 方案（§14 历史章节）已**作废**：自研网格能与 WorldGen 的 `Elevation` 直接对接做径向位移、与 SDF 软边权重共享同一组 `acos / w[3]` 公式、不必绑死 PTG 插件的 spherified-cube 几何与碰撞黑盒。R8 阶段仍跑在 IsoSphere 上验证参数化材质，T 阶段把 mesh 切到自研网格并与 R8 材质联调，之后 W4/R9/R10 全部跑在自研网格上。
 >
 > §14 文字保留作为"曾考虑的 PTG 路线"历史档案，仅供回看；新工作不要再向 PTG 路线投入。
 >
@@ -90,13 +90,7 @@
   - [15.3 多 Cell 同时高亮](#153-多-cell-同时高亮)
   - [15.4 GPU 实现](#154-gpu-实现)
   - [15.5 与既有 SelectLUT 的关系](#155-与既有-selectlut-的关系)
-- [16. 自研球面网格（生产路线）⭐](#16-自研球面网格生产路线)
-  - [16.1 R8 参数化 Tint + 水面层（mesh 不变，只改材质）](#161-r8-参数化-tint--水面层mesh-不变只改材质)
-  - [16.2 R8.5 自研球面网格几何](#162-r85-自研球面网格几何)
-  - [16.3 顶点 → 最近 3 Cell + 软高度过渡](#163-顶点--最近-3-cell--软高度过渡)
-  - [16.4 法线重算与材质对接](#164-法线重算与材质对接)
-  - [16.5 物理碰撞与拾取](#165-物理碰撞与拾取)
-  - [16.6 LOD 留白（R10 补做）](#166-lod-留白r10-补做)
+- [16. 自研球面网格（生产路线，占位 → [TessellatedMeshDesign.md](TessellatedMeshDesign.md)）⭐](#16-自研球面网格生产路线)
 
 ---
 
@@ -656,9 +650,9 @@ $$
 \text{color} = \frac{\sum_i w_i \cdot \text{hash}(\text{layer}_i)}{\sum_i w_i + \epsilon}
 $$
 
-**为什么用 acos 而非沿用 §14.7.7 的 dot 距离**：§14.7.5 论证了 sub=3 时三重积版 λ 与球面面积版 λ 差 $O(\text{Area}^2) \approx 0.001\%$。但 R5 的 `EdgeWidth` 是**绝对弧度物理量**，需要"跨 sub 语义不变"——用 acos 后 `EdgeWidth=0.05` 在 sub=3 / sub=4 / R8.5 自研球面网格路线上视觉宽度完全相同；如果用裸 dot 差量，需要按三角形大小局部归一化，反而引入额外耦合。HLSL `acos` 在现代 GPU 上 ~2 cycle/op，每像素 3 次 acos 可忽略。
+**为什么用 acos 而非沿用 §14.7.7 的 dot 距离**：§14.7.5 论证了 sub=3 时三重积版 λ 与球面面积版 λ 差 $O(\text{Area}^2) \approx 0.001\%$。但 R5 的 `EdgeWidth` 是**绝对弧度物理量**，需要"跨 sub 语义不变"——用 acos 后 `EdgeWidth=0.05` 在 sub=3 / sub=4 / T 阶段自研球面网格路线上视觉宽度完全相同；如果用裸 dot 差量，需要按三角形大小局部归一化，反而引入额外耦合。HLSL `acos` 在现代 GPU 上 ~2 cycle/op，每像素 3 次 acos 可忽略。
 
-**与生产路线（R8.5+）共用**：本路径在自研球面网格上语义完全相同——cpp 端不变（`CellDirLUT` 沿用），HLSL 不变（`dir = normalize(WorldPos - PlanetCenter)` 起点相同），仅 `c0/c1/c2` 来源从"UV 还原"换成"cpp 预计算灌顶点 UV1/UV2/UV3"（详见 §16.4.2）。因此 R5 的 Custom 节点可在 R8.5 阶段整段直接搬运。
+**与生产路线（T 阶段+）共用**：本路径在自研球面网格上语义完全相同——cpp 端不变（`CellDirLUT` 沿用），HLSL 不变（`dir = normalize(WorldPos - PlanetCenter)` 起点相同），仅 `c0/c1/c2` 来源从"UV 还原"换成"cpp 预计算灌顶点 UV1/UV2/UV3"（详见 §16.4.2）。因此 R5 的 Custom 节点可在 T 阶段整段直接搬运。
 
 详细落地步骤、HLSL 完整代码、cpp 改动、材质接线、验收清单详见 [R5_SharpenSoftEdge.md](R5_SharpenSoftEdge.md)。
 
@@ -714,7 +708,7 @@ $$
 | `NoiseAmplitude` | 绝对弧度（小角近似下） | dir 切向偏移的最大幅度 | 0（关闭）/ 0.02（微妙）/ 0.05（明显蜿蜒）/ 0.10（强变形） |
 | `NoiseScale` | 每弧度周期数 | 噪声频率（每弧度多少个起伏） | 5（大尺度海岸）/ 20（中等）/ 50（细密锯齿） |
 
-> 严格上 `normalize` 后切向位移略小于 $A$（径向分量被压缩约 1/3）；视觉上 `NoiseAmplitude=0.05` 对应实际边摆动约 ±2°。如需精确切向控制，可后续升级到方案 D（quaternion 微旋转），R6 阶段方案 B 已够用。
+> 严格上 `normalize` 后切向偏移略小于 $A$（径向分量被压缩约 1/3）；视觉上 `NoiseAmplitude=0.05` 对应实际边摆动约 ±2°。如需精确切向控制，可后续升级到方案 D（quaternion 微旋转），R6 阶段方案 B 已够用。
 
 **与 R5 EdgeWidth 的正交性**：
 
@@ -751,7 +745,7 @@ float3 SampleTriplanar(Texture2DArray T, uint layer, float3 WP, float3 N)
 
 #### 6.5.1 R7 落地方案：从 R6 哈希色升级为真实 Triplanar 采样
 
-**设计原则**：R7 不修改 R6 的 dirP / θ / δ / w 计算链路，只把最后的"三层颜色加权"从 `hash(layer_i+1)` 哈希色换为 `SampleTriplanar(TerrainAlbedoArray, layer_i, WorldPos, dir)` 真实纹理采样。三层权重 $w_A, w_B, w_C$ 、软边、蜿蜒、球面 Voronoi 边几何全部沿用 R6。
+**设计原则**：R7 不修改 R6 的 dirP / θ / δ / w 计算链路，只把最后的"三层颜色加权"从 `hash(layer_i+1)` 哈希色换为 `SampleTriplanar(TerrainAlbedoArray, layer_i, WorldPos, Normal)` 真实地表采样。三层权重 $w_A, w_B, w_C$ 、软边、蜿蜒、球面 Voronoi 边几何全部沿用 R6。
 
 **核心公式**（只变颜色采样路径）：
 
@@ -872,23 +866,23 @@ CPU 侧：
 | **R4** | ✅ 已完成 | **基于外心垂面的三角分割**——把判别准则从 `argmax(λ)`（外心→边中点折线边界）改为 `argmax(dot(dir, V_i))`（球面 Voronoi / 真正测地线 hex 边）。cpp 端新增 1×NumCells、PF_A32B32G32R32F 的 `CellDirLUT`（RGB = `UnitCenter`、A = `bIsPentagon`），通过 MID 注入 PS；`PlanetCenter` 也走 MID Vector 参数。PS 端用 R3 已解码的 c0/c1/c2 三次 `Texture2D.Load` 取得三个 cell 的中心方向，计算 `dot(dir, V_i)` 取 argmax。**消除 R3 hex/pent 边在 mesh 边中点处的可见折角**（详见 [R4_VoronoiBoundary.md](R4_VoronoiBoundary.md)） | 球面 hex/pent 边视觉上是平滑的测地线大圆弧，**任何相邻 cell 之间的边没有折点**；从近距离 / 高 sub 下侧视检查：图像中 hex 边的曲率连续；其他效果（NumLayersHint 影响、LUT 注入）保持 R3 一致 |
 | **R5** | ✅ 已完成 | 在 R4 球面 Voronoi 距离空间做软边——定义 $\delta_i = \theta_i - \min_{j\neq i}\theta_j$（到 Voronoi 边的有符号绝对弧度距离，$\theta_i = \arccos(\hat{d}\cdot V_i)$），权重 $w_i = \text{smoothstep}(\text{EdgeWidth}/2, -\text{EdgeWidth}/2, \delta_i)$。`EdgeWidth = 0` 退化为 R4 硬边；`EdgeWidth > 0` 时过渡带是测地线大圆弧两侧的等距弧度带；颜色三层独立 hash 加权。`EdgeWidth` 单位为**绝对弧度**（跨 sub 语义不变）（详见 [R5_SharpenSoftEdge.md](R5_SharpenSoftEdge.md)） | `EdgeWidth = 0` 视觉与 R4 完全一致；`EdgeWidth = 0.05`（约 2.86°）看到 hex/pent 边变成等宽测地线软边；`EdgeWidth = 0.20` 看到大幅柔软渐变；过渡带在 mesh 边中点处与硬边路径几何严格对齐（**无相位错位**） |
 | **R6** | ✅ 已完成 | 在 R5 球面距离空间叠加 per-cell 3D 噪声扰动——$\tilde\delta_i = \delta_i + n_i(\hat{d}) \cdot \text{NoiseAmplitude}$，软边权重沿用 R5 公式但用 $\tilde\delta_i$ 替代 $\delta_i$。`NoiseAmplitude` 单位为**绝对弧度**（与 EdgeWidth 同制），`NoiseScale` 单位为每弧度周期数；`NoiseAmplitude = 0` 退化为 R5；与 EdgeWidth **正交**——可独立控制"软/硬"和"直/蜿蜒"两个视觉维度（详见 [R6_BoundaryNoise.md](R6_BoundaryNoise.md)） | `NoiseAmplitude = 0` 视觉与 R5 一致；`NoiseAmplitude = 0.05, NoiseScale = 10` 看到 hex/pent 边变成蜿蜒曲线但仍可识别原 cell 形状；跨 mesh 边时 cell 边形状连续无缝；`EdgeWidth = 0 + NoiseAmplitude > 0` 看到硬边蜿蜒；`EdgeWidth > 0 + NoiseAmplitude > 0` 看到软边蜿蜒 |
-| **R7** | ✅ 已完成 | 把 R6 输出里的三层 `hash(layer_i+1)` 哈希色换为 `SampleTriplanar(TerrainAlbedoArray, layer_i, WorldPos, dir)` 真实地表采样；R4-R6 的 δ / w / dirP 计算链路全部保留。需新建 1–2 张 `Texture2DArray`（`TerrainAlbedoArray` + 可选 `TerrainNormalArray`），slice 下标从 `CellAttrLUT.r` 读取。面法 $\hat{n}$ 必须用**未扰动的 dir** 而非 R6 dirP（详见 [R7_TerrainTriplanar.md](R7_TerrainTriplanar.md)） | 调小 NumLayersHint（如 4）后能看到同色块上三个 Triplanar 采样区块（yz / xz / xy 三面混合未出接缝）；调大 NumLayersHint=16 后 cell 内部是草/沙/雪/岩交错的马赛克拼接，cell 边处蜿蜒软过渡（R6） |
+| **R7** | ✅ 已完成 | 把 R6 输出里的三层 `hash(layer_i+1)` 哈希色换为 `SampleTriplanar(TerrainAlbedoArray, layer_i, WorldPos, Normal)` 真实地表采样；R4-R6 的 δ / w / dirP 计算链路全部保留。需新建 1–2 张 `Texture2DArray`（`TerrainAlbedoArray` + 可选 `TerrainNormalArray`），slice 下标从 `CellAttrLUT.r` 读取。面法 $\hat{n}$ 必须用**未扰动的 dir** 而非 R6 dirP（详见 [R7_TerrainTriplanar.md](R7_TerrainTriplanar.md)） | 调小 NumLayersHint（如 4）后能看到同色块上三个 Triplanar 采样区块（yz / xz / xy 三面混合未出接缝）；调大 NumLayersHint=16 后 cell 内部是草/沙/雪/岩交错的马赛克拼接，cell 边处蜿蜒软过渡（R6） |
 | **R8** | 🛠 cpp 完成（待材质验收）| **材质参数化（Tint 路径）**：把 R7 的 19 张独立 `Texture2DArray` slice 升级为 **3 张基础 PBR 套件（Soil / Rock / Forest Canopy）+ 多通道参数 LUT 微调**——每个 cell 通过 4 张 RGBA LUT 携带 (BaseTexIdx, OverlayIdx, OverlayBlend, Tint, HSV 修正, Normal/Roughness/Specular 修正, Triplanar Scale)。同时**新增水面层**：在 IsoSphere 之外额外渲一个 sub=3 的简易球皮 mesh，挂噪声扰动的反光 + 透光水材质，作为全局水面（与基础 mesh 自然遮挡，本期无球面网格无法遮挡 → 独立验收）。**不依赖 W4**：CellAttrLUT.r（BaseTexIdx）继续沿用 R3 的 Knuth 哈希 placeholder，仅观察 17 种地形配方的视觉效果是否合理 | (a) 关掉水面层后地形球展示 17 种地形 placeholder 配方，颜色 / 粗糙度 / 法线强度的差异肉眼可辨；(b) 单独打开水面层后看到一颗"贴满水纹的球"（无遮挡），噪声扰动让反光斑驳；(c) R6 软蜿蜒边在 17 种 tint 之间自然过渡；(d) 详稿见 [R8_ParametricTint.md](R8_ParametricTint.md) ✅|
-| **R8.5** | ⏳ 待开始 | **自研球面网格（无 LOD）**：构建 `FSphereTopology(SubdivisionLevel + 2)` 的 primal mesh 作为渲染 mesh（每个粗 Tri 细分为 16 份），每个细顶点预计算 "最近 3 Cell + acos 三方权重 w[3]"（与 §14.7 / §16.3 同公式），按 `Pos = Dir·(R + Σ wᵢ · Elevᵢ · HeightScale)` 做径向位移、用 `KismetTangents` 重算法线。把 R8 材质（17 种 tint 配方 + 水面层）挂到自研网格上联调，确认 Elevation 位移 + 水面遮挡 + tint 边界三者视觉协调。**不做 LOD**——sub=5 全球 ~10K cells × 16 ≈ 160K 三角形，UE 常规 ProcMesh 吃得下（详见 §16） | 山脉沿板块边界连续抬升、海底盆地下沉、水面把海底完全遮挡（Ocean.Deep slot 配方仅在水面被掀开时可见）；R6 边界软过渡仍然成立，且与 Elevation 高度过渡天然同步（共用 w[3]）；R8 与 R8.5 视觉差异主要是"有起伏 / 无起伏" |
-| **W4 验收** | ⏳ 待开始（依赖 R8.5）| 在 R8 + R8.5 联调通过后，把 CellAttrLUT.R / 4 通道材质 LUT 中的"BaseTexIdx + 17 种配方索引"从 Knuth 哈希 placeholder 切换为 `Def->LayerIndex` + `Def->FTerrainMaterialParams` 真实查表（W4 详稿 [W4_BiomeClassification.md](W4_BiomeClassification.md) 已就绪）。本步**不增加 SDF 端工作量**——SDF 端只是把 17 种配方的 BaseTexIdx 换源 | 球面呈现合理的"赤道沙漠 / 温带森林 / 极地冰原 + 12 五边形 + 大陆东岸森林 vs 西岸沙漠"分布；调试师可在编辑器里改 `T_Forest_Tropical.uasset` 的 `ClimateRules[0].Temperature` 区间立即生效 |
+| **T 阶段（TessellatedMesh）** | ⏳ 待开始 | **自研球面网格（独立可调 `MeshSubdivisionLevel`，默认 4）**：主验收 actor `APlanetTessellatedMesh` 同时持有两个独立 `FSphereTopology` 实例——逻辑层 `CellTopology`（默认 sub=3 / 642 cells）供 WorldGen + Gameplay 共用，渲染层 `MeshTopology`（默认 sub=4 / 2562 verts / 5120 tris）供 GridRender 独占。顶点位移走 cpp 路径：每个 mesh 顶点通过 `Cells[v].CornerIds` 拿到它所属的 5 或 6 个粗 mesh 三角形 → `FTriTreeNode->Father` 上爬 `MeshSub - CellSub` 次拿到父粗 CellTopology 三角形 → 三 Cell `dot` 权重线性插值 → 多重三角形取算术平均 → `Pos = Dir·(R + H_macro)`。顶点法线直取 `+UnitCenter`（D5）、Tangent 留空；fbm 高频细节（D9）留后续子里程碑。子里程碑 T1~T5 逐文件验收；详见 [TessellatedMeshDesign.md](TessellatedMeshDesign.md) | sub=4 球表面被山脉 / 盆地 / 海底低洼拉出起伏；R8 材质（17 tint + SLW 水面）零改动复用；sub=3 退化验收与 R8 `APlanetTopologyDebugMesh` 视觉完全一致 |
+| **W4 验收** | ⏳ 待开始（依赖 T 阶段）| 在 R8 + T 阶段联调通过后，把 CellAttrLUT.R / 4 通道材质 LUT 中的"BaseTexIdx + 17 种配方索引"从 Knuth 哈希 placeholder 切换为 `Def->LayerIndex` + `Def->FTerrainMaterialParams` 真实查表（W4 详稿 [W4_BiomeClassification.md](W4_BiomeClassification.md) 已就绪）。本步**不增加 SDF 端工作量**——SDF 端只是把 17 种配方的 BaseTexIdx 换源 | 球面呈现合理的"赤道沙漠 / 温带森林 / 极地冰原 + 12 五边形 + 大陆东岸森林 vs 西岸沙漠"分布；调试师可在编辑器里改 `T_Forest_Tropical.uasset` 的 `ClimateRules[0].Temperature` 区间立即生效 |
 | **R9** | ⏳ 待开始 | 加 Decor / Owner / Fog 三套独立 LUT（在 R8 4 通道基础上扩展） | 政治版图 + 战争迷雾 + 城市 / 农田装饰上线 |
 | **R10** | ⏳ 待开始 | 自研球面网格 LOD（远 sub+0、近 sub+2、超近 sub+3；用 skirt 法消拼缝；可选 morph） | 远景帧时间下降；近景细节增加 |
 | **R11** | ⏳ 待开始 | 接入 §15 高亮描边带 + 选中 / 鼠标悬停的 LUT 联动 | hex 边发光描边、选中即时反馈 |
-| ~~**原 R11/R12/R13 (PTG 路线)**~~ | ❌ 已废弃 | （历史路径：PTG 高细分球皮 + GPU FindNearestCell + WPO 位移 + 高亮）—— R8.5 自研球面网格已替代该路线全部职责，且与 WorldGen `Elevation` 字段直连，不再需要 PTG 插件依赖。§14 章节文字保留作历史档案 | — |
+| ~~**原 R11/R12/R13 (PTG 路线)**~~ | ❌ 已废弃 | （历史路径：PTG 高细分球皮 + GPU FindNearestCell + WPO 位移 + 高亮）—— T 阶段自研球面网格已替代该路线全部职责，且与 WorldGen `Elevation` 字段直连，不再需要 PTG 插件依赖。§14 章节文字保留作历史档案 | — |
 
-每一阶段单独可验证，不会卡死。R1~R7 在 IsoSphere 上跑通"球面 SDF + Triplanar 真实地表"的全部 HLSL 公式；R8 把单纹理 19-slice 路径升级为 3-base 参数化 tint，并加入水面层；R8.5 把 mesh 切到自研球面网格做径向位移；之后 W4/R9/R10/R11 全部跑在自研网格上。
+每一阶段单独可验证，不会卡死。R1~R7 在 IsoSphere 上跑通"球面 SDF + Triplanar 真实地表"的全部 HLSL 公式；R8 把单纹理 19-slice 路径升级为 3-base 参数化 tint，并加入水面层；T 阶段把 mesh 切到自研球面网格做径向位移；之后 W4/R9/R10/R11 全部跑在自研网格上。
 
 ### 11.1 当前进度记录
 
 - **R1（✅ 2026-06）**：`APlanetTopologyDebugMesh` + `UProceduralMeshComponent` 渲出 sub=3 的 1280 个 primal 三角形（642 cells，12 pentagon 位置与正二十面体顶点对齐）；`OnConstruction` 自动 Rebuild、视口即时刷新。修复了 `FSphereTopology::Build()` 二次累加导致 sub=3 → 41604 cells 的爆炸 bug。
-- **R2（✅ 2026-06）**：每个三角形展开为 3 个独立顶点，`UV0/UV1/UV2 = (Hi,Lo)` 装填三个 cell id，`UV3.xy = OneHot` 重心权重；PS 端走 `argmax(λ)` 硬边切分（1/3 角块判别，详见 §2.1.2）。**关键踩坑**：fp16 UV 通道导致 CellId 在 sub≥4 时退化——已采用 8-bit Hi/Lo 拆分编码（详见 [R2_TopologyDebugMaterial.md](R2_TopologyDebugMaterial.md) §5）。
+- **R2（✅ 2026-06）**：每个三角形展开为 3 个独立顶点，`UV0/UV1/UV2 = (Hi,Lo)` 装填三个 cell id，`UV3.xy = OneHot` 重心权重；PS 端走 `argmax(λ)` 硬边切分（1/3 角块判别，详见 §2.1.2）。**关键踩坑**：fp16 UV 通道导致 CellId 在 sub≥4 时退化——已采用 8-bit 拆分编码（详见 [R2_TopologyDebugMaterial.md](R2_TopologyDebugMaterial.md) §5）。
 - **R3（✅ 2026-06）**：新增 `CellAttrLUT`（1×NumCells、BGRA8、Filter=Nearest、SRGB=false），R 通道存 LayerIndex（Knuth 哈希 placeholder）；`Rebuild()` 末尾包装 MID 注入 `CellAttrLUT` + `NumLayersHint`/`NumCells`，PS 端着色升级为 `hash(LUT.Load(chosen).r*255 + 1)`。**关键踩坑**：材质必须挂在 Actor 的 `PlanetTopology > Material` 槽位（不能挂在 `渲染 > 材质 > 元素 0`，否则 MID 不创建）；验证 Custom Code 真值只能用 cpp 反射、不可用 `.uasset` 二进制 dump（详见 [R3_CellAttrLUTMaterial.md](R3_CellAttrLUTMaterial.md) §5）。
-- **R4（✅ 2026-06）**：PS 判别准则从 `argmax(λ)` 改为球面 Voronoi `argmax(dot(dir, V_i))`，等位线退化为大圆弧，**消除 hex 边在 mesh 边中点的折角**。新增 `CellDirLUT`（1×NumCells、RGBA32F、`(UnitCenter.xyz, isPentagon)`）和 `PlanetCenter` MID Vector 参数注入；R4 的 PS 核心 HLSL 在 R8.5 自研球面网格路线可零改动复用（仅 c0/c1/c2 来源换成 cpp 预计算灌顶点属性）。详见 [R4_VoronoiBoundary.md](R4_VoronoiBoundary.md)。
+- **R4（✅ 2026-06）**：PS 判别准则从 `argmax(λ)` 改为球面 Voronoi `argmax(dot(dir, V_i))`，等位线退化为大圆弧，**消除 hex 边在 mesh 边中点的折角**。新增 `CellDirLUT`（1×NumCells、RGBA32F、`(UnitCenter.xyz, isPentagon)`）和 `PlanetCenter` MID Vector 参数注入；R4 的 PS 核心 HLSL 在 T 阶段自研球面网格路线可零改动复用（仅 c0/c1/c2 来源换成 cpp 预计算灌顶点属性）。详见 [R4_VoronoiBoundary.md](R4_VoronoiBoundary.md)。
 - **R5（✅ 2026-06）**：在 R4 dot 距离空间做球面软边——定义 `δ_i = arccos(d̂·V_i) - min_{j≠i} arccos(d̂·V_j)`（带符号弧度距离），用 `smoothstep(-EdgeWidth/2, +EdgeWidth/2, -δ_i)` 给每个 cell 出权重，三层颜色独立加权混合；`EdgeWidth = 0` 时退化为 R4 硬边，`EdgeWidth > 0` 时过渡带为大圆弧两侧等距弧度带。详见 [R5_SharpenSoftEdge.md](R5_SharpenSoftEdge.md)。
 - **R6（✅ 2026-06）**：在 R5 之后**全局连续 3D 噪声偏移（方案 B）**——对 PS 端 `d̂` 做切向小角度扰动 `d̂' = normalize(d̂ + NoiseAmplitude·n3D(NoiseScale·d̂))`，再走 R5 全流程。彻底避免 per-cell 噪声的接缝/重叠；`NoiseAmplitude` 弧度量级、`NoiseScale` 控制空间频率。详见 [R6_BoundaryNoise.md](R6_BoundaryNoise.md)。
 - **R7（✅ 2026-06）**：把 R6 输出里的三层 `hash(layer_i+1)` 哈希色换为 `SampleTriplanar(TerrainAlbedoArray, layer_i, WorldPos, Normal)`——三平面世界空间投影、`pow(|N|, TriplanarSharpness)` 加权融合、`TileScale` 控制 tile 尺寸。**关键踩坑**：`Texture2DArray` 必须挂在 Custom 节点 `Inputs` 列表的 **位置 A（Texture Object Parameter）**，不能挂在材质实例参数面板的 `TerrainAlbedoArray` 字段（否则 fallback 到 `GBlackTexture`）。详见 [R7_TerrainTriplanar.md](R7_TerrainTriplanar.md)。
@@ -896,13 +890,14 @@ CPU 侧：
 **下一阶段**：R7 已完成所有"球面 SDF + Triplanar 真实地表"层面的 HLSL 公式建设。**新路线（2026-06-29 拍板）**：
 
 ```
-R8 (Tint 参数化 + 水面层) → R8.5 (自研球面网格无 LOD) → W4 (Biome 分类正式接入) → R9 (多 LUT) → R10 (LOD) → R11 (高亮)
+R8 (Tint 参数化 + 水面层) → T (自研球面网格无 LOD / TessellatedMesh) → W4 (Biome 分类正式接入) → R9 (多 LUT) → R10 (LOD) → R11 (高亮)
 ```
 
 - **R8** 不依赖 W4——`CellAttrLUT.R` 与 4 通道材质 LUT 的 BaseTexIdx 继续沿用 R3 的 Knuth 哈希 placeholder，仅观察 17 种地形配方 + 水面层的视觉效果是否合理；详见 §16.1 与 [R8_ParametricTint.md](R8_ParametricTint.md) ✅。
-- **R8.5** 把 mesh 从 IsoSphere 切到 `FSphereTopology(SubdivisionLevel + 2)` 自研球面网格，实现径向位移（Elevation）+ 法线重算 + 水面遮挡；详见 §16。
-- **W4** 推迟到 R8 + R8.5 联调通过后再调，因为有了真实地形位移 + 水面遮挡后调 Whittaker 区间反而更直观。WorldGen 端 W4 详稿 [W4_BiomeClassification.md](W4_BiomeClassification.md) 已就绪、不阻塞此排序。
+- **T 阶段（TessellatedMesh）** 把 mesh 在渲染端与逻辑端解耦——逻辑 `CellTopology` 默认仍 sub=3（642 cells），渲染 `MeshTopology` 默认 sub=4（2562 verts / 5120 tris），两者独立可调。顶点位移走 cpp 路径（三 Cell `dot` 权重线性插值 + 多重三角形算术平均 + 顶点法线直取 `+UnitCenter`）；子里程碑 T1~T5 逐文件验收；详见 [TessellatedMeshDesign.md](TessellatedMeshDesign.md)。
+- **W4** 推迟到 R8 + T 阶段联调通过后再调，因为有了真实地形位移 + 水面遮挡后调 Whittaker 区间反而更直观。WorldGen 端 W4 详稿 [W4_BiomeClassification.md](W4_BiomeClassification.md) 已就绪、不阻塞此排序。
 - 原计划的 R11/R12/R13 PTG 路线**已废弃**，§14 章节文字保留作历史档案。
+- **§16 占位说明**：原 §16 自研球面网格正文在 2026-06-30 已迁出本稿，折叠为跳转入口 → [TessellatedMeshDesign.md](TessellatedMeshDesign.md)。SDF 主稿仅保留架构说明与占位部分。
 
 后续 R9~R11 见 §11 Roadmap 表。
 
@@ -910,9 +905,9 @@ R8 (Tint 参数化 + 水面层) → R8.5 (自研球面网格无 LOD) → W4 (Bio
 
 ### 11.2 PMC↔PTG 渲染契约（顶点法线与 UE5 光照约定）
 
-> ⚠ **本节标题保留作历史参照，但 PTG 路线已废弃（2026-06-29）**——下面"PMC ↔ PTG 跨期同构性"原约束现在转为"R8 IsoSphere ↔ R8.5 自研球面网格跨期同构性"，规则**完全一致**：UE5 左手系 + CCW frontface + N·L 同侧三条硬约定不变，顶点法线"指向球心而非朝外"的几何推论不变，强制 `KismetTangents` 自动计算的工作流不变。本节以下文字仍可直接套用到自研球面网格上。
+> ⚠ **本节标题保留作历史参照，但 PTG 路线已废弃（2026-06-29）**——下面"PMC ↔ PTG 跨期同构性"原约束现在转为"R8 IsoSphere ↔ T 阶段自研球面网格跨期同构性"，规则**完全一致**：UE5 左手系 + CCW frontface + N·L 同侧三条硬约定不变，顶点法线"指向球心而非朝外"的几何推论不变，强制 `KismetTangents` 自动计算的工作流不变。本节以下文字仍可直接套用到自研球面网格上。
 >
-> ⚠ **本节是跨期同构性的硬约束**——SDF 模块本质是**为生产路线（R8.5+ 自研球面网格）提供"材质 + 着色公式"的研发载体**，PMC 调试 mesh 只是用于在 IsoSphere 几何上验证这套 HLSL 是否正确。R8.5 切换到自研球面网格 mesh 时，**几何会换，但顶点法线方向的约定不能换**。本节为 R7 Lit 漆黑根因复盘的最终产物。
+> ⚠ **本节是跨期同构性的硬约束**——SDF 模块本质是**为生产路线（T 阶段+ 自研球面网格）提供"材质 + 着色公式"的研发载体**，PMC 调试 mesh 只是用于在 IsoSphere 几何上验证这套 HLSL 是否正确。T 阶段切换到自研球面网格 mesh 时，**几何会换，但顶点法线方向的约定不能换**。本节为 R7 Lit 漆黑根因复盘的最终产物。
 
 #### 11.2.1 UE5 渲染管线的两条硬约定
 
@@ -937,11 +932,11 @@ R8 (Tint 参数化 + 水面层) → R8.5 (自研球面网格无 LOD) → W4 (Bio
    → 叉积指向朝外（背离球心、朝相机方向）
 ```
 
-**与几何直觉完全一致**：“球面外法线 = 顶点位置归一化（朝外）”。UE 的 lit shading 期待顶点法线朝外：`saturate(dot(+UnitCenter, LightDir))` 在朝光半球 > 0 → Lit 正常受光。
+**与几何直觉完全一致**："球面外法线 = 顶点位置归一化（朝外）"。UE 的 lit shading 期待顶点法线朝外：`saturate(dot(+UnitCenter, LightDir))` 在朝光半球 > 0 → Lit 正常受光。
 
 ⚠ **早期版本的错误推论**（"face_normal_LH = -cross_RH 朝球心"）已于 R8 阶段被实测证伪，详见 [SphereTopologyReference.md §11.4](SphereTopologyReference.md#114-关联踩坑历史与文档修订)。
 
-#### 11.2.3 PMC / 自研球面网格 端实现（R1~R10 / R8.5+）
+#### 11.2.3 PMC / 自研球面网格 端实现（R1~R10 / T 阶段+）
 
 [`PlanetTopologyDebugMesh.cpp`](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp) `Rebuild` / `RebuildWaterMesh_` 中，顶点法线**直接手填 `+UnitCenter`**（朝外）。Tangents 留空（Default Lit / SLW 不消费 Tangent 空间）。
 
@@ -953,15 +948,13 @@ R8 (Tint 参数化 + 水面层) → R8.5 (自研球面网格无 LOD) → W4 (Bio
 
 **禁止**：手填 `Normal = -UnitCenter`（朝球心）——这是早期版 §11.2 仅凭错误推导得出的结论，实际会令整球 `dot(N, L) ≤ 0` 全像素漆黑。R8 阶段已实测证伪。
 
-#### 11.2.4 PTG / 自研球面网格 端实现（R8.5+）
+#### 11.2.4 自研球面网格端实现（T 阶段+）
 
-R8.5 把 PMC 换成自研高细分球皮时，**顶点法线仍取 `+UnitCenter`（朝外）**。如果采用 spherified-cube 生成路径，**必须验证**：
+T 阶段的 `MeshTopology = FSphereTopology(MeshSubdivisionLevel)` 与 `CellTopology = FSphereTopology(CellSubdivisionLevel)` 同源——前者是后者经多次 `SubdividePrimalOnce` 得到的子图同构后代，几何 face 朝向、CCW 绕序与 PMC 调试 mesh 完全一致。**顶点法线仍取 `+UnitCenter`（朝外）**，Tangent 留空，不调 KismetTangents（详见 [TessellatedMeshDesign.md](TessellatedMeshDesign.md) §3 D5）。
 
-1. **生成的 6 个 face 三角形索引是否 CCW from outside** —— 这是 UE 默认 frontface 的必要条件
-2. **顶点法线是否朝外（背离球心）** —— spherified-cube 默认可能输出 face 法线或顶点位置归一化朝外，后者才是对的；误填朝内会漆黑
-3. **启用 WPO（顶点位移）后法线是否仍朝外** —— 径向位移不改变 face normal 方向；任何切向位移都需重新烘焙法线
+**唯一需要验证的事**：径向位移 `Pos = Dir·(R + H)` 不改变法线方向（仍朝外）—— D5 决策依赖此性质。任何**切向位移**（如未来 R10+ 的 fbm 加切向扰动）都会破坏 face_normal 与 vertex_normal 的一致性，必须重新烘焙法线。
 
-R8.5 验收黄金检查点：在 Buffer Visualization → World Normal viewmode 下，**朝光源一侧的半球** lit 后应亮（验证 `dot(N, L) > 0`），反面应暗。若全黑 → 法线方向是反的，需取负。
+T 阶段验收黄金检查点：在 Buffer Visualization → World Normal viewmode 下，**朝光源一侧的半球** lit 后应亮（验证 `dot(N, L) > 0`），反面应暗。若全黑 → 法线方向是反的，需取负。
 
 #### 11.2.5 为什么 R1~R6 没暴露这个问题
 
@@ -1042,7 +1035,7 @@ protected:
 
 ### 13.2 几何构建（核心循环）
 
-直接消费 [`FSphereTopology::Cells`](../Source/Grid/Public/FCell.h) 与 [`FSphereTopology::Corners`](../Source/Grid/Public/FCorner.h)，**完全不再需要 `FRenderTri`**。每个 Corner 视作一个三角形，三个顶点由 `Corner.CellIds[0..2]` 给出，每个三角形展开成 3 个独立顶点（方案 A，§4.3）以承载差异化的 OneHot：
+直接消费 [`FSphereTopology::Cells`](../Source/Grid/Public/FCell.h) 与 [`FSphereTopology::Corners`](../Source/Grid/Public/FCorner.h)，**完全不再需要 `FRenderTri`**。每个 Corner 视作一个三角形，三角形的 3 个顶点是 `Corner.CellIds[0..2]`。**每个三角形展开成 3 个独立顶点**（方案 A，§4.3）以承载差异化的 OneHot：
 
 ```cpp
 void UGlobeMeshComponent::BuildFromTopology(const FSphereTopology& Topo)
@@ -1160,11 +1153,11 @@ void AGlobeActor::OnCityBuilt(int32 CellId)
 
 ## 14. PTG 几何层集成（生产环境路线）
 
-> ⚠ **本章已作废（2026-06-29）**：原计划在 R11+ 把渲染 mesh 切到 PTG（`ProceduralTerrainGenerator` 插件）的高细分球皮 + GPU FindNearestCell，但讨论确定**自研球面网格方案（§16）能完成 PTG 路线的全部职责且与 WorldGen `Elevation` 直连**，不再投入 PTG 路线。
+> ⚠ **本章已作废（2026-06-29）**：原计划在 R11+ 把渲染 mesh 切到 PTG（`ProceduralTerrainGenerator` 插件）的高细分球皮 + GPU FindNearestCell + WPO 位移 + 高亮，但讨论确定**自研球面网格方案（§16）能完成 PTG 路线的全部职责且与 WorldGen `Elevation` 直连**，不再投入 PTG 路线。
 >
 > 本章文字保留作"曾考虑的几何路线"历史档案，包含：
 > - §14.1~§14.6：三层架构、PTG mesh 着色流程、GPU FindNearestCell 树纹理实现、WPO 顶点位移
-> - §14.7：球面重心坐标与"外心折角"修正——⭐ **这部分仍然有效**：自研球面网格 §16 需要"最近 3 Cell + acos 三方权重 w[3]"，公式与 §14.7 完全一致，只是改在 cpp 端预计算到顶点而非 GPU 实时查询
+> - §14.7：球面重心坐标与"外心折角"修正——⚠ 该修正是在 "acos / argmin" 路径上才发生的，本项目 T 阶段 [TessellatedMeshDesign.md](TessellatedMeshDesign.md) 拍板采用三点 `dot` 线性插值、**不使用 acos**——`max(0, dot)` 在顶点附近是连续平滑的，外心折角问题在 T 阶段路径上不出现；§14.7 公式仅在未来如果采用 `acos` 高次插值升级时才会被重新引用
 >
 > 新工作请直接看 §16；§14 仅在需要参考"球面重心坐标证明"或"外心修正几何"时回看。
 
@@ -1672,223 +1665,19 @@ albedo += ComputeHighlight(c0, c1, c2, w0, w1, w2);
 
 ---
 
-## 16. 自研球面网格（生产路线）⭐
+## 16. 自研球面网格（生产路线，占位 → [TessellatedMeshDesign.md](TessellatedMeshDesign.md)）⭐
 
-> 本章是 R8 / R8.5 / W4 / R9 / R10 / R11 全部后续阶段的几何与材质底座。**取代了原 §14 PTG 路线**——自研球面网格能完成 PTG 路线的全部职责（径向位移、SDF 多层着色、高亮、水面遮挡），且：
+<a id="16-自研球面网格生产路线"></a>
+
+> ⚠ **本章正文已迁出 SDF 主稿**（2026-06-30）——自研球面网格的设计稿过重，单独成稿后与本稿、[WorldGenDesign.md](WorldGenDesign.md) 三足鼎立，由 [TechnicalDesign.md](TechnicalDesign.md) §1 模块图统一引用。
 >
-> - 与 [WorldGenDesign.md](WorldGenDesign.md) `FCellGeoData::Elevation` 字段**直连**——cpp 端按 cell 高度做径向位移，无需 GPU WPO + HeightLUT 中转；
-> - 与 R6 软边过渡**共享同一组 acos 权重 w[3]**——高度场的过渡边界与材质的过渡边界天然同步（PTG 路线下两者由两个独立通路计算，对齐难度高）；
-> - 与 R7 的 HLSL 不绑定——R7 的"3 CellId + 3 权重"现在由 cpp 端预计算到顶点（与 R1~R7 IsoSphere 方案完全同构），HLSL 无需改动；
-> - 不依赖 `ProceduralTerrainGenerator` 插件——可一次性删除该插件依赖（[`TerraCivilization.Build.cs`](../Source/TerraCivilization/TerraCivilization.Build.cs) 与 [`PlanetBinder.h/.cpp`](../Source/TerraCivilization/Public/Interaction/PlanetBinder.h) 的 PTG 桥接代码在 R8.5 落地后可清理）。
-
-### 16.1 R8 参数化 Tint + 水面层（mesh 不变，只改材质）
-
-R8 阶段**仍跑在 IsoSphere primal mesh 上**（与 R7 相同），变化全部在材质侧。核心思路：把 R7 的"19 张独立纹理 slice"路径替换为"3 张基础 PBR 套件 + 4 张多通道参数 LUT"，让所有 17 种地形通过参数微调从同一组基础贴图派生。
-
-#### 16.1.1 基础 PBR 套件（3 张 Texture2DArray）
-
-| 名称 | 用途 | 推荐分辨率 / 格式 |
-| --- | --- | --- |
-| **A. Soil**（碎石沙砾） | 高频小颗粒，用作平地 / 沙漠 / 海岸 / 海底底层 — Gravel042 | 1024² × 4 通道（Albedo / Normal / Roughness / Height）|
-| **B. Rock**（岩石） | 中频片状，用作山脉 / 戈壁 / 岩石海岸 — Rock022 | 同上 |
-| **C. Forest Canopy**（苔藓 / 树冠） | 中低频块状，用作所有森林类的 Overlay 层 — Moss002 | 同上 |
-
-> 第 4 张可选 Snow/Ice，但首版用 A 通过 `Brightness↑↑ + Roughness↓` 模拟即可。每张套件 ≈ 4 MB（BC1/BC5 压缩），3 张总计 ≈ 12 MB 显存——可控。
-
-#### 16.1.2 4 通道材质 LUT（每 cell 16 字节）
-
-R7 现有的 `CellAttrLUT`（1×NumCells × R8G8B8A8）已不够用，扩展为 4 张 LUT：
-
-| LUT | 格式 | RGBA 含义 |
-| --- | --- | --- |
-| `LUT0_Index` | R8G8B8A8 | R=BaseTexIdx (0/1/2)，G=OverlayIdx (0=无/1=Forest)，B=OverlayBlend×255，A=Mask（bIsCoast / bIsRiver / ...）|
-| `LUT1_Tint` | RGBA16F | RGB=Tint Multiply（线性空间），A=HueShift |
-| `LUT2_HSV_Rough` | RGBA16F | R=Saturation，G=Brightness，B=RoughMin，A=RoughMax |
-| `LUT3_NSpec` | RGBA16F | R=NormalStrength，G=HeightScale（R8.5 用），B=SpecularBoost，A=TriplanarScale |
-
-材质里 4 次 `Texture2D::Load(int3(CellId, 0, 0))` 拿全部参数；HLSL 端做 HSV 偏移、Roughness Remap、Brightness Multiply、Triplanar 三平面采样。
-
-#### 16.1.3 17 种地形配方表（建议初值，最终入 `UTerrainDefinition::FTerrainMaterialParams`）
-
-| Tag | Base | Tint(R,G,B) | Sat | Bri | RoughMin/Max | Overlay/Blend |
-| --- | --- | --- | --- | --- | --- | --- |
-| `Plain.Grass` | Soil | (0.40, 0.70, 0.30) | 1.0 | 1.0 | 0.5/0.8 | Forest / 0.15 |
-| `Plain.Savanna` | Soil | (0.70, 0.60, 0.30) | 0.9 | 1.1 | 0.6/0.9 | — |
-| `Forest.Temperate` | Soil | (0.30, 0.55, 0.25) | 1.1 | 0.9 | 0.5/0.8 | Forest / 0.65 |
-| `Forest.Tropical` | Soil | (0.20, 0.50, 0.20) | 1.3 | 0.85 | 0.4/0.7 | Forest / 0.85 |
-| `Forest.Taiga` | Soil | (0.25, 0.40, 0.30) | 0.7 | 0.85 | 0.5/0.8 | Forest / 0.55 |
-| `Wetland` | Soil | (0.30, 0.50, 0.35) | 1.0 | 0.85 | 0.2/0.5 | — |
-| `Desert.Sand` | Soil | (0.95, 0.85, 0.60) | 0.9 | 1.2 | 0.7/0.95 | — |
-| `Desert.Rocky` | Rock | (0.70, 0.60, 0.45) | 0.7 | 1.0 | 0.7/0.95 | — |
-| `Coast.Beach` | Soil | (0.95, 0.90, 0.70) | 0.7 | 1.15 | 0.7/0.95 | — |
-| `Coast.Rocky` | Rock | (0.55, 0.55, 0.50) | 0.5 | 0.9 | 0.6/0.9 | — |
-| `Mountain.Hill` | Rock | (0.55, 0.50, 0.42) | 0.7 | 0.9 | 0.6/0.9 | Soil / 0.30 |
-| `Mountain.Peak` | Rock | (0.50, 0.48, 0.45) | 0.4 | 0.85 | 0.7/0.95 | — |
-| `Mountain.Snow` | Rock | (0.92, 0.94, 0.98) | 0.2 | 1.4 | 0.1/0.4 | — |
-| `Tundra` | Soil | (0.70, 0.70, 0.65) | 0.3 | 1.05 | 0.7/0.95 | — |
-| `Glacier` | Rock | (0.85, 0.92, 0.98) | 0.4 | 1.45 | 0.1/0.3 | — |
-| `Ocean.Shallow` | Soil | (0.20, 0.50, 0.70) | 1.5 | 0.8 | 0.05/0.2 | —（仅作为水下海床；水面由 §16.1.4 渲染）|
-| `Ocean.Deep` | Soil | (0.05, 0.15, 0.40) | 1.5 | 0.5 | 0.05/0.2 | — |
-
-> **R8 阶段验收时**：`CellAttrLUT.R` 写入 BaseTexIdx，但**仍按 R3 的 Knuth 哈希 placeholder**派生 17 种配方索引（0~16）；W4 完成后 SDF 端把 placeholder 一行改成 `Def->FTerrainMaterialParams` 真实查表，无其他改动。
-
-#### 16.1.4 水面层（独立 sub=3 球皮 + Single Layer Water shading model）
-
-水体不走 SDF 多层混合，而是独立渲一个**简易球皮 mesh**，使用 UE5 内置的 **Single Layer Water**（SLW）着色模型——这是 UE5 官方 Water Plugin 用的同一套 shading model。
-
-> ⚠ **方案变更（2026-06-29）**：原 §16.1.4 V1 用 `Translucent + Default Lit + Surface ForwardShading` 路线，但 Translucent 默认管线**不接收 ReflectionCapture/SSR**——视觉上水面看起来"颜色平、无反光、无时间感"，PIE 与 Editor 都验不出 sparkle。R8 验收期实测明确：Translucent 路线在不开 Project-wide Forward Shading 的前提下，物理上无法实现"既透光又反射"的效果。**SLW 才是 UE5 提供的物理水路径**——本质是不透明渲染（写深度、参与 GBuffer），但内置"水下颜色透出 + 大气反射 + 焦散"的整套近似。
-
-- **几何**：`FSphereTopology(SubdivisionLevel=3)` 的 primal mesh，半径 = `GlobeRadius + WaterSurfaceOffset`（R8 阶段 `WaterSurfaceOffset = 0`，即贴在球面上）。
-- **材质**（M_WaterShell）：
-  - **Blend Mode**：`Opaque`（SLW 必须 Opaque——这是与老方案最大差异）；
-  - **Shading Model**：`Single Layer Water`；
-  - **Two Sided**：勾选（球内外都渲，便于相机进入水球时仍可见）；
-  - 主节点引脚：
-    - **Base Color**：深水基色（如 `(0.0, 0.05, 0.1)`，很暗即可，反射会主导视觉）；
-    - **Specular**：1.0；
-    - **Roughness**：0.02~0.1（决定反射锐利度，越小越亮）；
-    - **Normal**：fbm 噪声扰动法线（与老方案一致，`Time * FlowSpeed` 驱动）；
-  - 新出现的特殊节点 **Single Layer Water Material Output**（材质图右键搜索添加）：
-    - **Scattering Coefficients**：`(0.05, 0.18, 0.25)`——水的散射颜色（蓝绿调）；
-    - **Absorption Coefficients**：`(0.3, 0.08, 0.04)`——水的吸收颜色（红光衰减最快 → 远处变蓝，物理正确）；
-    - **Phase G**：0.0（散射各向异性，先用 0）；
-    - **Color Scale Behind Water**：`(1, 1, 1)`（水下颜色染色，先白）；
-- **场景前置条件**（SLW 反射依赖外部光照源，缺一不可）：
-  - **DirectionalLight**：勾选 `Atmosphere Sun Light`（驱动太阳 specular highlight）；
-  - **SkyLight**：放一个 ASkyLight，勾选 **Real Time Capture**（驱动环境反射；缺它反射全黑）；
-  - **Project Settings → Rendering → Reflection Method**：`Lumen` 或 `Screen Space`（推荐 Lumen）；
-  - 可选 Sphere/Box ReflectionCapture：在水面附近放一个，提升反射质量（非必需）。
-- **渲染顺序**：作为 `APlanetTopologyDebugMesh` 的子 `UProceduralMeshComponent`（`WaterMeshComp`）；SLW 写深度 + 不透明排序——与地形 mesh 自然遮挡，不需要手工调 RenderPriority。
-- **R8 阶段限制**：因为 R8 仍跑在 IsoSphere 球面 mesh 上（半径恒定），水面与地形完全重合 → **水面层会把所有 cell 都盖住**。因此 R8 阶段验收时**分开看**：
-  - 关掉水面层（`bEnableWaterShell=false`）→ 看 17 种地形配方（包括海洋的两种海床配方）；
-  - 打开水面层 + 关掉地形球的 `MeshComp.Visibility` → 看一颗"贴满水纹的反光球"，验证 SLW 反射 + 噪声法线扰动效果。
-- **R8.5 后真正联调**：地形球被 Elevation 拉出起伏后，水面（半径 R + ε，恒定）只在 cell 高度 < 0 时盖住该 cell（自然遮挡海底），这才是水面的目标视觉。
-
-完整材质节点连线（包括 Wave Noise Custom 宏、SLW Material Output 接线、场景 SkyLight 配置、排错清单）见 [R8_ParametricTint.md §4.5.3](R8_ParametricTint.md)。
-
-### 16.2 R8.5 自研球面网格几何
-
-R8.5 把渲染 mesh 从"逻辑层 IsoSphere"切换到"渲染层自研球面网格"，**逻辑层的 `FSphereTopology(SubdivisionLevel)` 仍然保留**（用于 Cell 邻接 / A* 寻路 / Gameplay）。两者关系：
-
-```
-逻辑层（已有）: FSphereTopology(SubdivisionLevel = N)
-                · NumCells = 10·4^N + 2     // 例：N=4 → 2562 cells
-                · 提供 Cell 邻接图、UnitCenter、bIsPentagon
-                · WorldGen 在此层上跑 Generate()，输出 FCellGeoData[]
-                ↓
-渲染层（新建）: FSphereTopology(SubdivisionLevel = N + 2)
-                · NumPrimalVertsUnit = 10·4^(N+2) + 2  // 例：N=4 → 40962 顶点
-                · NumPrimalTris       = 20·4^(N+2)     // 例：N=4 → 81920 三角形
-                · 用作渲染 mesh 顶点/索引来源
-                · 不参与玩法逻辑——它只负责承载像素细节与 Elevation 位移
-```
-
-**为什么是 +2 而不是 +1 或 +3**：
-- +1 时每个粗 Tri 细分为 4 份，单个粗 Tri 边上只有 1 个新顶点 → 山脚位移仍像棱角；
-- **+2 时每个粗 Tri 细分为 16 份（4×4）**，边上 3 个新顶点，足够让 Elevation 位移表现出平滑曲线；
-- +3 时每个粗 Tri 细分为 64 份，sub=4 全球 ≈ 320K 三角形，UE 常规 ProcMesh 仍能吃但开始触摸性能边界——**留给 R10 LOD 阶段做近景**。
-
-### 16.3 顶点 → 最近 3 Cell + 软高度过渡
-
-R8.5 阶段最关键的 cpp 计算：每个细顶点 V 预计算 "(c0, c1, c2, w0, w1, w2)"，并据此计算位移高度。
-
-#### 16.3.1 找最近 3 Cell
-
-每个细顶点 V 落在唯一一个粗 Tri 内（或边上）。**这个粗 Tri 的 3 个角恰好是 3 个 Cell 中心**——所以 "最近 3 Cell" = 该粗 Tri 的 3 个角 Cell，**无需任何空间查询**。
-
-实现：构建渲染层 `FSphereTopology(N+2)` 时，对每个新增顶点维护"它属于哪个粗 Tri"的信息（`SubdividePrimalOnce()` 已经天然提供了这个层级关系——每次细分都记录"父 Tri 是谁"，递归到最浅父即根 Tri，根 Tri 的 3 个 Cell 即所求）。
-
-> 这一步可以在 `FSphereTopology::Build()` 完成后用 ~50 行 cpp 一次性预计算，sub=N+2 全部顶点 ≈ 几十毫秒（一次性）。
-
-#### 16.3.2 acos 三方权重（与 §14.7 / R5 同公式）
-
-```cpp
-const float Softness = 0.05f; // 弧度，与 R6 EdgeWidth 同制
-for (int32 V = 0; V < NumRenderVerts; ++V)
-{
-    const FVector  Dir   = RenderVertsUnit[V];
-    const int32    PT    = VertexToCoarseTri[V];          // 父粗 Tri
-    const int32    c[3]  = { PrimalTris[PT].X, PrimalTris[PT].Y, PrimalTris[PT].Z };
-    float w[3]; float wsum = 0.f;
-    for (int32 i = 0; i < 3; ++i)
-    {
-        const float d = FMath::Acos(FMath::Clamp(
-            FVector::DotProduct(Dir, Cells[c[i]].UnitCenter), -1.f, 1.f));
-        w[i] = FMath::Exp(-d / Softness);
-        wsum += w[i];
-    }
-    for (int32 i = 0; i < 3; ++i) w[i] /= wsum;
-
-    VertCellId[V][0] = c[0]; VertCellId[V][1] = c[1]; VertCellId[V][2] = c[2];
-    VertWeight[V][0] = w[0]; VertWeight[V][1] = w[1]; VertWeight[V][2] = w[2];
-}
-```
-
-> **同一组 w[3] 服务两个用途**：(a) Elevation 加权（§16.3.3），(b) 材质边界软过渡。这就是自研球面网格相比 PTG 路线最大的架构收益——高度边界与材质边界天然同步，无需"GPU WPO + GPU PS 两套独立通路对齐"的工程头痛。
-
-#### 16.3.3 径向位移
-
-```cpp
-for (int32 V = 0; V < NumRenderVerts; ++V)
-{
-    const FVector Dir = RenderVertsUnit[V];
-    float ElevAtV = 0.f;
-    for (int32 i = 0; i < 3; ++i)
-    {
-        ElevAtV += VertWeight[V][i] * GeoData[VertCellId[V][i]].Elevation;
-    }
-    VertPos[V] = Dir * (GlobeRadius + ElevAtV * HeightScale);
-}
-```
-
-`HeightScale` 推荐值：`GlobeRadius * 0.05 ~ 0.10`（最高山脉占球半径的 5~10%，与地球真实比例的视觉夸张约 50 倍——回合制游戏里这是常规手法）。
-
-#### 16.3.4 增量更新策略
-
-玩家行为（建造、占领）改变 cell 的 LayerIndex 而**不改 Elevation** → 位移结果不变 → 顶点缓冲不需要重传，只需更新 4 张材质 LUT 的对应行（与 R7 的 LUT 增量更新接口完全相同）。
-
-只有当 WorldGen 重跑（新种子 / 新 SubdivisionLevel）时才需要重新跑 §16.3.1~§16.3.3，~10K 顶点 × 简单运算 = 几十毫秒一次性，可接受。
-
-### 16.4 法线重算与材质对接
-
-#### 16.4.1 法线
-
-径向位移后顶点法线不再等于 Dir（山坡上的法线明显不指向球心），需要重算。**强制使用** `KismetProceduralMeshLibrary::CalculateTangentsForMesh`——这是 UE 内置的工具，按 `cross(P1-P0, P2-P0)` 累加到顶点，结果严格遵循 UE5 左手系 + CCW frontface 约定（详见 [AgentWorkflow.md §3.6](AgentWorkflow.md) / [SphericalSDFTerrainDesign.md §11.2](#112-pmcptg-渲染契约顶点法线与-ue5-光照约定)）。
-
-> **不要手填错误方向的法线**——主 mesh 顶点法线应该写 `+UnitCenter`（朝外）。写成 `-UnitCenter`（朝球心）会让 Lit 模式下整球漆黑（`dot(N, L) ≤ 0` 全像素被 clamp）。详见 [SphereTopologyReference.md §11](SphereTopologyReference.md)（已于 R8 期修订）。
-
-#### 16.4.2 把"最近 3 Cell + 权重"传给材质
-
-R7 现有路径是"VS 把 3 CellId + 重心 OneHot 通过 UV 槽位灌进 PS"——**自研球面网格继续沿用这条管线**，区别仅在：
-
-- R7（IsoSphere）：每个三角形展开为 3 独立顶点，OneHot = 三角形顶点的角色 → 重心坐标；
-- R8.5（自研网格）：每个细顶点的 3 CellId + 3 acos 权重已在 cpp 端 §16.3.2 预算好，直接灌进顶点 UV1/UV2/UV3 → PS 拿到的就是 acos 权重而非重心坐标。
-
-唯一变化：PS 端不再需要 R5 的 `δ_i = arccos(...) - min(...)` 重新计算软边——因为 cpp 端预算的 w[3] 已经是软过渡权重；R6 噪声扰动改为对 `w[3]` 直接做扰动 + 归一化（实现等效）。R7 Triplanar 采样路径保持不变。
-
-> **R8.5 落地时必须**：在详稿 [R8.5_NativeSphereMesh.md](R8.5_NativeSphereMesh.md)（待撰写）中明确"PS 收到的 3 个权重的语义从'重心坐标'改为'acos 软权重'"，并升级反射诊断的 Inputs 列表（Inputs 数量不变，但语义变了）。
-
-### 16.5 物理碰撞与拾取
-
-R7 的拾取链路：`PlanetInteractionController` → 射线击中 PTG RuntimeMesh → `Hit.ImpactPoint` 转交 `APlanetBinder::OnHoverWorldPoint` → `Query.FindNearestCell(WorldPoint - PlanetCenter)` 拿 CellId。
-
-R8.5 后**改为两步**：
-
-1. **几何拾取**：直接给自研球面网格的 `UProceduralMeshComponent` 启用 `bUseAsyncCooking = false` + `bUseComplexAsSimpleCollision = true`，UE 会按渲染三角形烘焙碰撞数据。射线击中 → `Hit.ImpactPoint` 仍然可用。
-2. **CellId 解算**：`Hit.ImpactPoint` 已是球面附近一点（位移后），需要先把它**沿径向归一化回单位球**：`Dir = (Hit.ImpactPoint - PlanetCenter).GetSafeNormal()`，再走 `FSphereTopologyQuery::FindNearestCell(Dir)` 拿逻辑层 CellId。
-
-> **过渡期兼容**：R8.5 落地后 [`PlanetBinder.cpp`](../Source/TerraCivilization/Private/Interaction/PlanetBinder.cpp) 的 PTG 桥接逻辑可以删除（PTG Manager 不再 Spawn）；保留 `OnHoverWorldPoint` 接口，但实现改为读自研网格的 `Hit.ImpactPoint`。详见 [R8.5_NativeSphereMesh.md](R8.5_NativeSphereMesh.md) 待撰写章节。
-
-### 16.6 LOD 留白（R10 补做）
-
-R8.5 阶段**不实现 LOD**——sub=4 时全球 ~80K 三角形，UE5 ProcMesh 在 RTX 3060 级别 GPU 上 < 1 ms，可接受。R10 阶段再补：
-
-- **远景**：`SubdivisionLevel + 0`（直接用逻辑层 IsoSphere，~5K 三角形）；
-- **中景**：`SubdivisionLevel + 1`；
-- **近景**：`SubdivisionLevel + 2`（即 R8.5 的常驻形态）；
-- **超近景**：`SubdivisionLevel + 3`（仅在相机 < 球半径 × 0.2 时启用）。
-
-LOD 切换的拼缝（T-junction）问题用 **skirt 法**解决：每个粗 Tri 内部独立细分，边缘往内法线方向落一圈"裙边"遮裂缝。详见 R10 详稿（待撰写）。
+> **跳转入口**：[TessellatedMeshDesign.md](TessellatedMeshDesign.md)（自研球面网格主稿）。
+>
+> **概述**：T 阶段（TessellatedMesh）把渲染 mesh 从"逻辑层 IsoSphere"切换到"渲染层独立 mesh"——逻辑层 `CellTopology`（默认 sub=3，642 cells）由 WorldGen / Gameplay 共用，渲染层 `MeshTopology`（默认 sub=4，2562 verts / 5120 tris）由 GridRender 独占。两者通过 `FMeshDisplacementBuilder` 把"mesh 顶点的所属粗三角形 + 三 Cell dot 权重 + Elevation 插值"做径向位移，材质侧 R8 阶段全部 HLSL 零改动复用。
+>
+> **三步走里程碑（2026-06-30 拍板）**：`R8 (✅) → T (⏳ TessellatedMesh、该独立主稿) → W4 (⏳)`。T 阶段子里程碑 T1~T5 逐文件验收（与 R4 / W1 验收风格对齐）。T 阶段落地后 W4 才接入 Biome 真实查表。
+>
+> **本章历史**：原 §16 包含 §16.1~§16.6 共 6 个子节（约 220 行），其中 §16.1 R8 参数化 Tint + SLW 水面层已在 [R8_ParametricTint.md](R8_ParametricTint.md) 中详细落地、本稿 §10 / §11 / §15 章节继续承担"材质 + 着色公式"的真理来源职责；§16.2~§16.6 自研球面网格几何 / 顶点位移 / 材质对接 / 物理拾取 / LOD 留白等内容全部迁入 [TessellatedMeshDesign.md](TessellatedMeshDesign.md)。SDF 主稿与 T 阶段主稿的边界遵循"几何属于 T / 材质属于 SDF"的硬切分。
 
 ---
 

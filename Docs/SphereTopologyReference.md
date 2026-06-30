@@ -378,7 +378,7 @@ CPU / GPU 的"球面方向 → 所属 Cell"查询：
 
 平均查询复杂度 `O(log4(NumTris)) ≈ O(N)`，远快于线性遍历 `O(20·4^N)`。
 
-> **该调用的 GPU 烘焟路径已废弃**（2026-06-29）：原 SDF 主稿 §14.4 描述的"GPU FindNearestCell"是原 R11 PTG 路线产物，现路线是 R8.5 自研球面网格（详见 [SphericalSDFTerrainDesign.md §16](SphericalSDFTerrainDesign.md#16-自研球面网格生产路线)）：FindNearestCell 仅在 cpp 端预计算阶段调用（为渲染层 sub+2 网格的每个细顶点找最近 3 个逻辑 Cell），不再需要烘焟为 GPU 纹理。
+> **该调用的 GPU 烘焙路径已废弃**（2026-06-29）：原 SDF 主稿 §14.4 描述的"GPU FindNearestCell"是原 R11 PTG 路线产物，现路线是 T 阶段自研球面网格（详见 [SphericalSDFTerrainDesign.md §16](SphericalSDFTerrainDesign.md#16-自研球面网格生产路线) 占位与 [TessellatedMeshDesign.md](TessellatedMeshDesign.md) 主稿）：FindNearestCell 仅在 cpp 端预计算阶段调用（为渲染层 sub+2 网格的每个细顶点找最近 3 个逻辑 Cell），不再需要烘焙为 GPU 纹理。
 
 ### 3.7 `FSurfaceFrame`（局部正交基）
 
@@ -650,7 +650,7 @@ public:
 | `Edges[].bIsPlateBoundary` | W2 Step1 |
 | `Edges[].BoundaryStrength` | W2 Step1 |
 
-> **WorldGen 不创建任何拓扑结构，不修改 Cell/Corner，仅在 Edges 上写 2 个 bool/float 字段**——这是 [WorldGenDesign.md §14.3](WorldGenDesign.md#143-跨模块调用时序) "WorldGen 是上游模块" 承诺的具体实现。
+> **WorldGen 不创建任何拓扑结构，不修改 Cell/Corner，仅在 Edges 上写 2 个 bool/float 字段**——这是 [WorldGenDesign.md §14.3](WorldGenDesign.md#143-跨模块调用时序) "WorldGen 是上游模块"承诺的具体实现。
 
 ### 8.2 GridRender（[SphericalSDFTerrainDesign.md](SphericalSDFTerrainDesign.md)）
 
@@ -838,7 +838,7 @@ sub=5: 10242 cell 20480 corner/tri 30720 edge
 
 ## 11. 顶点法线与 UE5 光照约定（重要结论 + 经验沉淀）
 
-> 本章是 R7 阶段（Triplanar 真实地表纹理）调试 Lit 模式时挖到的关键事实，**不属于纯几何拓扑但与渲染端的"几何法线方向"强相关**——若不沉淀于本稿（拓扑权威），下游任何模块（PMC 调试 mesh / R8.5 自研球面网格生产 mesh / R8+ WorldGen 法线烘焟）都可能在"顶点法线方向"上踩同一个坑。
+> 本章是 R7 阶段（Triplanar 真实地表纹理）调试 Lit 模式时挨到的关键事实，**不属于纯几何拓扑但与渲染端的"几何法线方向"强相关**——若不沉淀于本稿（拓扑权威），下游任何模块（PMC 调试 mesh / T 阶段自研球面网格生产 mesh / R8+ WorldGen 法线烘焙）都可能在"顶点法线方向"上踩同一个坑。
 
 ### 11.1 UE5 渲染管线的两条硬约定
 
@@ -920,8 +920,8 @@ R7 阶段把 R6 哈希色换成 Triplanar 真实地表纹理，材质从 Emissiv
 | --- | --- |
 | **PMC（IsoSphere 调试 mesh，R1~R10）** | 顶点法线**直接写 `+UnitCenter`（朝外）**，Tangents 留空。不调 KismetTangents——本路径每 Corner 展开 3 独立顶点，KismetTangents 等价 flat shading（[AgentWorkflow §3.13 / §3.14](AgentWorkflow.md)）|
 | **PTG（R11+ 生产 mesh）** | 顶点法线 = 朝外（球面外法）。R11 切换前必须显式验证：在 Buffer Visualization → World Normal viewmode 下，球面右半（朝光源一侧）应在 lit 后呈现"亮面"颜色（验证 `dot(N, L) > 0`）|
-| **R8+ WorldGen 法线烘焟** | 若 `FCellGeoData` 引入"per-cell 法线"字段（如山地法线扰动），应统一为"几何外法线方向"（朝外），下游材质 / mesh 直接消费，无需 sign flip |
-| **R8.5 cpp 顶点位移** | 任何沿径向的位移（`Pos = Dir·(R + Σ wᵢ · Elevᵢ · HeightScale)`）**不改变** 顶点法线方向（仍朝外）；切向位移会破坏 face_normal 与 vertex_normal 的一致性，必须重新烘焟法线 |
+| **R8+ WorldGen 法线烘焙** | 若 `FCellGeoData` 引入"per-cell 法线"字段（如山地法线扰动），应统一为"几何外法线方向"（朝外），下游材质 / mesh 直接消费，无需 sign flip |
+| **T 阶段 cpp 顶点位移** | 任何沿径向的位移（`Pos = Dir·(R + Σ wᵢ · Elevᵢ · HeightScale)`）**不改变** 顶点法线方向（仍朝外）；切向位移会破坏 face_normal 与 vertex_normal 的一致性，必须重新烘焙法线 |
 
 ### 11.6 一句话速记
 
@@ -935,4 +935,4 @@ R7 阶段把 R6 哈希色换成 Triplanar 真实地表纹理，材质从 Emissiv
 
 本稿一旦因 Grid 模块重构（如 `FSphereTopology::Build` 增加新字段、对偶定义变更）而需要更新，**必须同步更新所有引用本稿的下游主稿**——这是与 [AgentWorkflow.md §4.1](AgentWorkflow.md#41-跨阶段同步项检查表) 跨阶段同步项检查表平行的"基础设施稿"维护承诺。
 
-> **致后续维护者**：拓扑是几何刚性结构，不应轻易扩展字段。如确需新增（例如未来 R8.5 自研球面网格需要把顶点 Elevation 烘焟进 某个几何缓存结构），先在本稿 §3 / §8 中加一行字段说明 + 写入阶段、再改 cpp。**先文档、后代码**。
+> **致后续维护者**：拓扑是几何刚性结构，不应轻易扩展字段。如确需新增（例如未来 T 阶段自研球面网格需要把顶点 Elevation 烘焙进 某个几何缓存结构），先在本稿 §3 / §8 中加一行字段说明 + 写入阶段、再改 cpp。**先文档、后代码**。

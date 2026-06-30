@@ -1,6 +1,6 @@
 ﻿# AI Agent 工作流报告（TerraCivilization R1~R7 阶段总结）
 
-> 本文档基于 TerraCivilization 项目 R1（纯白材质）→ R7（Triplanar 真实地表）阶段中累积的协作经验，沉淀适合后续 R8+ 及自研球面网格（R8.5+）生产路线的 AI Agent 工作流规范。
+> 本文档基于 TerraCivilization 项目 R1（纯白材质）→ R7（Triplanar 真实地表）阶段中累积的协作经验，沉淀适合后续 R8+ 及自研球面网格（T 阶段+ TessellatedMesh）生产路线的 AI Agent 工作流规范。
 >
 > 阅读对象：本项目后续阶段的 AI 助手 / 维护者；也作为「AI 与人类配对编程」一般性参考。
 
@@ -91,13 +91,13 @@
 | §4 | 材质资产搭建（节点级 + Sampler Type + Inputs 表） | ✅ |
 | §5 | 验收清单（A~J 项可勾选） | ✅ |
 | §6 | 排错表（症状 → 根因 → 修复） | ✅ |
-| §7 | 与上下游关系（与 R<N-1> / R<N+1> / R8.5 自研网格同构性） | ✅ |
+| §7 | 与上下游关系（与 R<N-1> / R<N+1> / T 阶段自研网格同构性） | ✅ |
 | 附录 | 数值上限分析、参数调参参考、跨阶段同构性论证 | 推荐 |
 
 #### 1.3.2 必须做
 - §2 给出**直接可复制粘贴**的完整 HLSL Code，不要让用户"自己拼"。
 - §6 排错表必须列出每个已知踩坑的完整三段式（症状 / 根因 / 修复）。
-- §7 必须明确与上下游阶段的关系（关键约束：本项目 PMC 与 R8.5 自研网格共用同一套 HLSL。原 R11 PTG 同构性要求已作废）。
+- §7 必须明确与上下游阶段的关系（关键约束：本项目 PMC 与 T 阶段自研网格共用同一套 HLSL。原 R11 PTG 同构性要求已作废）。
 
 #### 1.3.3 禁止做
 - ❌ 在详稿里写「请参考 §X.Y」却不在 §6 排错表给出操作步骤。
@@ -278,6 +278,40 @@ cpp 落地后给用户一份"下一步该做什么"清单，包含：
 #### 2.4.2 `read_history_context`
 - 输入 contextID（在 `<system_reminder>` 中给出）
 - 用于读完整历史对话细节（参数、文件路径、返回值等）
+
+### 2.5 ⚠ 文件 / 资产删除策略：禁止主动调用删除命令
+
+> **用户偏好（2026-06-30 锁定）**：用户可能在不值守状态下让 Agent 长时间自跑，对话中弹出的删除型 terminal 命令（`Remove-Item` / `rm` / `del` 等）很难被及时同意，会阻塞工作流；同时"残留过时文件 / 临时脚本"在最终对话末尾集中列出由用户手动清理是更安全的做法。
+
+#### 2.5.1 硬规则
+- **不得**在工具调用中执行任何删除命令（`Remove-Item` / `rm -rf` / `del` / `git rm` / `unlink` / 任何破坏性 `mv -f` 覆盖）。
+- **不得**用 `edit_file` 把别的文件改成空内容来"伪删除"。
+- **可以**用 `edit_file` 将旧文件重写为短小的"已废弃 / 跳转 stub"占位（保留版本说明 + 跳转链接，约 5~10 行），让外部链接平滑迁移。
+
+#### 2.5.2 标准做法（替代删除）
+1. **重命名 / 迁移内容**：把内容迁到新文件后，将旧文件改写为废弃 stub（如 [R8.5_TessellatedMesh.md](R8.5_TessellatedMesh.md) → [TessellatedMeshDesign.md](TessellatedMeshDesign.md) 的实践）。
+2. **临时调试脚本**：放在 `Docs/_tmp/` 或 `Scripts/_tmp/` 子目录，文件名加 `tmp_` 前缀，便于一次性 grep 出来。
+3. **过时 cpp / 资产**：仅修改逻辑使其不被引用，不要 `Remove-Item`。
+
+#### 2.5.3 对话末尾"待清理清单"格式（强制）
+
+每次完成会引入"过时文件 / 临时脚本"的任务时，在最终回复**末尾**追加固定格式块：
+
+```
+### 待用户手动清理清单
+
+| # | 路径 | 类别 | 已无下游引用？ | 建议操作 |
+|---|------|------|----------------|----------|
+| 1 | C:\workspace\...\R8.5_TessellatedMesh.md | 废弃 stub | ✅ 是（已 grep 确认） | `Remove-Item <path> -Force` |
+| 2 | C:\workspace\...\Scripts\_tmp\xxx.ps1 | 临时调试脚本 | ✅ 是 | `Remove-Item <path> -Force` |
+```
+
+要求：
+- **每条都附完整绝对路径**（用户可直接复制粘贴）。
+- **类别**字段：`废弃 stub` / `临时调试脚本` / `过时 cpp` / `过时资产` / `临时日志` 等。
+- **已无下游引用**列必须先 grep 验证后再写 `✅ 是`，未验证则写 `⚠ 待复核`。
+- **建议操作**给出可直接执行的 shell 命令字符串，但**不要**自己尝试执行。
+- 若本次任务无任何待清理项，则无需追加该清单（保持回复整洁）。
 
 ---
 
@@ -893,7 +927,7 @@ SLW 本质是不透明渲染（写深度、参与 GBuffer），但内置"水下�
 
 完整 R8 SLW 实现见 [R8_ParametricTint.md §4.5.3](R8_ParametricTint.md)。
 
-**次选**（不推荐，仅作记录）：保留 Translucent，开启 Project Settings → Rendering → **Forward Shading** ✓ + 材质 Translucency 勾 Screen Space Reflections + Forward Shading 勾 High Quality Reflections。这条路会**全项目所有材质切到 Forward 渲染**——影响 Lumen / Nanite 兼容性，R8/R8.5 阶段不要为一个测试球开此项目级开关。
+**次选**（不推荐，仅作记录）：保留 Translucent，开启 Project Settings → Rendering → **Forward Shading** ✓ + 材质 Translucency 勾 Screen Space Reflections + Forward Shading 勾 High Quality Reflections。这条路会**全项目所有材质切到 Forward 渲染**——影响 Lumen / Nanite 兼容性，R8/T 阶段不要为一个测试球开此项目级开关。
 
 **末选**（伪反射，仅作 placeholder）：保留 Translucent + Default Lit，承认无真反射，把 sparkle 通过 Emissive 显式画出来。视觉够用但不是物理反射，跟相机角度 / 光源位置无关。R8 验收期已抛弃此路径。
 
@@ -1132,6 +1166,231 @@ Tangents = MoveTemp(AutoTangents);
 > - [APlanetTopologyDebugMesh::Rebuild](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp)（主 mesh，本节复盘对象，+UnitCenter）
 > - [APlanetTopologyDebugMesh::RebuildWaterMesh_](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp)（水面 SLW，§3.13 复盘对象，+UnitCenter）
 
+### 3.15 ⚠ SLW 水体光程随 1/cos(θ) 离散化导致的水面三角锯齿（§3.14 之后的子坑）
+
+#### 3.15.1 现象
+
+§3.14 修复主 mesh 顶点法线为 `+UnitCenter`（光滑朝外）后，主球昼夜分割线本身已经光滑、无三角棱面锯齿。**但水面 SLW 表面在昼夜分割线附近仍呈现与 sub=3 球面 1280 个三角形精确对应的色块状锯齿**——色调过渡按三角面分段而非连续。
+
+排查时首先排除的（不是这些）：
+1. ❌ 水面 mesh 顶点法线 flat → 已实测水面 mesh 顶点法线也是 `+UnitCenter` 光滑
+2. ❌ Z-fighting → 调高 `WaterSurfaceOffset` 锯齿不消失，甚至在更小 σ 下不调 Offset 也无锯齿
+3. ❌ 绕序错误 / KismetTangents → 水面 mesh 跟主 mesh 同样的法线工作流，均无问题
+4. ❌ 主 mesh 法线（已经是 `+UnitCenter`）
+
+实际根因是 **SLW 物理参数在球面拓扑上的尺度问题**——与几何法线无关。
+
+#### 3.15.2 根因：Beer-Lambert 衰减下的非线性光程敏感度
+
+SLW 用 Beer-Lambert 衰减计算水下颜色：
+
+```
+T(λ) = exp(-(σ_a + σ_s)(λ) · L)
+       L ≈ d / cos(θ)
+       d = WaterSurfaceOffset（几何厚度，恒定）
+       θ = 入射角，cos(θ) = dot(N_water, LightDir)
+```
+
+在昼夜分割线附近 `cos(θ) → 0` → `L → ∞`。Beer-Lambert 是 `exp(-σ·L)`，在 `σ·L ≈ 1` 数量级处颜色梯度变化最剧烈（指数函数对自变量最敏感的区段）。
+
+**虽然水面 mesh 几何法线光滑（`+UnitCenter` 在每顶点处朝外，三角面间法线光滑插值），但 `θ(x)` 经过 `1/cos` 这个奇异点附近的非线性映射后，肉眼对斜率的感知会沿三角形面分段离散化**：几个像素之内颜色就跨越多个数量级，三角形边界两侧的细微差异被放大成可见色块。**这个锯齿来自 SLW 物理着色函数本身，不来自几何法线**。
+
+#### 3.15.3 解法：等比例同时缩小 σ、放大 d，让 σ·d 不变但单位光程斜率变缓
+
+| 参数 | 原值（物理标准）| R8 修订默认值 | 倍率 |
+| --- | --- | --- | --- |
+| `WaterSurfaceOffset`（cm）| 0~1 | **100** | ×100 |
+| `Scattering Coefficients` | `(0.05, 0.18, 0.25)` | **`(0.0005, 0.0018, 0.0025)`** | ÷100 |
+| `Absorption Coefficients` | `(0.3, 0.08, 0.04)` | **`(0.003, 0.0008, 0.0004)`** | ÷100 |
+
+**等比例缩放为什么有效**：
+- 光学厚度积分 `(σ_a + σ_s) · d` 值近似不变 → 远处水体仍呈"清澈海蓝"色调，不破坏 SLW 物理观感
+- 单位光程上的衰减 `exp(-σ·L)` 对 `L` 的局部斜率 `≈ -σ · exp(-σ·L)`，σ 缩小 100× → 斜率绝对值缩小 100×
+- 当 `cos(θ)` 在三角形面间因法线插值产生小阶跃时，`L = d/cos(θ)` 的相对变化乘以缩小后的 σ → 颜色变化幅度也缩小到肉眼不可分辨级别
+
+**单独调一个参数都不行**：
+- 单独 Offset ×100 而不缩小 σ → 水体不透明、看不见海床（破坏物理观感）
+- 单独 σ ÷ 100 而不放大 Offset → 水体过于稀薄、看不到水色（丢失视觉质感）
+- **必须同向等比例缩放**
+
+#### 3.15.4 排查诊断流程：识别"光程锯齿 vs 法线锯齿"
+
+| 测试 | 现象 | 结论 |
+| --- | --- | --- |
+| 把水面 mesh Visibility 关掉 | 主球昼夜分割线**仍有锯齿** | 法线锯齿（§3.14） |
+| 把水面 mesh Visibility 关掉 | 主球昼夜分割线**光滑** | 锯齿来自水面层 |
+| 锯齿仅在水面层、且仅在昼夜分割线附近 | cos(θ) → 0 区域 | 光程锯齿（**本节**）|
+| 调小 σ（×0.01）+ 大幅调高 Offset（×100）锯齿消失 | 等比例缩放成功 | 锯齿确认是光程问题 |
+| 调小 σ 但不调 Offset → 锯齿消失但水体太稀 | 物理观感破坏 | 必须**同时**调 Offset |
+
+#### 3.15.5 与 §3.14 主 mesh 锯齿的并列关系
+
+| 现象 | 根因 | 修复 | 已落地位置 |
+| --- | --- | --- | --- |
+| 主 mesh 阴影边界三角棱面锯齿（§3.14） | 顶点法线 flat（KismetTangents 在独立顶点上等价 flat shading）| 顶点法线手填 `+UnitCenter`、Tangents 留空、不调 KismetTangents | [APlanetTopologyDebugMesh::Rebuild](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp) |
+| 水面 SLW 色块三角锯齿（**§3.15**）| 光程 `L = d/cos(θ)` 在 σ·L 较大时非线性敏感 | Offset × 100 + σ ÷ 100 = 光学厚度不变、衰减梯度变缓 | [PlanetTopologyDebugMesh.h `WaterSurfaceOffset` 默认 100](../Source/TerraCivilization/Public/Render/PlanetTopologyDebugMesh.h) + 用户在 `M_WaterShell` 材质中手填新 σ 值 |
+
+**两个坑独立**：前者是 vertex buffer 法线问题（修复后水面色块仍在），后者是 SLW 物理参数尺度问题（修复后主 mesh 锯齿仍在）。R8 阶段两者都已落地默认参数化解。
+
+#### 3.15.6 通用规则
+
+> **凡是 mesh 几何法线已经光滑（已修复 §3.14），但材质着色仍在阴影 / 光照 / 散射边界上呈三角面锯齿** —— 锯齿来自材质内部的非线性着色函数（如 Beer-Lambert `exp(-σ·d/cos(θ))`、SSS、Lumen IS），与 mesh 几何无关。
+>
+> **修法是参数缩放，不是几何细分**——把非线性函数中的关键尺度参数缩小，同时把另一个反向尺度参数放大同样倍数，保持物理观感的同时把斜率压平。
+>
+> SLW 专属修法：**Offset × N + (Scattering, Absorption) ÷ N** 等比例缩放，N = 100 在 sub=3 球面上验证有效；如未来主 mesh 提升细分级别（sub=4/5），N 可适当下调。
+
+---
+
+### 3.16 ⚠ 不要在 `BeginDestroy` 里手动 `Reset()` TUniquePtr 字段（T2 关闭编辑器经典踩坑）
+
+#### 3.16.1 现象
+
+关闭 Editor 时随机崩溃（PIE 不一定触发，纯 Editor 退出更明显），调用栈：
+
+```
+APlanetTessellatedMesh::BeginDestroy()
+  → FMeshDisplacementBuilder::~FMeshDisplacementBuilder()
+    → ~TMap<uint64, int32>
+    → ~TSparseArray< TTuple<uint64, int> >
+    → ReallocTo  ← EXCEPTION_ACCESS_VIOLATION
+```
+
+#### 3.16.2 根因
+
+`UObject::BeginDestroy()` 是 GC 流程的**早期回调**——对象在引擎逻辑层已被标记销毁、callback 已派发，但 **C++ 内存还活着、UPROPERTY 引用仍有效、后续阶段（FinishDestroy / 真正的 dtor）尚未执行**。
+
+我在 `BeginDestroy` 中调用 `Displacement.Reset() / MeshTopology.Reset() / CellTopology.Reset()`，等于**在 GC 早期阶段提前释放非 UObject 字段**。Editor 关闭路径会触发：
+
+1. 非常多的 actor `BeginDestroy` 在同一帧链式触发；
+2. 期间 GC 内部数据结构（用 `TSparseArray<TTuple<...>>` 实现的 `TSet` / `TMap` 池）会做 `ReallocTo` 重定位；
+3. 我已经手动析构过的 `TMap<uint64, int32> CoarseTriIdByCellTriple` 内存被释放了一次；
+4. 之后编译器生成的 `~APlanetTessellatedMesh()` 又试图析构同一份 `TUniquePtr` —— 此时 `TUniquePtr` 内部 ptr 已是 nullptr 没事，但 builder 内的 TMap 元数据已被破坏 → `~TSparseArray::ReallocTo` 试图 free 一块脏内存 → AV。
+
+#### 3.16.3 正确做法
+
+> **TUniquePtr 等非 UObject 字段交给编译器生成的 actor dtor 自动释放，不要 override `BeginDestroy` 来手动 Reset。**
+
+```cpp
+// 头文件：根本不声明 BeginDestroy。
+class TERRACIVILIZATION_API APlanetTessellatedMesh : public AActor {
+    // 只显式声明析构和 FVTableHelper 构造（前向声明类型 + UHT 联调所需）。
+    APlanetTessellatedMesh();
+    APlanetTessellatedMesh(FVTableHelper& Helper);
+    virtual ~APlanetTessellatedMesh();
+};
+
+// .cpp 中：
+APlanetTessellatedMesh::~APlanetTessellatedMesh() = default;        // ★ 自动展开 TUniquePtr 析构
+APlanetTessellatedMesh::APlanetTessellatedMesh(FVTableHelper& H) : Super(H) {}
+// 完全不要 override BeginDestroy()。
+```
+
+参考样板：[`PlanetTopologyDebugMesh.cpp`](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp) 中 R8 阶段的 actor 也是这种写法——它持有 `TUniquePtr<FSphereTopology> / TUniquePtr<FWorldGenerator>` 等多个非 UObject 字段，但**整个文件没有 override `BeginDestroy`**，从未崩溃。
+
+#### 3.16.4 例外：什么时候才需要 override `BeginDestroy`？
+
+仅当 actor 持有的资源**必须比真正的 dtor 更早释放**时，才考虑 override：
+
+| 场景 | 是否要 override BeginDestroy |
+| --- | --- |
+| `TUniquePtr<非 UObject 类>`（如 `FSphereTopology` / `FMeshDisplacementBuilder`）| ❌ 不要——编译器生成的 dtor 自动释放，时机正确 |
+| 取消 `FWorldDelegates::OnPostWorldCleanup` 等订阅 | ✅ 可以——但更推荐放在 `~Actor()` 中（`PlanetTopologyDebugMesh` 写法）|
+| 释放 RHI 资源 / GPU buffer | ✅ 必须——`BeginDestroy` 是 GPU 资源解绑的官方时机 |
+| 通知其他 UObject 解除引用 | ✅ 可以——此时其他 UObject 仍有效 |
+
+#### 3.16.5 验证清单
+
+- [ ] **grep 检查**：项目中所有 `override.*BeginDestroy` 都不能 `Reset()` TUniquePtr（应当是 RHI / 委托取消订阅）。
+- [ ] **关闭 Editor 测试**：放入 actor → 编辑器中拖动属性 → 关闭 Editor，观察是否有 ACCESS_VIOLATION 弹窗。
+- [ ] **PIE 进出测试**：与 §3.10 / §3.11 配合，确认进出 PIE 不丢材质、不崩溃。
+
+#### 3.16.6 一句话速记
+
+> **BeginDestroy ≠ C++ 析构函数**——前者是 GC 早期回调（对象逻辑死、内存还活），后者是真正释放内存。**TUniquePtr 字段要交给 C++ 析构函数处理，不要在 GC 早期阶段抢着 Reset。**
+
+---
+
+### 3.17 ⚠ R8 PS 端的 c0/c1/c2 是**三角形级常量**——T3 共享顶点路径会破坏这一假设导致整球破碎（T3 经典踩坑）
+
+> **修订历史**：2026-06-30 第一版诊断把根因归为"UV0 漏写 → c2 默认为 cell 0 → PS 错选"。修复后视觉症状不变 → 重新推演发现真正根因是**共享顶点路径下，邻接 mesh 三角形对同一个共享顶点写入了不同的 (c0, c1, c2) 代表组**，光栅化插值后 PS 端解出毫无意义的 cell ID。"UV0 漏写"是早期版本的附属症状之一，不是根因。
+
+#### 3.17.1 现象
+
+T3 拖入 [APlanetTessellatedMesh](../Source/TerraCivilization/Public/Render/PlanetTessellatedMesh.h) actor、挂上同一份 R8 合规材质 `M_TopologyDebug_R8`，与右侧 R8 的 [APlanetTopologyDebugMesh](../Source/TerraCivilization/Public/Render/PlanetTopologyDebugMesh.h) 并排：
+
+- **R8 actor**：每个 hex/pent 内部颜色一致，cell 边界整齐（17 配方 placeholder 视觉）
+- **T3 actor**：依稀可见 hex 形状（颜色块尺寸与 R8 接近），但**每个 hex 内部按 mesh 三角形粒度破碎**——sub=4 的每个三角形都呈现一块独立颜色，相邻三角形之间颜色完全不同；Output Log `✓ R8 compliance (all 17 inputs present & connected)`，无 Error
+
+#### 3.17.2 根因（订正版）
+
+R8 PS 端的 17-input Custom 节点（详见 [SphericalSDFTerrainDesign.md §3.2.2](SphericalSDFTerrainDesign.md) / [PlanetTopologyDebugMesh.cpp L488~L545](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp)）的 **3 个候选 cell 编码布局**是：
+
+```
+UV0.xy = (HiC, LoC)   ← Cell C 的 CellId 拆分（R8 把 UV0 借给 c2）
+UV1.xy = (HiA, LoA)   ← Cell A 的 CellId 拆分
+UV2.xy = (HiB, LoB)   ← Cell B 的 CellId 拆分
+UV3.xy = (OneHot.x, OneHot.y) — R3 重心权重，R4+ 由 PS 自算，仅作 hint
+```
+
+**R8 PS 端的核心隐含假设（从未明文写出但事实存在）**：
+
+> **每个渲染三角形内部，光栅化插值出的 (c0, c1, c2) 必须是常量**——也就是说三角形的 3 个顶点必须**写入完全相同的一组 (HiA,LoA, HiB,LoB, HiC,LoC)**，光栅化后 UV0/UV1/UV2 在三角形内部是常量，PS 端解出的 c0/c1/c2 仍然是同一组（A, B, C），与该三角形对应的 primal 三角形 1:1 对应。
+
+R8 通过"独立顶点 + 三个顶点写同一组"自然满足这一假设：
+
+```cpp
+// R8：每个 Corner（primal 三角形）展开 3 独立顶点，3 个顶点写同一组
+Vertices.Add(PA); UV0=(HiC,LoC); UV1=(HiA,LoA); UV2=(HiB,LoB); UV3=(1,0);  // Role 0
+Vertices.Add(PB); UV0=(HiC,LoC); UV1=(HiA,LoA); UV2=(HiB,LoB); UV3=(0,1);  // Role 1
+Vertices.Add(PC); UV0=(HiC,LoC); UV1=(HiA,LoA); UV2=(HiB,LoB); UV3=(0,0);  // Role 2
+```
+
+T3 第一版基于"共享顶点节省内存 / 自然光滑"的朴素优化，把渲染顶点缓冲设为 `MeshTopology->PrimalVertsUnit`（共享顶点）。**但共享顶点路径在物理上不可能满足 R8 PS 端的 c 三角形级常量假设**：
+
+- 一个共享 mesh 顶点 V 同时被 5/6 个邻接 mesh 三角形使用
+- 每个邻接三角形需要 V 写入"该三角形所属粗 Cell 三角形的 (cA, cB, cC)"——但**5/6 个邻接三角形对应的粗 Cell 三角形通常不同**，需要的 (cA, cB, cC) 也不同
+- V 只能保留**一组** (c0, c1, c2)，T3 第一版用 `FindRepresentativeCoarseTri_` 挑"权重最大的代表组"——这只对 V 自身位置正确，**对它周围的三角形则是错的**
+- 当一个三角形 T 的 3 个顶点 V0/V1/V2 各自挑了不同的代表组时，光栅化器把 3 组 (HiA,LoA) 做线性插值——**插值后的 (Hi, Lo) 在 PS 端 round 出来是个完全无意义的 cell ID**
+- PS 端球面 Voronoi `argmax(dot(dir, V_i))` 在 3 个**乱七八糟的 cell 候选**间仲裁，最终选到的 cell 不属于该位置 → 该 fragment 显示错误的 layer 颜色 → 整球按 mesh 三角形粒度破碎
+
+#### 3.17.3 诊断流程
+
+| 步骤 | 工具 | 看什么 | 期望 |
+| --- | --- | --- | --- |
+| 1 | grep cpp | 顶点缓冲长度 = `NumMeshVerts` 还是 `NumMeshTris*3` | **必须是 `NumMeshTris*3`**（独立顶点） |
+| 2 | grep cpp | `Triangles.Add(Tri.X/.Y/.Z)`（共享索引）vs `Triangles.Add(BaseIdx+0/1/2)`（独立索引）| 必须是 `BaseIdx+i` |
+| 3 | 对照 R8 cpp | `for CornerIdx ... Vertices.Add(PA/PB/PC)` 的"3 独立顶点"模式 | T3 必须采用同款"每三角形 3 顶点"模式 |
+| 4 | 顶点缓冲 dump | 同一三角形 3 个顶点的 UV1 值 | **必须完全相等**（HiA, LoA 三顶点同值） |
+
+#### 3.17.4 修复
+
+T3 [PlanetTessellatedMesh.cpp::RebuildTerrainMesh_](../Source/TerraCivilization/Private/Render/PlanetTessellatedMesh.cpp) 必须切换到"独立顶点 + 三角形级 c 一致"路径：
+
+1. 顶点缓冲长度 = `NumMeshTris * 3`
+2. 对每个 mesh 渲染三角形 T：
+   - 通过 `MeshTopology->PrimalTriTreeNodes[T]` 沿 `Father` 爬升 `MeshSub - CellSub` 步，拿到所属粗 Cell 三角形的 `(cA, cB, cC)`
+   - 把 `(cA, cB, cC)` 作为该三角形 3 个独立顶点的**共同**写入值
+3. UV3 用 R8 同款 OneHot `(1,0)/(0,1)/(0,0)` 三角色循环
+4. 顶点位置 / 法线仍按 mesh 顶点查 `PrimalVertsUnit + VertexElevCM` 取值——保证邻接三角形在共享 mesh 顶点处的位置 / 法线**完全相等** → 视觉上仍是光滑共享顶点 mesh，无 flat shading 锯齿
+
+> "顶点位置共享 + 顶点 UV 不共享"是 R8 一贯的设计——T 阶段沿用即可。共享顶点带来的 "8KB → 3KB 内存节省" 在球面渲染量级下完全不重要，但 PS 端的 c 三角形级常量假设必须满足。
+
+#### 3.17.5 通用规则
+
+> **任何复用 R8 材质的渲染路径，渲染三角形必须采用"独立顶点 + 同一组 (c0, c1, c2) 写入 3 个顶点"模式。**
+> **共享顶点（一个 mesh 顶点被多个三角形共享同一组 UV）会破坏 R8 PS 端的 c 三角形级常量假设，导致 PS 仲裁出错乱的 cell ID。**
+
+附属规则：
+
+- UV1 / UV2 / UV0 的 (Hi, Lo) 拆分编码必须 **3 个候选 cell 全部写**——任何一个漏写 / 全 0 都会让 PS 的球面 Voronoi 仲裁默认把该位置当成 cell 0
+- 顶点位置 / 法线**应当**仍按"共享 mesh 顶点位置"取值（即三角形 T 的 3 个独立 UV 顶点的 Position 仍取 `PrimalVertsUnit[Tri.X/Y/Z] * (R + ElevCM)`），保证视觉光滑
+- 三角索引必须用 `BaseIdx + 0/1/2` 顺序模式（与 R8 一致），不能用 `MeshTopology->PrimalTris[T].X/Y/Z`（那是共享索引）
+
+#### 3.17.6 一句话速记
+
+> **R8 PS 端 c0/c1/c2 = 三角形级常量**——三角形 3 顶点必须写同一组 c，光栅化插值后才解得回正确的 cell。共享顶点必然破坏这一假设，必须用"独立顶点 + 同 c 三写"。位置 / 法线仍可共享 mesh 顶点取值，所以视觉无锯齿。
+
 ---
 
 ## 4. 文档维护规范
@@ -1238,12 +1497,12 @@ per-cell noise on δ  # R6 旧路径
 
 ## 6. 跨期同构性约束（贯穿 R1~R11，最重要的隐性约束）
 
-> 当前 PMC 调试 mesh（R1~R8）与 R8.5+ 自研球面网格生产路线必须共用同一套着色公式。
+> 当前 PMC 调试 mesh（R1~R8）与 T 阶段+ 自研球面网格生产路线必须共用同一套着色公式。
 
 实现守则：
-- 所有几何 / 着色公式同时适配 PMC（顺点流 UV 还原 c0/c1/c2）与自研网格（cpp 端预计算 acos 权重灬顶点）
-- LUT 纹理（CellAttrLUT / CellDirLUT 与后续 4 通道材质 LUT）在 R8.5 及以后仍生效、表示语义一致
-- 所有 HLSL Custom Code 在 R8 → R8.5 mesh 切换时**应当零改动复用**（PS 收到的 3 个权重语义从"重心坐标"改为"acos 软权重"，但后续混合公式完全一致）
+- 所有几何 / 着色公式同时适配 PMC（顺点流 UV 还原 c0/c1/c2）与自研网格（cpp 端预计算"权重"灬顶点）
+- LUT 纹理（CellAttrLUT / CellDirLUT 与后续 4 通道材质 LUT）在 T 阶段及以后仍生效、表示语义一致
+- 所有 HLSL Custom Code 在 R8 → T 阶段 mesh 切换时**应当零改动复用**（PS 收到的 3 个权重的具体语义会随 D3 决策演进而变化——T 阶段拍板为 dot 线性插值；如未来升级到 acos 软权重或高次方插值，需同步在 [TessellatedMeshDesign.md](TessellatedMeshDesign.md) §1.3 D3 行更新）
 - 详稿每章 §7 必须明确"与上下游阶段的关系"（包括不再引用的 R11 PTG 路线需明确标记为"已废弃"）
 
 具体到当前阶段：
@@ -1251,8 +1510,8 @@ per-cell noise on δ  # R6 旧路径
 | 阶段 | mesh | 三个权重来源 | 区别 |
 | --- | --- | --- | --- |
 | R3~R8 | IsoSphere primal | 顶点流 UV 还原 c0/c1/c2 + 硬件重心坐标 | 无 Elevation 位移 |
-| R8.5+ | 自研 sub+2 | cpp 预计算 "最近 3 Cell + acos 三方权重" 灬进顶点 UV1/UV2/UV3 | 含径向位移 + 法线重算 |
-| ~~R11 PTG~~ | ~~PTG 高细分球皮~~ | ~~GPU FindNearestCell + acos~~ | ❌ 已废弃（R8.5 自研网格取代）|
+| T 阶段+ | 自研 `MeshTopology = FSphereTopology(4)` 独立实例 | cpp 端按 mesh 顶点 → 父 CellTopology 三角形 → 三 Cell `dot` 线性插值 + 多重三角形算术平均；详见 [TessellatedMeshDesign.md §3](TessellatedMeshDesign.md) | 含径向位移；顶点法线直取 `+UnitCenter`、Tangent 留空、不调 KismetTangents |
+| ~~R11 PTG~~ | ~~PTG 高细分球皮~~ | ~~GPU FindNearestCell + acos~~ | ❌ 已废弃（T 阶段自研网格取代）|
 ---
 
 ## 7. 协作守则速查卡
@@ -1272,6 +1531,7 @@ per-cell noise on δ  # R6 旧路径
 | 用户截图 | 必须 read_image |
 | 多文件读取 | 并行 |
 | 多处改动同文件 | multi_replace |
+| **删除文件 / 资产 / 过时脚本** | **禁止主动调用 `Remove-Item`/`rm`/`del`**；改写为废弃 stub 或保留原状，回复**末尾**统一列出"待用户手动清理清单"（详见 §2.5）|
 
 ---
 
@@ -1337,15 +1597,17 @@ R8+ 要预算下一期的 ms 增量、显存占用、Sampler 资源占用。
 - 反射诊断 Inputs 从 R7 的 14 项升级到 ≈18–20 项（新增 4 LUT 与 Triplanar 参数）
 - **不依赖 W4**：BaseTexIdx 仍走 R3 Knuth 哈希 placeholder
 
-### R8.5（自研球面网格无 LOD）
-- 渲染 mesh 切到 `FSphereTopology(SubdivisionLevel + 2)` 的 primal mesh
-- cpp 端预计算每个细顶点的（13 Cell + acos 三方权重 w[3]）
-- 径向位移：`Pos = Dir·(R + Σ w_i · Elev_i · HeightScale)`
-- **强制使用 `KismetTangents`** 重算法线（不手填，避免 Lit 漆黑）
-- 拾取路线从"PTG RuntimeMesh 碰撞"改为"自研 ProcMesh 碰撞 + Hit.ImpactPoint 径向归一化"
+### T 阶段（TessellatedMesh、自研球面网格无 LOD，详见 [TessellatedMeshDesign.md](TessellatedMeshDesign.md)）
+- 子里程碑 T1~T5 逐文件验收（与 R4 / W1 验收风格对齐）
+- 主验收 actor `APlanetTessellatedMesh` 同时持有两个独立 `FSphereTopology` 实例：逻辑层 `CellTopology`（默认 sub=3）+ 渲染层 `MeshTopology`（默认 sub=4，独立可调）
+- cpp 端顺 mesh 顶点预计算：`Cells[v].CornerIds` 拿 5/6 个粗 mesh 三角形 → `FTriTreeNode->Father` 上爬 `MeshSub - CellSub` 次 → 得到粗 CellTopology 三角形 → 三 Cell `dot` 权重线性插值 → 多重三角形取算术平均
+- 径向位移：`Pos = Dir·(R + H_macro)`，不进 GPU WPO
+- **顶点法线直取 `+UnitCenter`、Tangent 留空、不调 KismetTangents**（径向位移不改变法线方向）
+- fbm 高频细节（`H_micro`）接口预留但 T 阶段主验收不吻合，留后续子里程碑
+- 拾取路线：`Hit.ImpactPoint` 径向归一化 → `FSphereTopologyQuery::FindNearestCell`（使用 `CellTopology`、不是 `MeshTopology`）
 
 ### W4（联调验收）
-- R8 + R8.5 联调通过后，把 R3 Knuth 哈希 placeholder 换为 `Def->LayerIndex` + `Def->FTerrainMaterialParams` 真实查表
+- R8 + T 阶段联调通过后，把 R3 Knuth 哈希 placeholder 换为 `Def->LayerIndex` + `Def->FTerrainMaterialParams` 真实查表
 - SDF 端仅一行 cpp 改动 + 反射诊断参数名更新
 
 ### R9（多套 LUT）
@@ -1361,7 +1623,7 @@ R8+ 要预算下一期的 ms 增量、显存占用、Sampler 资源占用。
 - hex 边发光描边、选中即时反馈
 
 ### 废弃路线提醒
-- 原计划的 "R11 PTG 路线"（渲染从 IsoSphere 切到 PTG 高细分球皮 + GPU FindNearestCell）**已废弃**——R8.5 自研球面网格已取代该路线的全部职责。SDF 主稿 §14 仅作历史档案保留（其中 §14.7 球面重心坐标证明仍有效，被 §16.3 复用）。在 R8.5 阶段以后，可以一次性删除 `ProceduralTerrainGenerator` 插件依赖与 `PlanetBinder` 中的 PTG 桥接代码。
+- 原计划的 "R11 PTG 路线"（渲染从 IsoSphere 切到 PTG 高细分球皮 + GPU FindNearestCell）**已废弃**——T 阶段自研球面网格已取代该路线的全部职责。SDF 主稿 §14 仅作历史档案保留（其中 §14.7 球面重心坐标证明仍有效，被 §16.3 复用）。在 T 阶段以后，可以一次性删除 `ProceduralTerrainGenerator` 插件依赖与 `PlanetBinder` 中的 PTG 桥接代码。
 
 ---
 
@@ -1382,5 +1644,5 @@ R8+ 要预算下一期的 ms 增量、显存占用、Sampler 资源占用。
 ## 附录 B：本文档归档时间线
 
 - 创建于：R7 完成后（19 个真实地表 layer 的 Triplanar 通路验收通过）
-- 下次更新：R8.5 完成后（自研球面网格与 PTG 路线废弃需補充新章节）
+- 下次更新：T 阶段完成后（自研球面网格与 PTG 路线废弃需補充新章节）
 - 长期目标：作为 R10/R11 阶段的 "AI 协作 baseline"

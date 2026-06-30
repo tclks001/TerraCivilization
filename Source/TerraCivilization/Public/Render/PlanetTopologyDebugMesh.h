@@ -326,11 +326,20 @@ public:
 
     /**
      * R8：水面 mesh 相对 Radius 的径向偏移（cm）。
-     * R8 阶段建议 0.0；R8.5 自研球面网格上线后可调（让水面贴合在 Elevation=0 等高面上）。
+     *
+     * R8 阶段默认 = 100 cm。该值不能再调低（降到 ~10 cm 以下会触发 [AgentWorkflow §3.15]
+     *（../../../Docs/AgentWorkflow.md）记录的"SLW 光程随 1/cos(θ) 离散化导致的水面三角锯齿"
+     * 现象——昼夜分割线附近 dot(N, L) → 0 时水体光程急剧拉长，Beer-Lambert 衰减按 mesh
+     * 三角面分段呈现锯齿色块）。
+     *
+     * 与 §4.5.3.3 SLW 推荐值（Scattering / Absorption 均较物理标准缩小 100×）配套使用：
+     * Offset × 100 + 浓度 ÷ 100 = 光学厚度积分近似不变，但单位光程衰减梯度变平缓 → 锯齿肉眼不可见。
+     *
+     * R8.5 自研球面网格上线后可继续调高（让水面贴合在 Elevation=0 等高面上）。
      */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|R8",
-              meta = (ClampMin = "-1000.0", ClampMax = "1000.0"))
-    float WaterSurfaceOffset = 0.0f;
+              meta = (ClampMin = "-1000.0", ClampMax = "10000.0"))
+    float WaterSurfaceOffset = 100.0f;
 
     /**
      * R8：是否启用 R8 placeholder 配方哈希（默认 true，R8 主验收期）。

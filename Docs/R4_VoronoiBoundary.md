@@ -4,7 +4,7 @@
 >
 > 阅读本文档前请先理解 [SDF 设计稿 §2.1](SphericalSDFTerrainDesign.md#21-球面拓扑事实测地线球面--戈德堡多面体的对偶) 关于"primal mesh / dual hex 网格 / 1/3 角块"的拓扑事实。
 >
-> ⚠ **路线调整说明（2026-06-29）**：本文档中提到的"R11 PTG 路线零改动复用"等表述**已过期**——原 R11 PTG 路线已废弃，新生产路线是 [SDF 主稿 §16](SphericalSDFTerrainDesign.md#16-自研球面网格生产路线) 的"R8.5 自研球面网格"。但 R4 的 PS HLSL **仍然零改动复用**到 R8.5，区别仅在 c0/c1/c2 来源（R8.5 由 cpp 端预计算灌顶点 UV1/UV2/UV3，而非 GPU FindNearestCell）。本文涉及"R11 PTG"的具体表述请按"R8.5 自研球面网格"理解。
+> ⚠ **路线调整说明（2026-06-29）**：本文档中提到的"R11 PTG 路线零改动复用"等表述**已过期**——原 R11 PTG 路线已废弃，新生产路线是 [SDF 主稿 §16](SphericalSDFTerrainDesign.md#16-自研球面网格生产路线) 的"T 阶段自研球面网格（TessellatedMesh）"。但 R4 的 PS HLSL **仍然零改动复用**到 T 阶段，区别仅在 c0/c1/c2 来源（T 阶段由 cpp 端预计算灌顶点而非 UV 还原）。详见 [TessellatedMeshDesign.md](TessellatedMeshDesign.md)。
 
 ---
 

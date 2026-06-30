@@ -1173,19 +1173,19 @@ R8 阶段（[SphericalSDFTerrainDesign.md §11.x](SphericalSDFTerrainDesign.md)�
 
 **R8 阶段实际只需 0 行改动**——这是 [WorldGenDesign.md §10.1](WorldGenDesign.md) "WorldGen 改了，渲染端零改动"承诺的兑现。
 
-> ⚠ **路线调整（2026-06-29）**：上面"R8 阶段随 W4 完成而完成"的描述**已不准确**。新路线是 R8（参数化 Tint，仍用 Knuth placeholder）→ R8.5（自研球面网格）→ **W4 联调验收**——W4 cpp 已完成，但实际把 BaseTexIdx 从 placeholder 切换为 `Def->LayerIndex` 的动作发生在 R8.5 联调阶段。详见 [SphericalSDFTerrainDesign.md §11 Roadmap](SphericalSDFTerrainDesign.md#11-实施-roadmapm-step) 与 [SphericalSDFTerrainDesign.md §16](SphericalSDFTerrainDesign.md#16-自研球面网格生产路线)。
+> ⚠ **路线调整（2026-06-29 / 2026-06-30 命名修订）**：上面"R8 阶段随 W4 完成而完成"的描述**已不准确**。新路线是 R8（参数化 Tint，仍用 Knuth placeholder）→ T 阶段（自研球面网格 / TessellatedMesh）→ **W4 联调验收**——W4 cpp 已完成，但实际把 BaseTexIdx 从 placeholder 切换为 `Def->LayerIndex` 的动作发生在 T 阶段联调期。详见 [SphericalSDFTerrainDesign.md §11 Roadmap](SphericalSDFTerrainDesign.md#11-实施-roadmapm-step) 与 [TessellatedMeshDesign.md](TessellatedMeshDesign.md)。
 
-### B.2 R9 多 LUT、R8.5 自研球面网格、R10 LOD、R11 高亮均不影响 W4
+### B.2 R9 多 LUT、T 阶段自研球面网格、R10 LOD、R11 高亮均不影响 W4
 
 | 阶段 | SDF 端动作 | W4 是否需要适配 |
 | --- | --- | --- |
 | R8（参数化 Tint）| 加 4 通道 LUT + 17 种 tint 配方（仍用 Knuth placeholder）| ❌ 不需要——R8 不消费 W4 |
-| R8.5（自研球面网格）| mesh 切到 sub+2 + cpp 端径向位移 + 把 BaseTexIdx 从 placeholder 切到 `Def->LayerIndex` | ⚠ 仅消费 `Elevation`（W3 已就绪）+ `LayerIndex`（W4 已就绪），无需 W4 改动 |
+| T 阶段（TessellatedMesh）| mesh 切到独立 `MeshTopology = FSphereTopology(MeshSubdivisionLevel)`（默认 sub=4）+ cpp 端径向位移 + 把 BaseTexIdx 从 placeholder 切到 `Def->LayerIndex` | ⚠ 仅消费 `Elevation`（W3 已就绪）+ `LayerIndex`（W4 已就绪），无需 W4 改动 |
 | R9 Decor/Owner/Fog 多 LUT | 加独立 LUT 通道 | ❌ 不需要 |
 | R10 自研网格 LOD | 远 sub+0 / 近 sub+2 / 超近 sub+3 | ❌ 不需要 |
 | R11 高亮描边 | 接入 §15 高亮 LUT | ❌ 不需要 |
-| ~~原 R11 PTG 路线~~ | ❌ 已废弃（被 R8.5 取代）| — |
-| ~~原 R12 WPO~~ | ❌ 已废弃（被 R8.5 cpp 端位移取代）| — |
+| ~~原 R11 PTG 路线~~ | ❌ 已废弃（被 T 阶段取代）| — |
+| ~~原 R12 WPO~~ | ❌ 已废弃（被 T 阶段 cpp 端位移取代）| — |
 
 ### B.3 W5/W6 在 W4 之上的增量
 

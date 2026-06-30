@@ -4,7 +4,7 @@
 >
 > 阅读本文档前必须先理解 [R5_SharpenSoftEdge.md](R5_SharpenSoftEdge.md) §1 的“球面有符号弧度距离 δ”——R6 不修改 R5 的 δ 公式，只是在调用 R5 之前把 fragment 方向 dir 做一次球面切向偏移。
 >
-> ⚠ **路线调整说明（2026-06-29）**：本文档中"R11 PTG 路线下零修改"等表述**已过期**——原 R11 PTG 路线已废弃，新生产路线是 [SDF 主稿 §16](SphericalSDFTerrainDesign.md#16-自研球面网格生产路线) 的"R8.5 自研球面网格"。R6 dir 切向偏移公式 + 噪声扰动**仍然零改动**搬运到 R8.5（dir = normalize(WorldPos - PlanetCenter) 起点不变）。
+> ⚠ **路线调整说明（2026-06-29）**：本文档中"R11 PTG 路线下零修改"等表述**已过期**——原 R11 PTG 路线已废弃，新生产路线是 [SDF 主稿 §16](SphericalSDFTerrainDesign.md#16-自研球面网格生产路线) 折叠到 [TessellatedMeshDesign.md](TessellatedMeshDesign.md) 的"T 阶段自研球面网格"。R6 dir 切向偏移公式 + 噪声扰动**仍然零改动**搬运到 T 阶段（dir = normalize(WorldPos - PlanetCenter) 起点不变）。
 
 ---
 

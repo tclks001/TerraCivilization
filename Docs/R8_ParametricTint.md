@@ -1,10 +1,10 @@
 ﻿# R8：参数化 Tint 路径（3 套 PBR 基础 + 4 通道 LUT 微调 + 水面层）
 
-> 本文档是 [SphericalSDFTerrainDesign.md §16.1](SphericalSDFTerrainDesign.md#161-r8-参数化-tint--水面层mesh-不变只改材质) 的独立落地文档，与 [R7_TerrainTriplanar.md](R7_TerrainTriplanar.md) 风格一致。
+> 本文档是 [SphericalSDFTerrainDesign.md §16](SphericalSDFTerrainDesign.md#16-自研球面网格生产路线) 占位段下"R8 参数化 Tint + SLW 水面层"路线的独立落地文档，与 [R7_TerrainTriplanar.md](R7_TerrainTriplanar.md) 风格一致。
 >
 > 阅读本文档前必须先理解 [R7_TerrainTriplanar.md](R7_TerrainTriplanar.md) §1~§4 的"三层 Triplanar 加权混合"管线——R8 不修改 R4/R5/R6 的 dir / dirP / w[3] 几何链路，仅在 R7"三层 Triplanar 真实采样"之后插入"per-cell 多通道参数微调"，把 19 张独立纹理路径替换为 3 张共享基础套件 + 4 张 LUT 派生。
 >
-> ⚠ **路线说明（2026-06-29）**：本期是 [SDF 主稿 §11 Roadmap](SphericalSDFTerrainDesign.md#11-实施-roadmapm-step) 调整后的新 R8——**不消费 W4 输出**。`CellAttrLUT.R` 写入的 BaseTexIdx 与材质 LUT 中的 17 种地形配方索引继续沿用 R3 的 Knuth 哈希 placeholder。W4 真实查表（`Def->LayerIndex` + `Def->FTerrainMaterialParams`）推迟到 R8.5 自研球面网格联调阶段才接入。
+> ⚠ **路线说明（2026-06-29）**：本期是 [SDF 主稿 §11 Roadmap](SphericalSDFTerrainDesign.md#11-实施-roadmapm-step) 调整后的新 R8——**不消费 W4 输出**。`CellAttrLUT.R` 写入的 BaseTexIdx 与材质 LUT 中的 17 种地形配方索引继续沿用 R3 的 Knuth 哈希 placeholder。W4 真实查表（`Def->LayerIndex` + `Def->FTerrainMaterialParams`）推迟到 T 阶段自研球面网格（TessellatedMesh，详见 [TessellatedMeshDesign.md](TessellatedMeshDesign.md)）联调阶段才接入。
 
 ---
 
@@ -38,7 +38,7 @@ R4/R5/R6 几何链路（Voronoi 边、软边过渡、噪声扰动）原封保留
 | 17 种地形配方 | 在 cpp 端硬编码于材质 LUT（R8 阶段）| 由 W4 `FTerrainMaterialParams` DataAsset 配置 —— W4 联调时再切，R8 阶段先用 placeholder |
 | Forest Canopy 角色 | 作为 Overlay 层，与 Base 双层 lerp | 作为独立 Base —— 但 17 种配方里只有 Forest.* 真正用到森林纹理，独立 Base 浪费一个采样槽 |
 | 水面层方案 | 独立 sub=3 球皮 Actor + 半透明水材质 | 写到主材质里（按 BaseTexIdx 切水/陆）—— 主材质会变得过于复杂，且无法做半透明深度淡入 |
-| 水面层 mesh 半径 | `GlobeRadius + WaterSurfaceOffset`（R8 阶段 Offset=0）| `GlobeRadius` 恒定 —— R8 阶段地形球半径恒定，水面与地形重合，必须分开验收（关掉水面看地形 / 关掉地形看水面）|
+| 水面层 mesh 半径 | `GlobeRadius + WaterSurfaceOffset`（R8 阶段 Offset 默认 = 100 cm）| `GlobeRadius` 恒定 —— R8 阶段地形球半径恒定。Offset = 100 cm 是为了改善§3.15 记录的"光程三角锁齿"补偿与 Scattering/Absorption 缩小 100× 匹配；T 阶段起随 Elevation 起伏后只盖海洋区 |
 
 ---
 
@@ -98,7 +98,7 @@ $$
 |  |  | B | RoughnessMin | [0, 1] |
 |  |  | A | RoughnessMax | [0, 1] |
 | `LUT3_NSpec` | 1×N / `PF_FloatRGBA` | R | NormalStrength | [0, 4]，1=不变 |
-|  |  | G | HeightScale（R8.5 用，R8 写但不读）| [0, 2] |
+|  |  | G | HeightScale（T 阶段用，R8 写但不读）| [0, 2] |
 |  |  | B | SpecularBoost | [0, 4] |
 |  |  | A | TriplanarScale Multiplier | [0.1, 10]，1=不变 |
 
@@ -149,9 +149,9 @@ sample → linear RGB                          (BaseColor sRGB → 自动 linear
 
 调试师在编辑器里看到的"绿色 Tint"应该填 `(0.4, 0.7, 0.3)`（linear），不是 sRGB 的 `(0.6, 0.85, 0.55)`。
 
-### 1.7 与 R8.5 自研球面网格的同构性
+### 1.7 与 T 阶段自研球面网格的同构性
 
-R8 不改 dir / dirP / w[3]——这些公式在 R8.5 切到自研球面网格后**完全不变**（仅 c0/c1/c2 来源从 UV 还原换成 cpp 预计算灌顶点 UV1/UV2/UV3）。R8 新增的 4 通道 LUT 在 R8.5 上**零修改复用**：cpp 端只是把 `BaseTexIdx = Knuth(CellId)` 一行换成 `BaseTexIdx = Def->LayerIndex`，其余 LUT 字段在 W4 联调时由 `Def->FTerrainMaterialParams` 提供。
+R8 不改 dir / dirP / w[3]——这些公式在 T 阶段（TessellatedMesh）切到自研球面网格后**完全不变**（仅 c0/c1/c2 来源从 UV 还原换成 cpp 预计算灌顶点 UV1/UV2/UV3）。R8 新增的 4 通道 LUT 在 T 阶段上**零修改复用**：cpp 端只是把 `BaseTexIdx = Knuth(CellId)` 一行换成 `BaseTexIdx = Def->LayerIndex`，其余 LUT 字段在 W4 联调时由 `Def->FTerrainMaterialParams` 提供。详见 [TessellatedMeshDesign.md](TessellatedMeshDesign.md)。
 
 ---
 
@@ -303,7 +303,7 @@ TObjectPtr<class UTexture2DArray> PBRBaseNormal;
 UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PlanetTopology|R8")
 TObjectPtr<class UTexture2DArray> PBRBaseRoughness;
 
-/** R8：3 张共享基础 PBR 套件的 Height 数组（Displacement，NumSlices=3）。R8.5 用，R8 阶段挂上即可不必采样。 */
+/** R8：3 张共享基础 PBR 套件的 Height 数组（Displacement，NumSlices=3）。T 阶段用，R8 阶段挂上即可不必采样。 */
 UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PlanetTopology|R8")
 TObjectPtr<class UTexture2DArray> PBRBaseHeight;
 
@@ -319,10 +319,10 @@ bool bEnableWaterShell = false;
 UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|R8")
 TObjectPtr<class UMaterialInterface> WaterMaterial;
 
-/** R8：水面 mesh 相对 Radius 的径向偏移（cm）。R8 阶段建议 0.0；R8.5 后可调。 */
+/** R8：水面 mesh 相对 Radius 的径向偏移（cm）。R8 阶段默认 = 100 cm（§3.15 光程锁齿坑补偿）；T 阶段后可调。 */
 UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|R8",
-          meta = (ClampMin = "-1000.0", ClampMax = "1000.0"))
-float WaterSurfaceOffset = 0.0f;
+          meta = (ClampMin = "-1000.0", ClampMax = "10000.0"))
+float WaterSurfaceOffset = 100.0f;
 ```
 
 > R7 的 `TerrainAlbedoArray` / `TerrainNormalArray` 字段**保留作历史档案**——可加 `meta = (DeprecatedProperty)` 但不强求，因为 R8 反射诊断已不再要求 `terrainalbedoarray` 这个 Input，材质里也不会出现该参数。简单做法是删除两行 UPROPERTY 与 §3.2 cpp 中对应的 MID 注入；保守做法是保留字段（不影响新材质，仍能挂回 R7 旧材质用）。本稿采用**保留字段、不删**的保守做法，详见 §3.2。
@@ -352,7 +352,7 @@ TObjectPtr<UTexture2D> CellHSVRoughLUT;
 
 /**
  * R8：每 Cell 一个像素的 1×N 动态纹理（PF_FloatRGBA）。
- *   R=NormalStrength、G=HeightScale（R8.5 用）、B=SpecularBoost、A=TriplanarScale。
+*   R=NormalStrength、G=HeightScale（T 阶段用）、B=SpecularBoost、A=TriplanarScale。
  */
 UPROPERTY(VisibleAnywhere, Transient, Category = "PlanetTopology|R8")
 TObjectPtr<UTexture2D> CellNSpecLUT;
@@ -1080,7 +1080,7 @@ HLSL 预处理器在 shader 编译期把宏完全展开 → 生成的字节码�
 5. 3 张 `Cell*LUT` Texture Object Parameter 节点的位置 A **保持空**（Transient），但 Sampler Type 设为 `Linear Color`
 6. **Apply + Save**
 7. 选中 `APlanetTopologyDebugMesh` 实例 → Details → **`PlanetTopology > Material`** 槽位 → 设为 `M_TopologyDebug_R8`
-8. **Details → R8 分类** 下的 `PBRBaseAlbedo` / `PBRBaseNormal` / `PBRBaseRoughness` / `PBRBaseHeight` → 各自拖入对应 `T_PBRBase_*` Texture2DArray 资产
+8. Details → R8 分类**下的** `PBRBaseAlbedo` / `PBRBaseNormal` / `PBRBaseRoughness` / `PBRBaseHeight` → 各自拖入对应 `T_PBRBase_*` Texture2DArray 资产
 9. Details → R8 → `bEnableWaterShell` → 勾选；`WaterMaterial` 槽位 → 拖入 `M_WaterShell`（cpp 路径，详见 §4.5）
 
 ### 4.5 水面层（WaterMeshComp 子组件）
@@ -1097,7 +1097,7 @@ HLSL 预处理器在 shader 编译期把宏完全展开 → 生成的字节码�
 >
 > R8 改为把水面 mesh 直接做成 `APlanetTopologyDebugMesh` 的 **`UProceduralMeshComponent` 子组件**（`WaterMeshComp`，与地形 `MeshComp` 兄弟节点）。Component 是 Owner Actor 的 SubObject——PIE 深拷贝跟 Owner 走，UPROPERTY 引用一起序列化/拷贝，**零生命周期错位坑、零额外管理代码**。详见 [AgentWorkflow.md §3.10](AgentWorkflow.md#310-)。
 >
-> **本节同时是 W3.5 之后所有 cpp Actor 风格球面渲染的参考样板**——R8.5 自研球面网格也将沿用同一套 `FSphereTopology + UProceduralMeshComponent` 路径。
+> **本节同时是 W3.5 之后所有 cpp Actor 风格球面渲染的参考样板**——T 阶段自研球面网格也将沿用同一套 `FSphereTopology + UProceduralMeshComponent` 路径。
 
 #### 4.5.1 字段（[APlanetTopologyDebugMesh](../Source/TerraCivilization/Public/Render/PlanetTopologyDebugMesh.h)）
 
@@ -1110,8 +1110,8 @@ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|R8")
 TObjectPtr<UMaterialInterface> WaterMaterial;
 
 UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|R8",
-          meta = (ClampMin = "-1000.0", ClampMax = "1000.0"))
-float WaterSurfaceOffset = 0.0f;
+          meta = (ClampMin = "-1000.0", ClampMax = "10000.0"))
+float WaterSurfaceOffset = 100.0f;  // §3.15 SLW 光程锁齿坑补偿默认值
 
 // 内部组件（构造函数 CreateDefaultSubobject）
 UPROPERTY(VisibleAnywhere, Category = "PlanetTopology|R8")
@@ -1305,10 +1305,10 @@ return N;
 
 | SLW 输入引脚 | 连什么 | 物理含义 |
 | --- | --- | --- |
-| **Scattering Coefficients** | `Constant3Vector(0.05, 0.18, 0.25)` | 水的散射颜色（蓝绿调）。值越大水越浑浊；R8 默认值为清澈海水 |
-| **Absorption Coefficients** | `Constant3Vector(0.3, 0.08, 0.04)` | 水的吸收颜色（红光衰减最快 → 远处变蓝，物理正确） |
+| **Scattering Coefficients** | `Constant3Vector(0.0005, 0.0018, 0.0025)` | 水的散射颜色（蓝绿调）。值越大水越浑浊。⚠ **R8 阶段已由原始 `(0.05, 0.18, 0.25)` 缩小 100×**，原因详见§4.5.5 与 [AgentWorkflow.md §3.15](AgentWorkflow.md#315-)：SLW 光程 = 几何厚度 / cosθ，原始浓度 + 小 Offset 会让昼夜分割线附近衰减梯度过陡、重现三角棱面锁齿。本值 + WaterSurfaceOffset × 100 = 光学厚度积分近似不变、梯度变平缓 |
+| **Absorption Coefficients** | `Constant3Vector(0.003, 0.0008, 0.0004)` | 水的吸收颜色（红光衰减最快 → 远处变蓝，物理正确）。⚠ 同样从原 `(0.3, 0.08, 0.04)` 缩小 100×，原因同上 |
 | **Phase G** | `Constant 0.0` | 散射各向异性参数，[-1, 1]。0 = 各向同性；接近 +1 = 强前向散射；R8 用 0 |
-| **Color Scale Behind Water** | `Constant3Vector(1.0, 1.0, 1.0)` | 水下颜色染色（先白，让水下海床原色透出）；R8.5 后想要"绿色浑浊湖水"可改为 `(0.7, 1.0, 0.8)` |
+| **Color Scale Behind Water** | `Constant3Vector(1.0, 1.0, 1.0)` | 水下颜色染色（先白，让水下海床原色透出）；T 阶段后想要"绿色浑浊湖水"可改为 `(0.7, 1.0, 0.8)` |
 
 > 这 4 个系数取代了**老方案 Custom Node B 中的 `lerp(deepColor, shallowColor, depthMix)` 公式**——SLW 内置物理模型替你做了同样的事，且自动随相机视角与水深变化（不需要手写 `dot(dir, LightDir)` 近似）。
 
@@ -1374,18 +1374,71 @@ R8 阶段地形球与水面层都贴在同一半径上——水面会盖住整�
 - 关掉水面层 → 单看 17 配方地形（[R8 §1.4](#14-地形配方表)）；
 - 打开水面层 + 关掉地形 mesh → 单看 SLW 反射波纹球。
 
-**R8.5 上线后**自然解决——地形被 Elevation 拉出起伏后，水面（半径恒定）只盖住 Elevation < 0 的 cell，海陆分明。届时 SLW 的 `Color Scale Behind Water` 还能配合 R8.5 的"水下海床透出"做更精细的浅海色调（[详见 SDF §16.1.4](SphericalSDFTerrainDesign.md#1614-)）。
+**T 阶段上线后**自然解决——地形被 Elevation 拉出起伏后，水面（半径恒定）只盖住 Elevation < 0 的 cell，海陆分明。届时 SLW 的 `Color Scale Behind Water` 还能配合 T 阶段的"水下海床透出"做更精细的浅海色调（[详见 SDF §16.1.4](SphericalSDFTerrainDesign.md#1614-)）。
 
 #### 4.5.4 验收期单独看地形 / 单独看水面
 
-R8 阶段地形球与水面层重合（都贴在 Radius=15000 的球面上），无法同时观察。验收时：
+R8 阶段地形球半径 = `Radius`，水面层半径 = `Radius + WaterSurfaceOffset`（默认 Offset = 100 cm）。两层很近但已分离，单独验收时：
 
 - 阶段 A：`bEnableWaterShell=false` → 只看 17 种地形配方
 - 阶段 B：`bEnableWaterShell=true` + `WaterMaterial=M_WaterShell` → 选中 Actor 的主 `MeshComp` 把 Visibility 关掉 → 看一颗"贴着 fbm 法线波纹的反射球"——天空 / 太阳 / 周围环境清晰映在球面上，移动相机时反射跟随相机角度变化（这是 SLW 真反射的判定特征）
 
 > § PIE 验证：勾上 `bEnableWaterShell` 后点 PIE，水面材质不应丢失（vs 早期 Spawn 独立 Actor 路径的推后 PIE 后变默认棋盘格现象）。退 PIE 后 Editor 中的 `WaterMeshComp` 仍在，无所谓"Actor 消失"问题。
 
-R8.5 自研球面网格上线后自然解决——地形被 Elevation 拉出起伏后，水面（半径恒定）只盖住 Elevation < 0 的 cell。
+T 阶段自研球面网格上线后自然解决——地形被 Elevation 拉出起伏后，水面（半径恒定）只盖住 Elevation < 0 的 cell。
+
+#### 4.5.5 SLW 光程随 1/cos(θ) 离散化导致的水面三角锯齿（R8 实测踩坑）
+
+##### 4.5.5.1 现象
+
+主 mesh 顶点法线已修复为光滑的 `+UnitCenter`（[§11 / §3.14 修订史](../Docs/SphereTopologyReference.md)），昼夜分割线本身光滑。但 SLW 水面在昼夜分割线附近仍呈现**与 sub=3 球面 1280 个三角形精确对应的色块状锯齿**——色调过渡按三角面分段而非连续。早期一度误判为 vertex normal 锯齿、绕序问题、Z-fighting，但都不是。
+
+##### 4.5.5.2 根因：水体光程 = 几何厚度 / cos(θ)，按三角面离散化
+
+SLW 用 Beer-Lambert 衰减计算水下颜色：`T(λ) = exp(-(σ_a + σ_s)(λ) · L)`，其中 `L` 是水体光程（光从太阳穿过水体到达水底再反射到相机的总距离）。对水面和水底两层薄壳几何而言：
+
+```
+L ≈ d / cos(θ)
+  d   = 几何厚度（恒定，= WaterSurfaceOffset）
+  θ   = 入射角，cos(θ) = dot(N_water, LightDir)
+```
+
+在昼夜分割线附近 `cos(θ) → 0`，`L → ∞`——即使 `d` 不变，光程也急剧拉长。Beer-Lambert 又是 `exp(-σ·L)`：当 `σ·L` 数量级跨过 1 时，颜色梯度变化最剧烈（非线性敏感）。
+
+水面 mesh 的几何法线虽然光滑（`+UnitCenter` 在每顶点处朝外），但 **Beer-Lambert 的 `exp(-σ·d/cos(θ))` 是关于位置的高度非线性函数**——光滑的 `θ(x)` 经过这个非线性映射后，肉眼对斜率的感知会沿三角形面分段——尤其是 σ·d 较大、cos(θ) 较小的区域，几个像素之内颜色就跨越多个数量级，三角形边界两侧的细微差异被放大成可见色块。
+
+##### 4.5.5.3 解法（已落地为 R8 默认值）
+
+**等比例同时缩小光学浓度、放大几何厚度**，让光学厚度积分 `σ·d` 近似不变，但单位光程上的衰减斜率变平缓：
+
+| 参数 | R8 早期值 | R8 默认值（已修订）| 倍率 |
+| --- | --- | --- | --- |
+| `WaterSurfaceOffset`（cm）| 0 → 1 | **100** | ×100 |
+| `Scattering Coefficients` | `(0.05, 0.18, 0.25)` | **`(0.0005, 0.0018, 0.0025)`** | ÷100 |
+| `Absorption Coefficients` | `(0.3, 0.08, 0.04)` | **`(0.003, 0.0008, 0.0004)`** | ÷100 |
+
+**为什么这组缩放有效**：
+- 光学厚度积分 `(σ_a + σ_s) · d` 值近似不变 → 远处水体仍呈"清澈海蓝"色调，没改变 SLW 物理观感
+- 单位光程上的衰减 `exp(-σ·L)` 对 `L` 的局部斜率 `≈ -σ · exp(-σ·L)`，σ 缩小 100× → 斜率绝对值缩小 100×（在同样光程下）
+- 当 `cos(θ)` 在三角形面间因法线插值产生小阶跃时，`L = d/cos(θ)` 的相对变化乘以缩小后的 σ → 颜色变化幅度也缩小到肉眼不可分辨级别
+
+**为什么不是简单调高 Offset**：单独把 Offset ×100 而不缩小 σ，会让水体变得不透明、海床完全看不见——破坏 SLW 物理观感。单独缩小 σ 而不放大 Offset，会让水体过于稀薄、看不到水色——丢失水的视觉质感。**两者必须等比例同向缩放**才能既保持观感又化解锯齿。
+
+##### 4.5.5.4 与 §3.14 主 mesh 锯齿的关系
+
+| 现象 | 根因 | 修复 |
+| --- | --- | --- |
+| 主 mesh 阴影边界三角棱面锯齿（[§3.14](../Docs/AgentWorkflow.md#314-)） | 顶点法线 flat（KismetTangents 在独立顶点上等价 flat shading） | 顶点法线手填 `+UnitCenter`、Tangents 留空、不调 KismetTangents |
+| 水面 SLW 色块三角锯齿（**本节**） | 光程 `L = d/cos(θ)` 在 σ·L 较大时非线性敏感 | Offset × 100 + σ ÷ 100 = 光学厚度不变、衰减梯度变缓 |
+
+两个坑独立——前者是 vertex buffer 法线问题（修复后水面色块仍在），后者是 SLW 物理参数尺度问题（修复后主 mesh 锯齿仍在）。R8 阶段两个坑都已落地默认参数化解。
+
+##### 4.5.5.5 T 阶段起的演进
+
+T 阶段自研球面网格让 Elevation 起伏后，水面 mesh 不再贴着主 mesh 而是只盖在低洼区域。此时：
+- 海岸附近水深仍小（光程小）→ 颜色清浅，σ 缩小 100× 仍能看出"浅水偏绿"
+- 远海区域 cos(θ) 变化更剧烈（球面曲率累积）但水深也大 → 整体观感不变
+- 默认参数仍可继续使用；如要还原"物理标准"的浓度，可逐步把 σ 调回 ×10 区间，并配合 Offset 调到地形低洼底部以保持锯齿不出现
 
 ---
 
@@ -1412,7 +1465,7 @@ R8.5 自研球面网格上线后自然解决——地形被 Elevation 拉出起�
 | --- | --- | --- |
 | 颜色多样性 | 19 种独立 BaseColor（每种 1 张纹理）| 17 种 tint 配方 + 共享 3 base，颜色组合无限可调 |
 | 编辑器实时性 | 修改 R7 单纹理需重导入 + 重新拼装 Texture2DArray | 改 GR8Recipes 表常量 → Compile → 立即生效 |
-| 海洋视觉 | 与陆地同质（深色块）| 海床仍同质，但启用水面层后看到反光波纹（仅当遮挡可发生时——R8.5 后）|
+| 海洋视觉 | 与陆地同质（深色块）| 海床仍同质，但启用水面层后看到反光波纹（仅当遮挡可发生时——T 阶段后）|
 | 山岩与森林共存 | 山岩配方覆盖 14 种（视觉单调）| Forest.* 配方通过 Moss002 Overlay 与 Soil base 混合，森林"立体感"明显 |
 | Roughness 真实化 | 无 | LUT2.B/A 为后续 PBR 真实化预留（R8 不连 Roughness 输出，附录 B 给出连法）|
 
@@ -1436,7 +1489,7 @@ R8.5 自研球面网格上线后自然解决——地形被 Elevation 拉出起�
 | 水面层不显示 | `bEnableWaterShell=false` 或 `WaterMaterial` 槽位为空 | 勾选 `bEnableWaterShell`；拖入 `M_WaterShell` 到 `WaterMaterial`；Rebuild() 末尾检查日志中 `EnableWaterShell=YES  WaterMaterial=...` |
 | PIE 后水面变棋盘格 | 使用了旧的 SpawnActor 独立 Actor 路径（已废弃） | 确认代码里是 `WaterMeshComp` Component 路径而不是 `WaterShellClass + SpawnActor`；详见 [AgentWorkflow.md §3.10](AgentWorkflow.md) |
 | **退出 PIE 后**主 mesh + 水面 mesh 都变默认白材质，再 Rebuild 又恢复 | PIE duplicate 出来的 MID_pie 在 PIE 退出时被 GC，Editor 端 MeshComp 的 SceneProxy 拿到 stale 引用，fallback 到 DefaultMaterial | 已在 cpp 中注册 `FWorldDelegates::OnPostWorldCleanup` 自动恢复；如仍出现说明回调未生效——查 Output Log 是否有 `PIE world cleaned up; rebuilding to restore Editor MID + materials.` 一行；详见 [AgentWorkflow.md §3.11](AgentWorkflow.md) |
-| 水面层与地形球完全重合（看不到水）| R8 阶段正常现象——`WaterSurfaceOffset = 0` 时两者贴在同一 Radius | 验收期分别开关；R8.5 自研球面网格上线后地形 Elevation 起伏会自然让水面只盖海洋区域 |
+| 水面层与地形球完全重合（看不到水）| R8 阶段 `WaterSurfaceOffset` 调太小（原默认 = 0）；现默认已抬到 100 cm 以高亮 SLW。**不要再调低于 100 cm**——§3.15 记录的"光程三角锁齿"会重现 | 验收期分别开关；T 阶段自研球面网格上线后地形 Elevation 起伏会自然让水面只盖海洋区 |
 | 水面 SLW 反射全黑（什么都看不到）| 场景缺 SkyLight 或未勾 Real Time Capture | 放一个 ASkyLight + Details → Real Time Capture ✓；详见 §4.5.3.5 场景前置条件清单 |
 | 水面 SLW 看不到太阳 specular highlight | DirectionalLight 未勾 Atmosphere Sun Light | 选中 DirectionalLight → Details → Atmospheric Sun Light ✓ |
 | 水面 SLW 反射模糊一团 | Roughness 太大（>0.3）| 改 Constant 0.05；范围 0.02~0.1，不要超过 0.3 |
@@ -1455,9 +1508,9 @@ R8 是 R7 的"颜色源升级"，几何链路（R4 Voronoi / R5 软边 / R6 噪�
 - HLSL Code 字段从 ~210 行（R7：noise 80 + 3 Triplanar 40 + 主干 90）变为 ~210 行（R8：noise 80 + 3 ParamColor 28×3=84 + 主干 50）—— 体积持平
 - cpp 改动：新增 3 个 Transient LUT 字段 + 3 个 Rebuild_ 函数 + 17 配方表，约 200 行；修改 RebuildCellAttrLUT_ 写入逻辑（10 行）；反射诊断升级（4 行）
 
-### 7.2 与 R8.5 自研球面网格的同构性
+### 7.2 与 T 阶段自研球面网格的同构性
 
-R8 不依赖任何 mesh 几何特性（仍跑在 IsoSphere primal mesh 上）。R8.5 切到自研球面网格后，**R8 的所有 4 通道 LUT、HLSL Code、17 配方表零修改复用**，唯一变化：
+R8 不依赖任何 mesh 几何特性（仍跑在 IsoSphere primal mesh 上）。T 阶段切到自研球面网格后，**R8 的所有 4 通道 LUT、HLSL Code、17 配方表零修改复用**，唯一变化：
 
 - VS 阶段从"UV 还原 c0/c1/c2"改为"cpp 预计算灌顶点 UV1/UV2/UV3 + 3 个 acos 软权重灌 UV4/UV5/UV6"
 - PS 阶段把 R5 的 `θ_i / δ_i / w_i` 计算去掉（直接用 VS 预灌的权重）
@@ -1514,11 +1567,11 @@ R8 用了 4 张 Cell*LUT。R9 加 Decor / Owner / Fog 三套独立 LUT 时，**R
 | `T_PBRBase_Albedo` | 3 | BC1 sRGB | 基础 BaseColor |
 | `T_PBRBase_Normal` | 3 | BC5 | Normal（NormalDX）|
 | `T_PBRBase_Roughness` | 3 | BC4 | Roughness |
-| `T_PBRBase_Height` | 3 | BC4 | Displacement / Height（R8.5 用）|
+| `T_PBRBase_Height` | 3 | BC4 | Displacement / Height（T 阶段用）|
 
 #### A.1.3 R7 时代旧资产（保留作历史档案）
 
-`T_TerrainAlbedoArray.uasset` + 17 张 `T_*_BaseColor.uasset` / `T_*_Normal.uasset`——R8 主 mesh 不再依赖这些资产，但保留可让旧 R7 材质继续工作（向后兼容验证）。可在 R8.5 + W4 联调通过后删除。
+`T_TerrainAlbedoArray.uasset` + 17 张 `T_*_BaseColor.uasset` / `T_*_Normal.uasset`——R8 主 mesh 不再依赖这些资产，但保留可让旧 R7 材质继续工作（向后兼容验证）。可在 T 阶段 + W4 联调通过后删除。
 
 ### A.2 slice 顺序的"绝对命令"
 
@@ -1568,7 +1621,7 @@ return float4(colA * wA + colB * wB + colC * wC, roughOut) / wsum;
 
 材质图侧：把 Custom 节点输出从 `Float3` 改为 `Float4`（Output Type）→ Mask R/G/B 接 BaseColor，Mask A 接 Roughness。同时 R8 反射诊断的 OutputType 字段会从 `CMOT_Float3` 变为 `CMOT_Float4`，cpp 端反射 Log 不强制此变化（`(int32)Custom->OutputType.GetValue()` 只是打印不判断）。
 
-> R8 主验收**不需要**这一附录——R7 路径就是 BaseColor 单输出。Roughness 真实化推荐 R8.5 + W4 联调后再做。
+> R8 主验收**不需要**这一附录——R7 路径就是 BaseColor 单输出。Roughness 真实化推荐 T 阶段 + W4 联调后再做。
 
 ---
 
