@@ -269,10 +269,10 @@ Position = RawDir * radius
 
 1. PIE 运行。
 2. 鼠标移动到球面上，应继续出现 hover cell 调试信息。
-3. 点击 cell，应继续触发 `ToggleSelected(CellId)` 日志。
-4. 如果 hover 不稳定：
-   - 先设置 `bUseDebugProceduralCollision=true`。
-   - 确认旧 `TerrainMeshComp` 即使不可见也保留 `QueryOnly` 碰撞。
+3. 点击 cell，应进入 G2 Gameplay 点击流程：点击当前阵营棋子会选中并高亮黄色，移动后脚下 Cell 高亮蓝色，再次点击脚下 Cell 结束回合。
+4. 如果 hover / click 不稳定：
+   - 先设置 `bUseDebugProceduralCollision=false`，确保 HISM 实例优先被 trace 命中。
+   - 确认 HISM StaticMesh 有可用碰撞。
    - 再排查 HISM 碰撞资产设置。
 
 ### 6.6 Debug 对照验收

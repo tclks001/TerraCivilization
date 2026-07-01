@@ -20,7 +20,7 @@
 鼠标射线
   -> 命中某个 HISM 组件的某个 InstanceIndex
   -> InstanceIndex 反查 CellId
-  -> 后台记录当前 hover / selected CellId
+  -> hover 状态或 Gameplay 容器输出逻辑高亮
   -> 给该实例写 PerInstanceCustomData
   -> 瓦片材质按 UV 圆心距离只高亮外圈
 ```
@@ -99,30 +99,70 @@ int32 InstanceIndex;
 每个 HISM 组件设置：
 
 ```cpp
-SetNumCustomDataFloats(2)
+SetNumCustomDataFloats(4)
 ```
 
 通道分配：
 
 | Custom Data Index | 名称 | 含义 |
 | --- | --- | --- |
-| `0` | HoverIntensity | `0` 或 `1`，鼠标悬停高亮 |
-| `1` | SelectIntensity | `0` 或 `1`，点击选中高亮 |
+| `0` | `FinalHighlightColor.R` | C++ 计算后的最终高亮颜色 R |
+| `1` | `FinalHighlightColor.G` | C++ 计算后的最终高亮颜色 G |
+| `2` | `FinalHighlightColor.B` | C++ 计算后的最终高亮颜色 B |
+| `3` | `FinalHighlightIntensity` | C++ 计算后的最终高亮强度，通常为 `0..1` |
 
 材质中读取：
 
 ```text
-PerInstanceCustomData(0) -> HoverIntensity
-PerInstanceCustomData(1) -> SelectIntensity
+PerInstanceCustomData(0) -> FinalHighlightColor.R
+PerInstanceCustomData(1) -> FinalHighlightColor.G
+PerInstanceCustomData(2) -> FinalHighlightColor.B
+PerInstanceCustomData(3) -> FinalHighlightIntensity
 ```
 
-最终颜色建议：
+新版职责划分：
 
 ```text
-HighlightColor = HoverColor * HoverIntensity + SelectColor * SelectIntensity
+Gameplay：负责棋子选择、移动阶段、回合状态，并输出逻辑高亮颜色。
+C++ 渲染桥：负责 hover、Gameplay 高亮优先级覆盖与最终强度写入。
+材质：只负责读取 FinalHighlightColor 与 FinalHighlightIntensity，并按 UV 边缘 mask 输出自发光。
 ```
 
-如果 hover 与 select 同时存在，可以让 select 优先，或者两者相加后 saturate。
+G2 起不再使用 `HISMSelectedCellIds` / `SelectedNow`。当前 C++ 合成规则：
+
+```cpp
+float HoverIntensity = (HISMCurrentHoverCellId == CellId) ? 1.0f : 0.0f;
+
+FLinearColor FinalHighlightColor = FLinearColor::Black;
+float FinalHighlightIntensity = 0.0f;
+
+FTerraGameplayCellHighlight GameplayHighlight;
+if (GameplayContainer.IsValid() && GameplayContainer->GetHighlightForCell(CellId, GameplayHighlight))
+{
+    // Gameplay 高亮优先：选中棋子脚下黄色、移动后可停下蓝色，后续可扩展任意颜色。
+    FinalHighlightColor = GameplayHighlight.Color;
+    FinalHighlightIntensity = GameplayHighlight.Intensity;
+}
+else if (HoverIntensity > KINDA_SMALL_NUMBER)
+{
+    FinalHighlightColor = HighlightHoverColor;
+    FinalHighlightIntensity = HoverIntensity;
+}
+```
+
+新版通道中 `FinalHighlightColor` 与 `FinalHighlightIntensity` 分开传输：
+
+```text
+无高亮：Color=(0,0,0), Intensity=0
+普通 Hover：Color=HighlightHoverColor, Intensity=1
+G2.5 当前阵营棋子底色：Color=(1,0.45,0.68), Intensity=1
+G2.5 hover 当前阵营棋子：Color=(1,0.22,0.32), Intensity=1
+G2 选中棋子脚下：Color=(1,1,0), Intensity=1
+G2 移动后可停下：Color=(0,0.35,1), Intensity=1
+Gameplay 行动高亮 + Hover 同时存在：Gameplay 行动高亮覆盖 Hover / 当前阵营底色
+```
+
+后续如果要显示“绿色可移动格”“红色攻击目标”“紫色技能范围”，只需要 Gameplay/C++ 写入对应最终颜色，不需要继续修改材质图。
 
 ---
 
@@ -154,21 +194,23 @@ float HISMHoverFadeDuration = 0.5f;
 
 ---
 
-### 3.4 Click Select 状态
+### 3.4 G2 Gameplay 点击状态
 
 点击命中的 HISM 实例后：
 
 ```text
-CellId -> Toggle Selected
+CellId -> FTerraGameplayContainer::HandleCellClick(CellId, DirtyCellIds)
 ```
 
-初版允许多选，内部保存：
+G2 点击语义：
 
-```cpp
-TSet<int32> HISMSelectedCellIds;
+```text
+Idle：点击当前阵营可移动棋子 -> 选中，脚下 Cell 高亮黄色
+PieceSelected：点击相邻空 Cell -> 普通移动 1 格，新脚下 Cell 高亮蓝色
+PieceMovedCanEndTurn：再次点击脚下蓝色 Cell -> 停下并结束回合
 ```
 
-如果后续玩法只允许单选棋子，可以上层在调用前先 `ClearHISMSelection()`，或者新增单选模式。
+旧 `HISMSelectedCellIds` 多选集合和 `SelectedNow` 日志已移除。HISM 高亮只负责显示 Gameplay 容器输出的最终逻辑颜色。
 
 ---
 
@@ -220,51 +262,218 @@ GetHitResultUnderCursorByChannel
 
 ## 5. 材质图要求
 
-C++ 只负责把每个实例的 `HoverIntensity` / `SelectIntensity` 写入 GPU。真正“UV 边缘环”需要 HISM 瓦片材质读取这些值。
+C++ 负责把每个实例的 `FinalHighlightColor.RGB` 与 `FinalHighlightIntensity` 写入 GPU。材质不再判断 hover / select，也不再接收 `HoverColor` / `SelectColor`；材质只读取最终颜色和最终强度，并在 UV 边缘环输出高亮自发光。
 
-每个 Plain / Forest / Mountain tile 材质都需要加入相同逻辑。
+每个 Plain / Forest / Mountain tile 材质都需要加入相同逻辑。如果三种地形共享父材质，只改父材质即可。
 
-### 5.1 必需节点
+### 5.1 必需节点总览
 
 在材质中添加：
 
-- `TextureCoordinate`
-- `ComponentMask R,G`
-- `Subtract`：减去 `(0.5, 0.5)`
-- `Length`
-- `SmoothStep` 或等价节点
-- `PerInstanceCustomData`，Data Index = `0`
-- `PerInstanceCustomData`，Data Index = `1`
-- `VectorParameter HoverColor`
-- `VectorParameter SelectColor`
-- `ScalarParameter HighlightStrength`
-- `ScalarParameter HighlightInnerRadius`
-- `ScalarParameter HighlightOuterRadius`
+| 节点类型 | 建议命名 / 参数名 | 说明 |
+| --- | --- | --- |
+| `TextureCoordinate` | `UV0` | 使用瓦片 UV0 |
+| `ComponentMask` | `UV0_RG` | 只取 `R,G`，输出 `float2` UV |
+| `PerInstanceCustomData` | `PICD_HighlightR` | `Data Index = 0` |
+| `PerInstanceCustomData` | `PICD_HighlightG` | `Data Index = 1` |
+| `PerInstanceCustomData` | `PICD_HighlightB` | `Data Index = 2` |
+| `PerInstanceCustomData` | `PICD_HighlightIntensity` | `Data Index = 3` |
+| `AppendVector` | `HighlightRG` | `PICD_HighlightR` + `PICD_HighlightG` |
+| `AppendVector` | `HighlightRGB` | `HighlightRG` + `PICD_HighlightB` |
+| `ScalarParameter` | `HighlightStrength` | 推荐默认 `1.5`，C++ 会写入同名参数 |
+| `ScalarParameter` | `HighlightInnerRadius` | 推荐默认 `0.40`，C++ 会写入同名参数 |
+| `ScalarParameter` | `HighlightOuterRadius` | 推荐默认 `0.50`，C++ 会写入同名参数 |
+| `Custom` | `MF_HISM_FinalHighlightEmissive` | 输入 UV、最终颜色、强度、半径，输出自发光颜色 |
+| `Add` | `BaseEmissivePlusHighlight` | 如果原材质已有自发光，用 `Add` 叠加 |
 
-### 5.2 推荐公式
+### 5.2 PerInstanceCustomData 节点设置
 
-```hlsl
-float2 d = UV0 - float2(0.5, 0.5);
-float r = length(d);
-float ring = smoothstep(HighlightInnerRadius, HighlightOuterRadius, r);
+创建 4 个 `PerInstanceCustomData` 节点：
 
-float hover = PerInstanceCustomData0;
-float selected = PerInstanceCustomData1;
+| 节点命名 | Data Index | 输出含义 |
+| --- | --- | --- |
+| `PICD_HighlightR` | `0` | `FinalHighlightColor.R` |
+| `PICD_HighlightG` | `1` | `FinalHighlightColor.G` |
+| `PICD_HighlightB` | `2` | `FinalHighlightColor.B` |
+| `PICD_HighlightIntensity` | `3` | `FinalHighlightIntensity` |
 
-float3 color = HoverColor.rgb * hover + SelectColor.rgb * selected;
-Emissive += color * ring * HighlightStrength;
-BaseColor = lerp(BaseColor, saturate(BaseColor + color), ring * saturate(hover + selected));
+把前三个 float 组成 `float3`：
+
+```text
+PICD_HighlightR ┐
+                 ├─ AppendVector -> HighlightRG
+PICD_HighlightG ┘
+
+HighlightRG      ┐
+                 ├─ AppendVector -> HighlightRGB
+PICD_HighlightB ┘
 ```
 
-推荐初始参数：
+### 5.3 Custom 节点：自发光边缘环
+
+创建一个 `Custom` 节点：
+
+```text
+节点名：MF_HISM_FinalHighlightEmissive
+Output Type：CMOT Float 3
+Description：HISM tile final highlight emissive ring
+```
+
+Custom 输入列表：
+
+| 输入名 | 类型 | 连接来源 |
+| --- | --- | --- |
+| `UV` | `float2` | `TextureCoordinate` 经过 `ComponentMask R,G` |
+| `HighlightColor` | `float3` | `HighlightRGB` |
+| `HighlightIntensity` | `float` | `PICD_HighlightIntensity` |
+| `HighlightStrength` | `float` | `ScalarParameter HighlightStrength` |
+| `HighlightInnerRadius` | `float` | `ScalarParameter HighlightInnerRadius` |
+| `HighlightOuterRadius` | `float` | `ScalarParameter HighlightOuterRadius` |
+
+可直接复制粘贴的 HLSL：
+
+```hlsl
+float3 finalColor = saturate(HighlightColor);
+float finalIntensity = saturate(HighlightIntensity);
+
+float innerRadius = saturate(HighlightInnerRadius);
+float outerRadius = saturate(HighlightOuterRadius);
+outerRadius = max(outerRadius, innerRadius + 0.0001);
+
+float2 centeredUV = UV - float2(0.5, 0.5);
+float radius = length(centeredUV);
+
+float ringMask = smoothstep(innerRadius, outerRadius, radius);
+float emissiveMask = ringMask * finalIntensity * HighlightStrength;
+
+return finalColor * emissiveMask;
+```
+
+### 5.4 节点连线
+
+#### 5.4.1 输入组装
+
+```text
+TextureCoordinate
+  -> ComponentMask R,G
+  -> Custom.UV
+
+PerInstanceCustomData(Data Index 0)
+  -> AppendVector.A
+PerInstanceCustomData(Data Index 1)
+  -> AppendVector.B
+AppendVector(R,G)
+  -> AppendVector.A
+PerInstanceCustomData(Data Index 2)
+  -> AppendVector.B
+AppendVector(RG,B)
+  -> Custom.HighlightColor
+
+PerInstanceCustomData(Data Index 3)
+  -> Custom.HighlightIntensity
+
+ScalarParameter HighlightStrength
+  -> Custom.HighlightStrength
+
+ScalarParameter HighlightInnerRadius
+  -> Custom.HighlightInnerRadius
+
+ScalarParameter HighlightOuterRadius
+  -> Custom.HighlightOuterRadius
+```
+
+#### 5.4.2 输出到材质
+
+如果原材质没有自发光：
+
+```text
+Custom.MF_HISM_FinalHighlightEmissive
+  -> Material.Emissive Color
+```
+
+如果原材质已有自发光：
+
+```text
+OriginalEmissive
+  -> Add.A
+Custom.MF_HISM_FinalHighlightEmissive
+  -> Add.B
+Add
+  -> Material.Emissive Color
+```
+
+### 5.5 可选：BaseColor 轻微染色
+
+如果只接自发光在强光环境下不够明显，可以再添加一个 `Custom` 节点或普通节点，把高亮轻微叠加到 `BaseColor`。但初版推荐先只接 `Emissive Color`，避免改变瓦片原本地形颜色。
+
+如果需要 BaseColor 染色，可用下面这个独立 Custom：
+
+```text
+节点名：MF_HISM_FinalHighlightTintedBaseColor
+Output Type：CMOT Float 3
+```
+
+Custom 输入列表：
+
+| 输入名 | 类型 | 连接来源 |
+| --- | --- | --- |
+| `BaseColor` | `float3` | 原材质 BaseColor 结果 |
+| `UV` | `float2` | `TextureCoordinate` 经过 `ComponentMask R,G` |
+| `HighlightColor` | `float3` | `HighlightRGB` |
+| `HighlightIntensity` | `float` | `PICD_HighlightIntensity` |
+| `HighlightInnerRadius` | `float` | `ScalarParameter HighlightInnerRadius` |
+| `HighlightOuterRadius` | `float` | `ScalarParameter HighlightOuterRadius` |
+| `TintBlend` | `float` | 可用 `ScalarParameter HighlightBaseTintBlend`，推荐默认 `0.25` |
+
+可直接复制粘贴的 HLSL：
+
+```hlsl
+float3 finalColor = saturate(HighlightColor);
+float finalIntensity = saturate(HighlightIntensity);
+
+float innerRadius = saturate(HighlightInnerRadius);
+float outerRadius = saturate(HighlightOuterRadius);
+outerRadius = max(outerRadius, innerRadius + 0.0001);
+
+float2 centeredUV = UV - float2(0.5, 0.5);
+float radius = length(centeredUV);
+
+float ringMask = smoothstep(innerRadius, outerRadius, radius);
+float blend = saturate(ringMask * finalIntensity * TintBlend);
+
+return lerp(BaseColor, saturate(BaseColor + finalColor), blend);
+```
+
+连线：
+
+```text
+原 BaseColor 结果
+  -> Custom.BaseColor
+
+Custom.MF_HISM_FinalHighlightTintedBaseColor
+  -> Material.Base Color
+```
+
+### 5.6 推荐初始参数
 
 | 参数 | 推荐值 |
 | --- | --- |
 | `HighlightInnerRadius` | `0.40` |
 | `HighlightOuterRadius` | `0.50` |
 | `HighlightStrength` | `1.5` |
-| `HoverColor` | `(1.0, 0.85, 0.10)` |
-| `SelectColor` | `(0.20, 0.90, 1.00)` |
+| `HighlightBaseTintBlend` | `0.25`，仅在启用 BaseColor 染色时需要 |
+
+颜色不再由材质参数提供，而由 C++ 写入：
+
+| 逻辑状态 | C++ 写入颜色 | C++ 写入强度 |
+| --- | --- | --- |
+| 无高亮 | `(0,0,0)` | `0` |
+| 普通 Hover | `HighlightHoverColor`，默认 `(1.0, 0.85, 0.10)` | `1` |
+| G2.5 当前阵营棋子底色 | 淡粉色 `(1,0.45,0.68)` | `1` |
+| G2.5 hover 当前阵营棋子 | 红粉色 `(1,0.22,0.32)` | `1` |
+| G2 选中棋子脚下 | 黄色 `(1,1,0)` | `1` |
+| G2 移动后可停下 | 蓝色 `(0,0.35,1)` | `1` |
+| Gameplay 行动高亮 + Hover | Gameplay 行动高亮颜色 | `1` |
 
 如果瓦片 UV 并非中心对称，需要先检查烘焙出的 tile 资产 UV 是否以 `(0.5,0.5)` 为中心。
 
@@ -317,10 +526,12 @@ BaseColor = lerp(BaseColor, saturate(BaseColor + color), ring * saturate(hover +
 
 给 Plain / Forest / Mountain 三个 StaticMesh 使用的材质都接入：
 
-- `PerInstanceCustomData(0)` 作为 hover 强度。
-- `PerInstanceCustomData(1)` 作为 select 强度。
+- `PerInstanceCustomData(0)` 作为 `FinalHighlightColor.R`。
+- `PerInstanceCustomData(1)` 作为 `FinalHighlightColor.G`。
+- `PerInstanceCustomData(2)` 作为 `FinalHighlightColor.B`。
+- `PerInstanceCustomData(3)` 作为 `FinalHighlightIntensity`。
 - UV 半径 `0.4` 以外作为边缘环 mask。
-- 将 mask 乘高亮颜色输出到 `Emissive Color` 或叠加到 `BaseColor`。
+- 将 `FinalHighlightColor * FinalHighlightIntensity * ringMask * HighlightStrength` 输出到 `Emissive Color`，可选叠加到 `BaseColor`。
 
 如果三个地形材质不同，三份都要接；如果它们共享一个父材质，只改父材质即可。
 
@@ -334,14 +545,15 @@ BaseColor = lerp(BaseColor, saturate(BaseColor + color), ring * saturate(hover +
 - 移到相邻 tile，高亮立即切换。
 - 移出星球，高亮在 `HISMHoverFadeDuration` 后清除。
 
-### Step 6：PIE 验收 click select
+### Step 6：PIE 验收 G2 / G2.5 Gameplay 点击
 
 运行 PIE：
 
-- 左键点击某个 tile。
-- 该 tile 保持 select 色。
-- 再次点击同一个 tile，select 取消。
-- 点击多个 tile，可以看到多个 selected tile 同时保持高亮。
+- 回合开始时，摄像机切到当前阵营大本营上方并朝向大本营，当前阵营棋子所在 Cell 显示淡粉色。
+- hover 到当前阵营棋子所在 tile，淡粉色变为更红的红粉色；hover 离开后恢复淡粉色。
+- 左键点击当前阵营的可移动棋子所在 tile，该棋子脚下 Cell 高亮黄色，摄像机不移动但旋转对准该棋子。
+- 再点击相邻空 tile，棋子普通移动 1 格，原黄色消失，新脚下 Cell 高亮蓝色。
+- 再次点击蓝色脚下 Cell，蓝色消失并结束回合，当前阵营切到下一个阵营，新阵营棋子变淡粉色，摄像机切到新阵营大本营上方。
 
 ### Step 7：OnConstruction 重建索引验收
 
@@ -356,7 +568,7 @@ BaseColor = lerp(BaseColor, saturate(BaseColor + color), ring * saturate(hover +
 
 - HISM 实例重建后仍可点击。
 - 屏幕输出的 `CellId` 不错乱。
-- hover / select 状态被清空或重新映射，不出现旧实例残留高亮。
+- hover / Gameplay 高亮状态被清空或重新映射，不出现旧实例残留高亮。
 
 ---
 
@@ -372,13 +584,36 @@ BaseColor = lerp(BaseColor, saturate(BaseColor + color), ring * saturate(hover +
 
 ## 9. 后续扩展
 
-后续 SimpleGameplay 可以继续扩展更多通道：
+新版材质通道保持固定：
 
-| Custom Data Index | 未来用途 |
+| Custom Data Index | 固定用途 |
 | --- | --- |
-| `2` | MoveRangeIntensity |
-| `3` | JumpRangeIntensity |
-| `4` | AttackTargetIntensity |
-| `5` | CurrentFactionMask |
+| `0` | `FinalHighlightColor.R` |
+| `1` | `FinalHighlightColor.G` |
+| `2` | `FinalHighlightColor.B` |
+| `3` | `FinalHighlightIntensity` |
 
-初版先只实现 hover / select 两个通道，避免材质复杂度过早上升。
+后续 SimpleGameplay 不再通过继续增加材质强度通道扩展状态，而是在 C++ 侧扩展高亮来源与优先级：
+
+| 高亮来源 | 推荐颜色 | 推荐优先级 |
+| --- | --- | --- |
+| `Hover` | 暖金 | `100` |
+| `CurrentFactionPiece` | 淡粉 | `150` |
+| `CurrentFactionPieceHover` | 红粉 | `200` |
+| `SelectedPiece` / `SelectedCell` | 黄色 | `300` |
+| `MovedCanEndTurn` | 蓝色 | `400` |
+| `MoveTarget` | 绿色 | `500` |
+| `JumpTarget` | 蓝绿色或紫色 | `520` |
+| `AttackTarget` | 红色 | `600` |
+| `Debug` | 任意颜色 | 按调试需要指定 |
+
+C++ 每次交互变化时只对受影响 Cell 重新合成最终颜色：
+
+```text
+收集该 Cell 的所有高亮来源
+  -> 取 Priority 最高的一项
+  -> 写入 FinalHighlightColor.RGB
+  -> 写入 FinalHighlightIntensity
+```
+
+这样材质图无需再随着玩法状态增加而修改，后续想用任意颜色高亮任意 Cell，只需要 C++ 写入不同最终颜色即可。

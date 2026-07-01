@@ -4,6 +4,8 @@
 #include "Render/MeshDisplacementBuilder.h"
 #include "Render/R8RecipeTable.h"
 
+#include "TerraGameplayContainer.h"
+
 #include "FSphereTopology.h"
 #include "FCell.h"
 #include "FCorner.h"
@@ -32,6 +34,8 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogPlanetTess, Log, All);
 
@@ -49,7 +53,7 @@ APlanetTessellatedMesh::APlanetTessellatedMesh()
 {
     // 与 APlanetTopologyDebugMesh 一致：在编辑器中拖动属性即时刷新；Tick 仅在 HISM hover 防抖启用时打开。
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.bStartWithTickEnabled = false;
+    PrimaryActorTick.bStartWithTickEnabled = true;
     bRunConstructionScriptOnDrag = true;
 
     USceneComponent* RootScene = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
@@ -155,6 +159,17 @@ void APlanetTessellatedMesh::Tick(float DeltaSeconds)
         }
     }
 
+    if (bEnableG2_5CameraAssist
+        && GetWorld()
+        && GetWorld()->IsGameWorld()
+        && GameplayContainer.IsValid()
+        && GameplayContainer->IsInitialized()
+        && G2_5LastCameraFocusedTurnIndex != GameplayContainer->GetTurnIndex())
+    {
+        FocusCameraOnCurrentFactionBase_();
+        G2_5LastCameraFocusedTurnIndex = GameplayContainer->GetTurnIndex();
+    }
+
     DrawG1DebugPieces_();
 }
 
@@ -233,7 +248,10 @@ void APlanetTessellatedMesh::RebuildAll_()
     RebuildHISMTileInstances_();
     ApplyRenderModeVisibility_();
 
-    // SimpleGameplay G1：只生成调试棋子缓存，Tick 中用 DrawDebugSphere 临时绘制。
+    // SimpleGameplay G2：Gameplay 容器复制 Cell 拓扑与 WorldGen 地形，并持有棋子/回合状态。
+    RebuildGameplay_();
+
+    // SimpleGameplay G1/G2：根据 Gameplay 容器棋子状态生成调试球缓存，Tick 中绘制。
     RebuildG1DebugPieces_();
 }
 
@@ -1187,7 +1205,6 @@ void APlanetTessellatedMesh::RebuildHISMTileInstances_()
     ForestInstanceToCellId.Reset();
     MountainInstanceToCellId.Reset();
     CellIdToHISMInstance.Reset();
-    HISMSelectedCellIds.Empty();
     HISMCurrentHoverCellId = INDEX_NONE;
     HISMPendingHoverCellId = INDEX_NONE;
     HISMHoverFadeTimer = 0.0f;
@@ -1318,6 +1335,8 @@ void APlanetTessellatedMesh::RebuildHISMTileInstances_()
         {
             TargetComp->SetCustomDataValue(InstanceIndex, 0, 0.0f, false);
             TargetComp->SetCustomDataValue(InstanceIndex, 1, 0.0f, false);
+            TargetComp->SetCustomDataValue(InstanceIndex, 2, 0.0f, false);
+            TargetComp->SetCustomDataValue(InstanceIndex, 3, 0.0f, false);
         }
     }
 
@@ -1333,7 +1352,7 @@ void APlanetTessellatedMesh::PrepareHISMHighlightComponent_(UHierarchicalInstanc
         return;
     }
 
-    Comp->SetNumCustomDataFloats(2);
+    Comp->SetNumCustomDataFloats(4);
 
     const int32 MaterialCount = Comp->GetNumMaterials();
     for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
@@ -1347,8 +1366,6 @@ void APlanetTessellatedMesh::PrepareHISMHighlightComponent_(UHierarchicalInstanc
             }
             if (MID)
             {
-                MID->SetVectorParameterValue(TEXT("HoverColor"), HighlightHoverColor);
-                MID->SetVectorParameterValue(TEXT("SelectColor"), HighlightSelectColor);
                 MID->SetScalarParameterValue(TEXT("HighlightStrength"), HighlightStrength);
                 MID->SetScalarParameterValue(TEXT("HighlightInnerRadius"), HISMHighlightInnerRadius);
                 MID->SetScalarParameterValue(TEXT("HighlightOuterRadius"), HISMHighlightOuterRadius);
@@ -1370,27 +1387,66 @@ void APlanetTessellatedMesh::WriteHISMHighlightForCell_(int32 CellId, bool bMark
         return;
     }
 
-    const float HoverValue = (HISMCurrentHoverCellId == CellId) ? 1.0f : 0.0f;
-    const float SelectValue = HISMSelectedCellIds.Contains(CellId) ? 1.0f : 0.0f;
-    const bool bHoverWritten = Ref.Component->SetCustomDataValue(Ref.InstanceIndex, 0, HoverValue, false);
-    const bool bSelectWritten = Ref.Component->SetCustomDataValue(Ref.InstanceIndex, 1, SelectValue, bMarkRenderStateDirty);
+    const float HoverIntensity = (HISMCurrentHoverCellId == CellId) ? 1.0f : 0.0f;
+
+    FLinearColor FinalHighlightColor = FLinearColor::Black;
+    float FinalHighlightIntensity = 0.0f;
+
+    FTerraGameplayCellHighlight GameplayHighlight;
+    const bool bHasGameplayActionHighlight = GameplayContainer.IsValid()
+        && GameplayContainer->GetHighlightForCell(CellId, GameplayHighlight);
+    const bool bIsCurrentFactionPieceCell = GameplayContainer.IsValid()
+        && GameplayContainer->IsCurrentFactionPieceCell(CellId);
+
+    if (bHasGameplayActionHighlight)
+    {
+        FinalHighlightColor = GameplayHighlight.Color;
+        FinalHighlightIntensity = GameplayHighlight.Intensity;
+    }
+    else if (bIsCurrentFactionPieceCell && HoverIntensity > KINDA_SMALL_NUMBER)
+    {
+        FinalHighlightColor = G2_5CurrentFactionPieceHoverColor;
+        FinalHighlightIntensity = 1.0f;
+    }
+    else if (bIsCurrentFactionPieceCell)
+    {
+        FinalHighlightColor = G2_5CurrentFactionPieceColor;
+        FinalHighlightIntensity = 1.0f;
+    }
+    else if (HoverIntensity > KINDA_SMALL_NUMBER)
+    {
+        FinalHighlightColor = HighlightHoverColor;
+        FinalHighlightIntensity = HoverIntensity;
+    }
+    FinalHighlightIntensity = FMath::Clamp(FinalHighlightIntensity, 0.0f, 1.0f);
+
+    const bool bRedWritten = Ref.Component->SetCustomDataValue(Ref.InstanceIndex, 0, FMath::Clamp(FinalHighlightColor.R, 0.0f, 1.0f), false);
+    const bool bGreenWritten = Ref.Component->SetCustomDataValue(Ref.InstanceIndex, 1, FMath::Clamp(FinalHighlightColor.G, 0.0f, 1.0f), false);
+    const bool bBlueWritten = Ref.Component->SetCustomDataValue(Ref.InstanceIndex, 2, FMath::Clamp(FinalHighlightColor.B, 0.0f, 1.0f), false);
+    const bool bIntensityWritten = Ref.Component->SetCustomDataValue(Ref.InstanceIndex, 3, FinalHighlightIntensity, bMarkRenderStateDirty);
 
     if (bMarkRenderStateDirty)
     {
         Ref.Component->MarkRenderInstancesDirty();
     }
 
-    if (!bHoverWritten || !bSelectWritten)
+    if (!bRedWritten || !bGreenWritten || !bBlueWritten || !bIntensityWritten)
     {
         UE_LOG(LogPlanetTess, Warning,
-            TEXT("[Tess] Failed to write HISM highlight custom data. Cell=%d Instance=%d Component=%s HoverWritten=%d SelectWritten=%d Hover=%.1f Select=%.1f"),
+            TEXT("[Tess] Failed to write HISM highlight custom data. Cell=%d Instance=%d Component=%s RWritten=%d GWritten=%d BWritten=%d IntensityWritten=%d Hover=%.1f Gameplay=%.1f Final=(%.3f, %.3f, %.3f, %.3f)"),
             CellId,
             Ref.InstanceIndex,
             *GetNameSafe(Ref.Component),
-            bHoverWritten ? 1 : 0,
-            bSelectWritten ? 1 : 0,
-            HoverValue,
-            SelectValue);
+            bRedWritten ? 1 : 0,
+            bGreenWritten ? 1 : 0,
+            bBlueWritten ? 1 : 0,
+            bIntensityWritten ? 1 : 0,
+            HoverIntensity,
+            GameplayHighlight.Intensity,
+            FinalHighlightColor.R,
+            FinalHighlightColor.G,
+            FinalHighlightColor.B,
+            FinalHighlightIntensity);
     }
 }
 
@@ -1447,33 +1503,207 @@ void APlanetTessellatedMesh::UpdateHISMHover_(int32 NewCellId)
     WriteHISMHighlightForCell_(NewCellId, true);
 }
 
-void APlanetTessellatedMesh::SetHISMSelected_(int32 CellId, bool bSelected)
+void APlanetTessellatedMesh::RebuildGameplay_()
 {
-    if (!bEnableHISMInstanceHighlight || !CellIdToHISMInstance.IsValidIndex(CellId))
+    if (!CellTopology.IsValid() || !Generator.IsValid())
+    {
+        GameplayContainer.Reset();
+        G2_5LastHighlightedFactionId = INDEX_NONE;
+        G2_5LastCameraFocusedTurnIndex = INDEX_NONE;
+        return;
+    }
+
+    const int32 NumCells = CellTopology->Cells.Num();
+    const TArray<FCellGeoData>& GeoCells = Generator->GetCellData();
+    if (GeoCells.Num() != NumCells)
+    {
+        UE_LOG(LogPlanetTess, Warning,
+            TEXT("[Tess][G2] Skip Gameplay rebuild: WorldGen cell count mismatch. Got=%d Expected=%d"),
+            GeoCells.Num(),
+            NumCells);
+        GameplayContainer.Reset();
+        G2_5LastHighlightedFactionId = INDEX_NONE;
+        G2_5LastCameraFocusedTurnIndex = INDEX_NONE;
+        return;
+    }
+
+    TArray<FTerraGameplayCellState> GameplayCells;
+    GameplayCells.SetNum(NumCells);
+
+    for (int32 CellId = 0; CellId < NumCells; ++CellId)
+    {
+        const FCell& SourceCell = CellTopology->Cells[CellId];
+        FTerraGameplayCellState& TargetCell = GameplayCells[CellId];
+        TargetCell.CellId = CellId;
+        TargetCell.bIsPentagon = SourceCell.bIsPentagon;
+        TargetCell.NeighborCellIds = SourceCell.NeighborCellIds;
+
+        switch (GeoCells[CellId].SimpleTerrainType)
+        {
+        case ETerraSimpleTerrainType::Forest:
+            TargetCell.TerrainType = ETerraGameplayTerrainType::Forest;
+            break;
+        case ETerraSimpleTerrainType::Mountain:
+            TargetCell.TerrainType = ETerraGameplayTerrainType::Mountain;
+            break;
+        case ETerraSimpleTerrainType::Plain:
+        default:
+            TargetCell.TerrainType = ETerraGameplayTerrainType::Plain;
+            break;
+        }
+    }
+
+    GameplayContainer = MakeUnique<FTerraGameplayContainer>();
+    GameplayContainer->Initialize(GameplayCells);
+
+    G2_5LastHighlightedFactionId = GameplayContainer->GetCurrentFactionId();
+    G2_5LastCameraFocusedTurnIndex = INDEX_NONE;
+    RefreshCurrentFactionPieceHighlights_();
+}
+
+void APlanetTessellatedMesh::RefreshGameplayHighlights_(const TArray<int32>& DirtyCellIds)
+{
+    for (const int32 CellId : DirtyCellIds)
+    {
+        WriteHISMHighlightForCell_(CellId);
+    }
+}
+
+void APlanetTessellatedMesh::RefreshFactionPieceHighlights_(int32 FactionId)
+{
+    if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
     {
         return;
     }
 
-    const bool bWasSelected = HISMSelectedCellIds.Contains(CellId);
-    if (bWasSelected == bSelected)
+    TArray<int32> PieceCellIds;
+    if (!GameplayContainer->CollectFactionPieceCellIds(FactionId, PieceCellIds))
     {
         return;
     }
 
-    if (bSelected)
+    for (const int32 CellId : PieceCellIds)
     {
-        HISMSelectedCellIds.Add(CellId);
+        WriteHISMHighlightForCell_(CellId);
+    }
+}
+
+void APlanetTessellatedMesh::RefreshCurrentFactionPieceHighlights_()
+{
+    if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
+    {
+        return;
+    }
+
+    TArray<int32> PieceCellIds;
+    if (!GameplayContainer->CollectCurrentFactionPieceCellIds(PieceCellIds))
+    {
+        return;
+    }
+
+    for (const int32 CellId : PieceCellIds)
+    {
+        WriteHISMHighlightForCell_(CellId);
+    }
+}
+
+bool APlanetTessellatedMesh::GetCellSurfaceWorldPosition_(int32 CellId, float RadiusOffsetCM, FVector& OutWorldPosition) const
+{
+    if (!CellTopology.IsValid() || !CellTopology->Cells.IsValidIndex(CellId))
+    {
+        return false;
+    }
+
+    const float Radius = GlobeRadiusCM + RadiusOffsetCM;
+    const FVector LocalPosition = CellTopology->Cells[CellId].UnitCenter * Radius;
+    OutWorldPosition = GetActorTransform().TransformPosition(LocalPosition);
+    return true;
+}
+
+void APlanetTessellatedMesh::FocusCameraOnCell_(int32 CellId, bool bMoveCamera)
+{
+    if (!bEnableG2_5CameraAssist)
+    {
+        return;
+    }
+
+    UWorld* World = GetWorld();
+    if (!World || !World->IsGameWorld())
+    {
+        return;
+    }
+
+    APlayerController* PlayerController = UGameplayStatics::GetPlayerController(World, 0);
+    if (!PlayerController)
+    {
+        return;
+    }
+
+    FVector TargetWorldPosition;
+    if (!GetCellSurfaceWorldPosition_(CellId, 0.0f, TargetWorldPosition))
+    {
+        return;
+    }
+
+    AActor* ViewTarget = PlayerController->GetViewTarget();
+    FVector CameraWorldPosition = FVector::ZeroVector;
+    if (bMoveCamera)
+    {
+        if (!GetCellSurfaceWorldPosition_(CellId, FMath::Max(0.0f, G2_5TurnStartCameraHeightCM), CameraWorldPosition))
+        {
+            return;
+        }
+    }
+    else if (ViewTarget)
+    {
+        CameraWorldPosition = ViewTarget->GetActorLocation();
+    }
+    else if (PlayerController->PlayerCameraManager)
+    {
+        CameraWorldPosition = PlayerController->PlayerCameraManager->GetCameraLocation();
     }
     else
     {
-        HISMSelectedCellIds.Remove(CellId);
+        return;
     }
-    WriteHISMHighlightForCell_(CellId);
+
+    const FVector LookDirection = TargetWorldPosition - CameraWorldPosition;
+    if (LookDirection.IsNearlyZero())
+    {
+        return;
+    }
+
+    const FRotator LookRotation = LookDirection.Rotation();
+    if (ViewTarget)
+    {
+        if (bMoveCamera)
+        {
+            ViewTarget->SetActorLocation(CameraWorldPosition);
+        }
+        ViewTarget->SetActorRotation(LookRotation);
+    }
+    PlayerController->SetControlRotation(LookRotation);
+
+    UE_LOG(LogPlanetTess, Log,
+        TEXT("[Tess][G2.5] Focus camera on Cell=%d Move=%d Camera=(%.1f, %.1f, %.1f) Target=(%.1f, %.1f, %.1f)"),
+        CellId,
+        bMoveCamera ? 1 : 0,
+        CameraWorldPosition.X,
+        CameraWorldPosition.Y,
+        CameraWorldPosition.Z,
+        TargetWorldPosition.X,
+        TargetWorldPosition.Y,
+        TargetWorldPosition.Z);
 }
 
-void APlanetTessellatedMesh::ToggleHISMSelected_(int32 CellId)
+void APlanetTessellatedMesh::FocusCameraOnCurrentFactionBase_()
 {
-    SetHISMSelected_(CellId, !HISMSelectedCellIds.Contains(CellId));
+    if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
+    {
+        return;
+    }
+
+    FocusCameraOnCell_(GameplayContainer->GetCurrentFactionBaseCellId(), true);
 }
 
 bool APlanetTessellatedMesh::TryResolveHISMHitToCellId(const FHitResult& Hit, int32& OutCellId) const
@@ -1549,15 +1779,65 @@ bool APlanetTessellatedMesh::HandleHISMClickHit(const FHitResult& Hit)
         return false;
     }
 
-    ToggleHISMSelected_(CellId);
     LastHISMClickedCellId = CellId;
 
+    if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
+    {
+        UE_LOG(LogPlanetTess, Warning,
+            TEXT("[Tess][G2] HISM Click ignored: GameplayContainer is not ready. Cell=%d Instance=%d Component=%s"),
+            CellId,
+            Hit.Item,
+            *GetNameSafe(Hit.GetComponent()));
+        return true;
+    }
+
+    const int32 PrevFactionId = GameplayContainer->GetCurrentFactionId();
+    const int32 PrevSelectedPieceId = GameplayContainer->GetSelectedPieceId();
+
+    TArray<int32> DirtyCellIds;
+    const bool bGameplayHandled = GameplayContainer->HandleCellClick(CellId, DirtyCellIds);
+    RefreshGameplayHighlights_(DirtyCellIds);
+
+    const int32 NewFactionId = GameplayContainer->GetCurrentFactionId();
+    const int32 NewSelectedPieceId = GameplayContainer->GetSelectedPieceId();
+    const ETerraGameplayInteractionPhase NewPhase = GameplayContainer->GetInteractionPhase();
+
+    if (NewFactionId != PrevFactionId)
+    {
+        RefreshFactionPieceHighlights_(PrevFactionId);
+        RefreshFactionPieceHighlights_(NewFactionId);
+        G2_5LastHighlightedFactionId = NewFactionId;
+        G2_5LastCameraFocusedTurnIndex = GameplayContainer->GetTurnIndex();
+        FocusCameraOnCurrentFactionBase_();
+    }
+    else
+    {
+        RefreshFactionPieceHighlights_(NewFactionId);
+    }
+
+    if (bGameplayHandled
+        && NewSelectedPieceId != INDEX_NONE
+        && NewSelectedPieceId != PrevSelectedPieceId
+        && NewPhase == ETerraGameplayInteractionPhase::PieceSelected)
+    {
+        int32 SelectedPieceCellId = INDEX_NONE;
+        if (GameplayContainer->TryGetPieceCellId(NewSelectedPieceId, SelectedPieceCellId))
+        {
+            FocusCameraOnCell_(SelectedPieceCellId, false);
+        }
+    }
+
+    RebuildG1DebugPieces_();
+
     UE_LOG(LogPlanetTess, Log,
-        TEXT("[Tess] HISM Click -> ToggleSelected Cell=%d Instance=%d Component=%s SelectedNow=%d"),
+        TEXT("[Tess][G2] HISM Click -> Gameplay Cell=%d Instance=%d Component=%s Handled=%d CurrentFaction=%d Turn=%d Phase=%d"),
         CellId,
         Hit.Item,
         *GetNameSafe(Hit.GetComponent()),
-        HISMSelectedCellIds.Contains(CellId) ? 1 : 0);
+        bGameplayHandled ? 1 : 0,
+        GameplayContainer->GetCurrentFactionId(),
+        GameplayContainer->GetTurnIndex(),
+        static_cast<int32>(GameplayContainer->GetInteractionPhase()));
 
     return true;
 }
@@ -1569,12 +1849,6 @@ void APlanetTessellatedMesh::ClearHISMHover()
 
 void APlanetTessellatedMesh::ClearAllHISMHighlights()
 {
-    const TArray<int32> SelectedCopy = HISMSelectedCellIds.Array();
-    for (const int32 CellId : SelectedCopy)
-    {
-        SetHISMSelected_(CellId, false);
-    }
-
     if (HISMCurrentHoverCellId != INDEX_NONE)
     {
         const int32 OldHover = HISMCurrentHoverCellId;
@@ -1592,6 +1866,39 @@ void APlanetTessellatedMesh::RebuildG1DebugPieces_()
 
     if (!bEnableG1DebugPieces || !CellTopology.IsValid())
     {
+        return;
+    }
+
+    if (GameplayContainer.IsValid() && GameplayContainer->IsInitialized())
+    {
+        for (const FTerraGameplayPieceState& Piece : GameplayContainer->GetPieces())
+        {
+            if (!Piece.bAlive || !CellTopology->Cells.IsValidIndex(Piece.CellId))
+            {
+                continue;
+            }
+
+            FTerraG1DebugPiece& DebugPiece = G1DebugPieces.AddDefaulted_GetRef();
+            DebugPiece.FactionId = Piece.OwnerFactionId;
+            DebugPiece.CellId = Piece.CellId;
+
+            switch (Piece.PieceType)
+            {
+            case ETerraGameplayPieceType::Flag:
+                DebugPiece.PieceType = ETerraG1DebugPieceType::Base;
+                break;
+            case ETerraGameplayPieceType::Cavalry:
+                DebugPiece.PieceType = ETerraG1DebugPieceType::Cavalry;
+                break;
+            case ETerraGameplayPieceType::Archer:
+                DebugPiece.PieceType = ETerraG1DebugPieceType::Archer;
+                break;
+            case ETerraGameplayPieceType::Infantry:
+            default:
+                DebugPiece.PieceType = ETerraG1DebugPieceType::Infantry;
+                break;
+            }
+        }
         return;
     }
 

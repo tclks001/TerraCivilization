@@ -17,6 +17,7 @@ class UTexture2DArray;
 class FSphereTopology;
 class FMeshDisplacementBuilder;
 class FWorldGenerator;   // T4：TUniquePtr<FWorldGenerator>，避免在头文件 include "WorldGenerator.h"
+class FTerraGameplayContainer;
 class UHierarchicalInstancedStaticMeshComponent;
 class UStaticMesh;
 struct FHitResult;
@@ -377,6 +378,26 @@ public:
     float G1DebugPieceHeightOffsetCM = 260.0f;
 
     //----------------------------------------------------------
+    // SimpleGameplay G2.5：视角与当前阵营提示
+    //----------------------------------------------------------
+
+    /** true：回合开始自动切到当前阵营大本营上方，选中棋子时自动旋转视角对准。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G2.5")
+    bool bEnableG2_5CameraAssist = true;
+
+    /** 回合开始时摄像机位于大本营球面外侧的额外高度（cm）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G2.5", meta = (ClampMin = "0.0", ClampMax = "100000.0"))
+    float G2_5TurnStartCameraHeightCM = 8000.0f;
+
+    /** 当前阵营所有棋子脚下 Cell 的淡粉色提示。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G2.5")
+    FLinearColor G2_5CurrentFactionPieceColor = FLinearColor(1.0f, 0.45f, 0.68f, 1.0f);
+
+    /** hover 到当前阵营棋子时的加红提示色。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G2.5")
+    FLinearColor G2_5CurrentFactionPieceHoverColor = FLinearColor(1.0f, 0.22f, 0.32f, 1.0f);
+
+    //----------------------------------------------------------
     // 生命周期
     //----------------------------------------------------------
     virtual void OnConstruction(const FTransform& Transform) override;
@@ -493,22 +514,37 @@ private:
     /** SimpleGameplay：统一应用 HISM 与旧 ProceduralMesh 的显示 / 碰撞开关。 */
     void ApplyRenderModeVisibility_();
 
-    /** SimpleGameplay：统一设置 HISM 组件的自定义数据通道、动态材质参数与高亮初值。 */
+    /** SimpleGameplay：统一设置 HISM 组件的最终高亮颜色自定义数据通道、动态材质参数与高亮初值。 */
     void PrepareHISMHighlightComponent_(UHierarchicalInstancedStaticMeshComponent* Comp);
 
-    /** SimpleGameplay：写单个 Cell 的 HISM hover/select 自定义数据。 */
+    /** SimpleGameplay：把单个 Cell 当前 Gameplay/hover 逻辑合成为最终 RGB + Intensity 自定义数据。 */
     void WriteHISMHighlightForCell_(int32 CellId, bool bMarkRenderStateDirty = true);
 
     /** SimpleGameplay：设置当前 hover Cell，使用旧高亮组件同语义防抖状态机。 */
     void UpdateHISMHover_(int32 NewCellId);
 
-    /** SimpleGameplay：设置 / 清除某 Cell 的 HISM select 状态。 */
-    void SetHISMSelected_(int32 CellId, bool bSelected);
+    /** SimpleGameplay G2：重建 Gameplay 总容器，复制 Cell 拓扑和 WorldGen 地形状态。 */
+    void RebuildGameplay_();
 
-    /** SimpleGameplay：翻转某 Cell 的 HISM select 状态。 */
-    void ToggleHISMSelected_(int32 CellId);
+    /** SimpleGameplay G2：刷新 Gameplay 容器报告的脏 Cell 高亮。 */
+    void RefreshGameplayHighlights_(const TArray<int32>& DirtyCellIds);
 
-    /** SimpleGameplay G1：按 12 个五边形基地重建调试棋子缓存。 */
+    /** SimpleGameplay G2.5：刷新指定阵营所有棋子所在 Cell 的 HISM 高亮。 */
+    void RefreshFactionPieceHighlights_(int32 FactionId);
+
+    /** SimpleGameplay G2.5：刷新当前阵营所有棋子所在 Cell 的 HISM 高亮。 */
+    void RefreshCurrentFactionPieceHighlights_();
+
+    /** SimpleGameplay G2.5：根据 CellId 计算球面 Cell 中心世界坐标。 */
+    bool GetCellSurfaceWorldPosition_(int32 CellId, float RadiusOffsetCM, FVector& OutWorldPosition) const;
+
+    /** SimpleGameplay G2.5：回合开始时移动到 Cell 上方并朝向 Cell，或仅旋转当前视角对准 Cell。 */
+    void FocusCameraOnCell_(int32 CellId, bool bMoveCamera);
+
+    /** SimpleGameplay G2.5：回合开始时视角切到当前阵营大本营正上方。 */
+    void FocusCameraOnCurrentFactionBase_();
+
+    /** SimpleGameplay G1/G2：按当前 Gameplay 棋子状态重建调试棋子缓存。 */
     void RebuildG1DebugPieces_();
 
     /** SimpleGameplay G1：用 DrawDebugSphere 绘制当前调试棋子缓存。 */
@@ -624,10 +660,16 @@ private:
     /** HISM hover 离开后的防抖倒计时。 */
     float HISMHoverFadeTimer = 0.0f;
 
-    /** HISM select 高亮集合。 */
-    TSet<int32> HISMSelectedCellIds;
+    /** SimpleGameplay G2：棋子、Cell 逻辑、回合和 Gameplay 高亮的总容器。 */
+    TUniquePtr<FTerraGameplayContainer> GameplayContainer;
 
-    /** SimpleGameplay G1：当前初始化出的调试棋子缓存。 */
+    /** SimpleGameplay G2.5：上一次已刷新底色提示的当前阵营。 */
+    int32 G2_5LastHighlightedFactionId = INDEX_NONE;
+
+    /** SimpleGameplay G2.5：上一次已经执行回合开始相机切换的 TurnIndex。 */
+    int32 G2_5LastCameraFocusedTurnIndex = INDEX_NONE;
+
+    /** SimpleGameplay G1/G2：当前初始化出的调试棋子缓存。 */
     TArray<FTerraG1DebugPiece> G1DebugPieces;
 
     //----------------------------------------------------------

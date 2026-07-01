@@ -206,10 +206,10 @@ void APlanetBinder::OnHoverWorldPoint(const FVector& WorldHit)
 
 void APlanetBinder::OnClickWorldPoint(const FVector& WorldHit)
 {
-    // R11：点击 → 在鼠标命中的 Cell 上 toggle select 状态。
-    // CellHighlightComponent 内部会写 LUT.G 通道，马上看到 SelectColor 描边。
+    // G2 起，左键点击 gameplay 统一交给 APlanetTessellatedMesh -> FTerraGameplayContainer。
+    // 旧 CellHighlightComponent::ToggleSelected 仅作为历史 debug API 保留，不再由 PlanetBinder 触发。
     AActor* Host = GetHostActor();
-    if (!Host || !Query.IsValid() || !HighlightComp)
+    if (!Host || !Query.IsValid())
     {
         return;
     }
@@ -225,10 +225,9 @@ void APlanetBinder::OnClickWorldPoint(const FVector& WorldHit)
     {
         return;
     }
-    HighlightComp->ToggleSelected(R.CellId);
 
-    UE_LOG(LogPlanetBinder, Log,
-        TEXT("[PlanetBinder] Click -> ToggleSelected(Cell %d)"), R.CellId);
+    UE_LOG(LogPlanetBinder, Verbose,
+        TEXT("[PlanetBinder] Click ignored by deprecated fallback path. Cell=%d"), R.CellId);
 }
 
 void APlanetBinder::OnLeavePlanet()
