@@ -377,9 +377,15 @@ A' A - A -   =>   - A - A A'
 
 ## 8. “直线”的实现定义
 
-二吃一与跳跃都依赖“直线”。在球面 Hex/Pent 棋盘上，直线不是欧式平面直线，因此实现时需要定义为 **沿 Cell 邻接图的一条方向射线**。
+二吃一与跳跃都依赖“直线”。在球面 Hex/Pent 棋盘上，直线不是欧式平面直线，因此实现时定义为 **沿 Cell 邻接图和邻居环顺序推进的一条或多条方向射线**。
 
-### 8.1 方向射线
+核心原则：
+
+- 六边形 Cell 有 6 个邻居，可以通过“对向邻居”得到唯一延长方向。
+- 五边形 Cell 有 5 个邻居，本身又是大本营所在地，五个方向几何地位完全一致，**不使用几何方法强行选唯一延长线**。
+- 方向射线推进到五边形 Cell 时，直线发生一次二分叉，把两个对向候选都纳入后续判定，形成一个“人”字形。
+
+### 8.1 方向推进接口
 
 给定相邻两个 Cell：
 
@@ -387,30 +393,143 @@ A' A - A -   =>   - A - A A'
 Prev -> Cur
 ```
 
-继续向前的下一个 Cell 记为：
+继续向前的候选 Cell 不再是单个 `Next`，而是一组分叉结果：
 
 ```text
-Next = StepForward(Prev, Cur)
+NextCells = StepForwardBranches(Prev, Cur)
 ```
 
-`StepForward` 的实现建议：
+返回规则：
 
-1. 在 `Cur.NeighborCellIds` 中排除 `Prev`。
-2. 对每个候选邻居 `N`，计算从 `Cur` 指向 `Prev` 与从 `Cur` 指向 `N` 的球面切向方向。
-3. 选择与“从 Prev 到 Cur 的延长方向”最接近的 `N`。
-4. 如果角度偏差超过容忍阈值，则认为没有明确直线延长。
+- 如果 `Cur` 是六边形，`NextCells` 最多包含 1 个 Cell。
+- 如果 `Cur` 是五边形，`NextCells` 最多包含 2 个 Cell。
+- 如果 `Prev` 不是 `Cur` 的有效邻居，返回空。
+- 如果候选邻居为 `INDEX_NONE`，忽略该候选。
 
-在普通六边形区域，这等价于取对边方向；在五边形附近，由于没有完全对边，用几何上最接近的方向延续。
+### 8.2 六边形 Cell：唯一对向邻居
 
-### 8.2 初版约束
+六边形 Cell 的 `NeighborCellIds` 已按环形顺序排列。
 
-为降低实现复杂度，初版可以采用以下策略：
+若 `Prev` 是 `Cur` 的第 `x` 号邻居：
 
-- 对六边形 Cell：优先使用 `NeighborCellIds` 的环形顺序取对向邻居。
-- 对五边形 Cell：使用几何切向方向选择最接近的前进邻居。
-- 攻击、跳跃、远程判定全部复用同一套 `StepForward`。
+```text
+Cur.NeighborCellIds[x] == Prev
+```
 
-这样可以保证规则在五边形基地附近也能运行，而不是把 pent 当成特殊禁区。
+则沿当前方向继续前进时，唯一对向邻居为：
+
+```text
+Next = Cur.NeighborCellIds[(x + 3) % 6]
+```
+
+因此：
+
+```text
+StepForwardBranches(Prev, Cur) = { Cur.NeighborCellIds[(x + 3) % 6] }
+```
+
+示意：
+
+```text
+      n5   n0(Prev)
+   n4    Cur    n1
+      n3(Next) n2
+```
+
+### 8.3 五边形 Cell：两个对向邻居，形成“人”字形分叉
+
+五边形 Cell 没有严格的对边方向，不允许用几何角度选择唯一方向。
+
+若 `Prev` 是 `Cur` 的第 `x` 号邻居：
+
+```text
+Cur.NeighborCellIds[x] == Prev
+```
+
+则两个对向候选都是合法延长方向：
+
+```text
+NextA = Cur.NeighborCellIds[(x + 2) % 5]
+NextB = Cur.NeighborCellIds[(x + 3) % 5]
+```
+
+因此：
+
+```text
+StepForwardBranches(Prev, Cur) = {
+    Cur.NeighborCellIds[(x + 2) % 5],
+    Cur.NeighborCellIds[(x + 3) % 5]
+}
+```
+
+示意：
+
+```text
+          Prev = n0
+        /          \
+      n4    Cur     n1
+        \   /  \   /
+         n3    n2
+        NextB NextA
+```
+
+当方向射线走到五边形时，后续继续以 `Cur` 为新的 `Prev`，分别以 `NextA`、`NextB` 为新的 `Cur` 递归推进：
+
+```text
+Branch A: Cur -> NextA -> ...
+Branch B: Cur -> NextB -> ...
+```
+
+这会把一条入射线扩展成两条后续射线，即一个“人”字形。
+
+### 8.4 射线生成方式
+
+攻击、跳跃、远程判定不应只依赖单个 `StepForward`，而应生成射线分支。
+
+建议实现一个按最大长度展开的接口：
+
+```cpp
+struct FTerraRayBranch
+{
+    TArray<int32> CellIds;
+};
+
+void BuildForwardRayBranches(
+    int32 PrevCellId,
+    int32 CurCellId,
+    int32 MaxStepCount,
+    TArray<FTerraRayBranch>& OutBranches);
+```
+
+展开规则：
+
+1. 当前分支末尾状态为 `(Prev, Cur)`。
+2. 调用 `StepForwardBranches(Prev, Cur)` 获取 0、1 或 2 个后继。
+3. 若返回 0 个，当前分支终止。
+4. 若返回 1 个，将该 Cell 追加到当前分支并继续。
+5. 若返回 2 个，复制当前分支为两份，分别追加两个后继，再递归推进。
+6. `MaxStepCount` 用于限制最大展开长度，避免异常环路或过长扫描。
+
+初版中各规则所需的最大长度很短：
+
+| 用途 | 所需长度 |
+| --- | --- |
+| 标准跳跃 | 2 格前方 |
+| 骑兵特殊跳跃 | 3 格前方 |
+| 基础二吃一 | 2 格前方 |
+| 弓兵远程二吃一 | 3 格前方 |
+| 山脉弓兵远程二吃一 | 4 格前方 |
+
+### 8.5 判定规则如何使用分叉线
+
+所有依赖直线的规则，都应对每条分叉射线分别判定：
+
+- 只要任意一条分叉射线满足跳跃条件，该跳跃目标就是合法目标。
+- 只要任意一条分叉射线形成 `A A B`，就可以吃掉 `B`。
+- 只要任意一条分叉射线形成 `A' A - B` 或 `A' A - - B`，弓兵远程吃子成立。
+- 如果两条分叉线命中同一个目标，只记录一次。
+
+这样可以保证五边形大本营附近不会因为缺少唯一对边而失去规则连续性，同时也不引入任意几何偏置。
 
 ---
 
@@ -631,7 +750,7 @@ struct FTerraFactionState
 | --- | --- |
 | `FTerraBoardInitializer` | 选择 12 个五边形并生成开局 16 子 |
 | `FTerraMoveService` | 普通移动、跳跃、连跳合法性 |
-| `FTerraLineService` | `StepForward` 与直线 Cell 序列生成 |
+| `FTerraLineService` | `StepForwardBranches` 与 `BuildForwardRayBranches` 分叉射线生成 |
 | `FTerraCaptureService` | 基础二吃一与弓兵远程吃子判定 |
 | `FTerraTurnService` | 回合推进、失败阵营跳过 |
 | `FTerraWinService` | 军旗失败与最终胜利判定 |
@@ -678,7 +797,8 @@ struct FTerraFactionState
 
 ### G3：标准跳跃与连跳
 
-- 实现 `StepForward`。
+- 实现 `StepForwardBranches`。
+- 实现 `BuildForwardRayBranches`。
 - 实现标准跳跃。
 - 实现骑兵特殊跳跃。
 - 实现连跳交互。
