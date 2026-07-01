@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/EngineTypes.h"
 #include "GameFramework/Actor.h"
 #include "Templates/UniquePtr.h"
 #include "WorldGenSettings.h"   // T4：UPROPERTY 直接持有 FWorldGenSettings → 完整类型可见
@@ -16,6 +17,17 @@ class UTexture2DArray;
 class FSphereTopology;
 class FMeshDisplacementBuilder;
 class FWorldGenerator;   // T4：TUniquePtr<FWorldGenerator>，避免在头文件 include "WorldGenerator.h"
+class UHierarchicalInstancedStaticMeshComponent;
+class UStaticMesh;
+struct FHitResult;
+
+struct FTerraHISMCellInstanceRef
+{
+    UHierarchicalInstancedStaticMeshComponent* Component = nullptr;
+    int32 InstanceIndex = INDEX_NONE;
+
+    bool IsValid() const { return Component != nullptr && InstanceIndex != INDEX_NONE; }
+};
 
 /**
  * APlanetTessellatedMesh
@@ -263,9 +275,81 @@ public:
     bool bUsePlaceholderElevation = false;
 
     //----------------------------------------------------------
+    // SimpleGameplay：HISM 静态网格瓦片渲染
+    //----------------------------------------------------------
+
+    /** true：主视觉使用每 Cell 一个 StaticMesh 实例的 HISM 瓦片渲染。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|HISM Tiles")
+    bool bEnableHISMTileRendering = true;
+
+    /** true：HISM 组件开启 QueryOnly 碰撞，可直接参与鼠标拾取。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|HISM Tiles")
+    bool bEnableHISMTileCollision = true;
+
+    /** 平原 Cell 使用的烘焙 StaticMesh 资产。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|HISM Tiles")
+    TObjectPtr<UStaticMesh> PlainTileStaticMesh;
+
+    /** 森林 Cell 使用的烘焙 StaticMesh 资产。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|HISM Tiles")
+    TObjectPtr<UStaticMesh> ForestTileStaticMesh;
+
+    /** 山脉 Cell 使用的烘焙 StaticMesh 资产。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|HISM Tiles")
+    TObjectPtr<UStaticMesh> MountainTileStaticMesh;
+
+    /** 生成瓦片资产时使用的 BaseRadius。默认 100，与 TerraSphericalTileGenerator 默认值一致。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|HISM Tiles", meta = (ClampMin = "1.0"))
+    float HISMTileSourceRadiusCM = 100.0f;
+
+    /** HISM 瓦片相对 GlobeRadiusCM 的额外半径偏移。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|HISM Tiles")
+    float HISMTileRadiusOffsetCM = 0.0f;
+
+    /** HISM 瓦片额外统一缩放。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|HISM Tiles", meta = (ClampMin = "0.001"))
+    float HISMTileAdditionalUniformScale = 1.0f;
+
+    /** true：启用 HISM 实例拾取与 PerInstanceCustomData tile 边缘高亮。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|HISM Highlight")
+    bool bEnableHISMInstanceHighlight = true;
+
+    /** HISM hover 离开球体后的防抖保留时间；语义与旧 CellHighlightComponent 保持一致。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|HISM Highlight",
+              meta = (ClampMin = "0.0", ClampMax = "5.0"))
+    float HISMHoverFadeDuration = 0.5f;
+
+    /** 材质侧 UV 边缘高亮内半径建议值；C++ 会写入 HISM 动态材质参数。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|HISM Highlight",
+              meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float HISMHighlightInnerRadius = 0.40f;
+
+    /** 材质侧 UV 边缘高亮外半径建议值；C++ 会写入 HISM 动态材质参数。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|HISM Highlight",
+              meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float HISMHighlightOuterRadius = 0.50f;
+
+    /** 最近一次 HISM hover 解析出的 CellId，供编辑器 / 蓝图调试查看。 */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|HISM Highlight")
+    int32 LastHISMPickedCellId = INDEX_NONE;
+
+    /** 最近一次 HISM click 解析出的 CellId，供编辑器 / 蓝图调试查看。 */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|HISM Highlight")
+    int32 LastHISMClickedCellId = INDEX_NONE;
+
+    /** true：显示旧 ProceduralMesh 整球地表，用作 debug 对照。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|Debug Render")
+    bool bShowDebugProceduralSurface = false;
+
+    /** true：即使旧整球地表不可见，也保留 QueryOnly 复杂碰撞作为鼠标拾取兜底。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|Debug Render")
+    bool bUseDebugProceduralCollision = true;
+
+    //----------------------------------------------------------
     // 生命周期
     //----------------------------------------------------------
     virtual void OnConstruction(const FTransform& Transform) override;
+    virtual void Tick(float DeltaSeconds) override;
 
     // 注：不 override BeginDestroy()。
     //   1) BeginDestroy 是 UObject GC 的早期回调（对象逻辑销毁、但 C++ 内存还活着），
@@ -281,6 +365,31 @@ public:
      */
     UFUNCTION(CallInEditor, Category = "PlanetTopology|Tess")
     void Rebuild();
+
+    /** 尝试把鼠标命中的 HISM 实例解析成 CellId。 */
+    UFUNCTION(BlueprintCallable, Category = "PlanetTopology|Tess|HISM Highlight")
+    bool TryResolveHISMHitToCellId(const FHitResult& Hit, int32& OutCellId) const;
+
+    /** 输入层 hover 命中 HISM 时调用；成功处理返回 true。 */
+    bool HandleHISMHoverHit(const FHitResult& Hit);
+
+    /** 输入层 click 命中 HISM 时调用；成功处理返回 true。 */
+    bool HandleHISMClickHit(const FHitResult& Hit);
+
+    /** 鼠标离开 HISM 瓦片时调用，只清 hover，不清 select。 */
+    void ClearHISMHover();
+
+    /** 清空全部 HISM hover / select 高亮。 */
+    UFUNCTION(BlueprintCallable, Category = "PlanetTopology|Tess|HISM Highlight")
+    void ClearAllHISMHighlights();
+
+    /** 获取当前 HISM hover CellId。 */
+    UFUNCTION(BlueprintCallable, Category = "PlanetTopology|Tess|HISM Highlight")
+    int32 GetLastHISMPickedCellId() const { return LastHISMPickedCellId; }
+
+    /** 获取最近一次 HISM click CellId。 */
+    UFUNCTION(BlueprintCallable, Category = "PlanetTopology|Tess|HISM Highlight")
+    int32 GetLastHISMClickedCellId() const { return LastHISMClickedCellId; }
 
 private:
     /** 整体重建：双拓扑 + Builder + 5 张 LUT + 双 mesh + 材质（T3 完整路径）。 */
@@ -342,6 +451,27 @@ private:
 
     /** 水面 mesh 灌装（独立 sub=3 拓扑，详见 §6.1，与 R8 RebuildWaterMesh_ 等价）。 */
     void RebuildWaterMesh_();
+
+    /** SimpleGameplay：按 WorldGen 三地形输出重建平原 / 森林 / 山脉三套 HISM 实例。 */
+    void RebuildHISMTileInstances_();
+
+    /** SimpleGameplay：统一应用 HISM 与旧 ProceduralMesh 的显示 / 碰撞开关。 */
+    void ApplyRenderModeVisibility_();
+
+    /** SimpleGameplay：统一设置 HISM 组件的自定义数据通道、动态材质参数与高亮初值。 */
+    void PrepareHISMHighlightComponent_(UHierarchicalInstancedStaticMeshComponent* Comp);
+
+    /** SimpleGameplay：写单个 Cell 的 HISM hover/select 自定义数据。 */
+    void WriteHISMHighlightForCell_(int32 CellId, bool bMarkRenderStateDirty = true);
+
+    /** SimpleGameplay：设置当前 hover Cell，使用旧高亮组件同语义防抖状态机。 */
+    void UpdateHISMHover_(int32 NewCellId);
+
+    /** SimpleGameplay：设置 / 清除某 Cell 的 HISM select 状态。 */
+    void SetHISMSelected_(int32 CellId, bool bSelected);
+
+    /** SimpleGameplay：翻转某 Cell 的 HISM select 状态。 */
+    void ToggleHISMSelected_(int32 CellId);
 
     /** 应用 17 参数 MID 到 TerrainMeshComp（详见 §5.1）。 */
     void ApplyTerrainMaterial_(int32 NumCells);
@@ -419,6 +549,42 @@ private:
     /** 水面层 mesh 子组件（T3 起接入）。 */
     UPROPERTY(VisibleAnywhere, Category = "PlanetTopology|Tess")
     TObjectPtr<UProceduralMeshComponent> WaterMeshComp;
+
+    /** SimpleGameplay：平原瓦片 HISM 组件。 */
+    UPROPERTY(VisibleAnywhere, Category = "PlanetTopology|Tess|HISM Tiles")
+    TObjectPtr<UHierarchicalInstancedStaticMeshComponent> PlainTileHISMComp;
+
+    /** SimpleGameplay：森林瓦片 HISM 组件。 */
+    UPROPERTY(VisibleAnywhere, Category = "PlanetTopology|Tess|HISM Tiles")
+    TObjectPtr<UHierarchicalInstancedStaticMeshComponent> ForestTileHISMComp;
+
+    /** SimpleGameplay：山脉瓦片 HISM 组件。 */
+    UPROPERTY(VisibleAnywhere, Category = "PlanetTopology|Tess|HISM Tiles")
+    TObjectPtr<UHierarchicalInstancedStaticMeshComponent> MountainTileHISMComp;
+
+    /** HISM 反查：Plain 组件 InstanceIndex -> CellId。运行期缓存，不暴露给 Details 面板。 */
+    TArray<int32> PlainInstanceToCellId;
+
+    /** HISM 反查：Forest 组件 InstanceIndex -> CellId。运行期缓存，不暴露给 Details 面板。 */
+    TArray<int32> ForestInstanceToCellId;
+
+    /** HISM 反查：Mountain 组件 InstanceIndex -> CellId。运行期缓存，不暴露给 Details 面板。 */
+    TArray<int32> MountainInstanceToCellId;
+
+    /** HISM 正查：CellId -> HISM 组件 + InstanceIndex。运行期缓存，不暴露给 Details 面板。 */
+    TArray<FTerraHISMCellInstanceRef> CellIdToHISMInstance;
+
+    /** HISM 当前 hover 高亮 CellId。 */
+    int32 HISMCurrentHoverCellId = INDEX_NONE;
+
+    /** HISM 当前鼠标真实指向 CellId；INDEX_NONE 表示处于离开 / fade 状态。 */
+    int32 HISMPendingHoverCellId = INDEX_NONE;
+
+    /** HISM hover 离开后的防抖倒计时。 */
+    float HISMHoverFadeTimer = 0.0f;
+
+    /** HISM select 高亮集合。 */
+    TSet<int32> HISMSelectedCellIds;
 
     //----------------------------------------------------------
     // D15：PIE 退出后材质恢复（详见 AgentWorkflow.md §3.11）

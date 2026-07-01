@@ -3,6 +3,7 @@
 #include "Interaction/PlanetInteractionController.h"
 
 #include "Interaction/PlanetBinder.h"
+#include "Render/PlanetTessellatedMesh.h"
 
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -67,7 +68,25 @@ void APlanetInteractionController::PlayerTick(float DeltaTime)
 
     const bool bHitHost = bHit && Hit.GetActor() == HostActor;
 
-    if (bHitHost)
+    APlanetTessellatedMesh* Tess = CachedBinder->GetTessellatedMesh();
+    const bool bUseHISMHighlightPath = Tess && Tess->bEnableHISMInstanceHighlight;
+    const bool bHISMHoverHandled = bHit && Tess && Tess->HandleHISMHoverHit(Hit);
+
+    if (bHISMHoverHandled)
+    {
+        bWasHovering = true;
+
+        if (WasInputKeyJustPressed(EKeys::LeftMouseButton))
+        {
+            Tess->HandleHISMClickHit(Hit);
+        }
+    }
+    else if (bUseHISMHighlightPath)
+    {
+        Tess->ClearHISMHover();
+        bWasHovering = false;
+    }
+    else if (bHitHost)
     {
         CachedBinder->OnHoverWorldPoint(Hit.ImpactPoint);
         bWasHovering = true;

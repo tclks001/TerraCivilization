@@ -26,6 +26,10 @@
 
 #include "Components/SceneComponent.h"
 #include "Logging/LogMacros.h"
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogPlanetTess, Log, All);
 
@@ -41,8 +45,9 @@ namespace
 
 APlanetTessellatedMesh::APlanetTessellatedMesh()
 {
-    // 与 APlanetTopologyDebugMesh 一致：在编辑器中拖动属性即时刷新；不参与 tick。
-    PrimaryActorTick.bCanEverTick = false;
+    // 与 APlanetTopologyDebugMesh 一致：在编辑器中拖动属性即时刷新；Tick 仅在 HISM hover 防抖启用时打开。
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = false;
     bRunConstructionScriptOnDrag = true;
 
     USceneComponent* RootScene = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
@@ -68,6 +73,31 @@ APlanetTessellatedMesh::APlanetTessellatedMesh()
     WaterMeshComp->SetCanEverAffectNavigation(false);
     WaterMeshComp->bUseComplexAsSimpleCollision = false;
     WaterMeshComp->SetVisibility(false);
+
+    PlainTileHISMComp = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("PlainTileHISMComp"));
+    PlainTileHISMComp->SetupAttachment(RootScene);
+    PlainTileHISMComp->SetCanEverAffectNavigation(false);
+    PlainTileHISMComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    PlainTileHISMComp->SetCollisionObjectType(ECC_WorldStatic);
+    PlainTileHISMComp->SetCollisionResponseToAllChannels(ECR_Block);
+
+    ForestTileHISMComp = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("ForestTileHISMComp"));
+    ForestTileHISMComp->SetupAttachment(RootScene);
+    ForestTileHISMComp->SetCanEverAffectNavigation(false);
+    ForestTileHISMComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    ForestTileHISMComp->SetCollisionObjectType(ECC_WorldStatic);
+    ForestTileHISMComp->SetCollisionResponseToAllChannels(ECR_Block);
+
+    MountainTileHISMComp = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("MountainTileHISMComp"));
+    MountainTileHISMComp->SetupAttachment(RootScene);
+    MountainTileHISMComp->SetCanEverAffectNavigation(false);
+    MountainTileHISMComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    MountainTileHISMComp->SetCollisionObjectType(ECC_WorldStatic);
+    MountainTileHISMComp->SetCollisionResponseToAllChannels(ECR_Block);
+
+    PrepareHISMHighlightComponent_(PlainTileHISMComp);
+    PrepareHISMHighlightComponent_(ForestTileHISMComp);
+    PrepareHISMHighlightComponent_(MountainTileHISMComp);
 
 #if WITH_EDITOR
     // ===== D15：PIE 退出后材质恢复钩子（AgentWorkflow §3.11）=====
@@ -101,6 +131,27 @@ void APlanetTessellatedMesh::OnConstruction(const FTransform& Transform)
 {
     Super::OnConstruction(Transform);
     RebuildAll_();
+}
+
+void APlanetTessellatedMesh::Tick(float DeltaSeconds)
+{
+    Super::Tick(DeltaSeconds);
+
+    if (HISMHoverFadeTimer > 0.0f)
+    {
+        HISMHoverFadeTimer -= DeltaSeconds;
+        if (HISMHoverFadeTimer <= 0.0f)
+        {
+            HISMHoverFadeTimer = 0.0f;
+            const int32 OldHover = HISMCurrentHoverCellId;
+            HISMCurrentHoverCellId = INDEX_NONE;
+            LastHISMPickedCellId = INDEX_NONE;
+            if (OldHover != INDEX_NONE)
+            {
+                WriteHISMHighlightForCell_(OldHover);
+            }
+        }
+    }
 }
 
 void APlanetTessellatedMesh::Rebuild()
@@ -167,7 +218,9 @@ void APlanetTessellatedMesh::RebuildAll_()
     // T3：水面层独立 sub=3 mesh（详见 §6.1）。
     RebuildWaterMesh_();
 
-    LogTopologyStats_();
+    // SimpleGameplay：主视觉 HISM 静态网格瓦片。
+    RebuildHISMTileInstances_();
+    ApplyRenderModeVisibility_();
 }
 
 void APlanetTessellatedMesh::RebuildTopologies_()
@@ -1103,6 +1156,464 @@ void APlanetTessellatedMesh::RebuildWaterMesh_()
         TEXT("[Tess] Rebuilt water mesh: Radius=%.1f cm  Cells=%d  Corners=%d  Verts=%d  Tris=%d  Material=%s"),
         WaterRadius, NumCells, NumCorners, Vertices.Num(), Triangles.Num() / 3,
         WaterMaterial ? *WaterMaterial->GetName() : TEXT("(none)"));
+}
+
+void APlanetTessellatedMesh::RebuildHISMTileInstances_()
+{
+    if (!PlainTileHISMComp || !ForestTileHISMComp || !MountainTileHISMComp)
+    {
+        return;
+    }
+
+    PlainTileHISMComp->ClearInstances();
+    ForestTileHISMComp->ClearInstances();
+    MountainTileHISMComp->ClearInstances();
+
+    PlainInstanceToCellId.Reset();
+    ForestInstanceToCellId.Reset();
+    MountainInstanceToCellId.Reset();
+    CellIdToHISMInstance.Reset();
+    HISMSelectedCellIds.Empty();
+    HISMCurrentHoverCellId = INDEX_NONE;
+    HISMPendingHoverCellId = INDEX_NONE;
+    HISMHoverFadeTimer = 0.0f;
+    LastHISMPickedCellId = INDEX_NONE;
+    LastHISMClickedCellId = INDEX_NONE;
+
+    PlainTileHISMComp->SetStaticMesh(PlainTileStaticMesh);
+    ForestTileHISMComp->SetStaticMesh(ForestTileStaticMesh);
+    MountainTileHISMComp->SetStaticMesh(MountainTileStaticMesh);
+
+    PrepareHISMHighlightComponent_(PlainTileHISMComp);
+    PrepareHISMHighlightComponent_(ForestTileHISMComp);
+    PrepareHISMHighlightComponent_(MountainTileHISMComp);
+
+    if (!bEnableHISMTileRendering)
+    {
+        return;
+    }
+
+    if (!CellTopology.IsValid() || !Generator.IsValid())
+    {
+        UE_LOG(LogPlanetTess, Warning,
+            TEXT("[Tess] Skip HISM spherical tiles: CellTopology or WorldGen is not ready."));
+        return;
+    }
+
+    const TArray<FCellGeoData>& Cells = Generator->GetCellData();
+    const int32 NumCells = CellTopology->Cells.Num();
+    CellIdToHISMInstance.SetNum(NumCells);
+    if (Cells.Num() != NumCells)
+    {
+        UE_LOG(LogPlanetTess, Warning,
+            TEXT("[Tess] Skip HISM spherical tiles: WorldGen cell count mismatch. Got=%d Expected=%d"),
+            Cells.Num(), NumCells);
+        return;
+    }
+
+    if (!PlainTileStaticMesh || !ForestTileStaticMesh || !MountainTileStaticMesh)
+    {
+        UE_LOG(LogPlanetTess, Warning,
+            TEXT("[Tess] HISM spherical tiles need all three StaticMesh assets. Plain=%s Forest=%s Mountain=%s"),
+            *GetNameSafe(PlainTileStaticMesh),
+            *GetNameSafe(ForestTileStaticMesh),
+            *GetNameSafe(MountainTileStaticMesh));
+    }
+
+    const float SourceRadius = FMath::Max(HISMTileSourceRadiusCM, 1.0f);
+    const float TargetRadius = FMath::Max(GlobeRadiusCM + HISMTileRadiusOffsetCM, 1.0f);
+    const float UniformScale = (TargetRadius / SourceRadius) * FMath::Max(HISMTileAdditionalUniformScale, 0.001f);
+    const FVector Scale3D(UniformScale);
+    const FVector LocalTileUp = FVector::UpVector;
+
+    int32 PlainCount = 0;
+    int32 ForestCount = 0;
+    int32 MountainCount = 0;
+    int32 MissingMeshCount = 0;
+
+    for (int32 CellId = 0; CellId < NumCells; ++CellId)
+    {
+        const FVector UnitCenter = CellTopology->Cells[CellId].UnitCenter.GetSafeNormal();
+        if (UnitCenter.IsNearlyZero())
+        {
+            continue;
+        }
+
+        UHierarchicalInstancedStaticMeshComponent* TargetComp = nullptr;
+        switch (Cells[CellId].SimpleTerrainType)
+        {
+        case ETerraSimpleTerrainType::Forest:
+            TargetComp = ForestTileHISMComp;
+            ++ForestCount;
+            break;
+        case ETerraSimpleTerrainType::Mountain:
+            TargetComp = MountainTileHISMComp;
+            ++MountainCount;
+            break;
+        case ETerraSimpleTerrainType::Plain:
+        default:
+            TargetComp = PlainTileHISMComp;
+            ++PlainCount;
+            break;
+        }
+
+        if (!TargetComp || !TargetComp->GetStaticMesh())
+        {
+            ++MissingMeshCount;
+            continue;
+        }
+
+        const FQuat Rotation = FQuat::FindBetweenNormals(LocalTileUp, UnitCenter);
+        const FTransform InstanceTransform(Rotation, FVector::ZeroVector, Scale3D);
+        const int32 InstanceIndex = TargetComp->AddInstance(InstanceTransform, /*bWorldSpace=*/false);
+        if (InstanceIndex == INDEX_NONE)
+        {
+            continue;
+        }
+
+        TArray<int32>* InstanceToCellId = nullptr;
+        if (TargetComp == PlainTileHISMComp)
+        {
+            InstanceToCellId = &PlainInstanceToCellId;
+        }
+        else if (TargetComp == ForestTileHISMComp)
+        {
+            InstanceToCellId = &ForestInstanceToCellId;
+        }
+        else if (TargetComp == MountainTileHISMComp)
+        {
+            InstanceToCellId = &MountainInstanceToCellId;
+        }
+
+        if (InstanceToCellId)
+        {
+            if (InstanceToCellId->Num() <= InstanceIndex)
+            {
+                InstanceToCellId->SetNum(InstanceIndex + 1);
+            }
+            (*InstanceToCellId)[InstanceIndex] = CellId;
+        }
+
+        if (CellIdToHISMInstance.IsValidIndex(CellId))
+        {
+            CellIdToHISMInstance[CellId].Component = TargetComp;
+            CellIdToHISMInstance[CellId].InstanceIndex = InstanceIndex;
+        }
+
+        if (bEnableHISMInstanceHighlight)
+        {
+            TargetComp->SetCustomDataValue(InstanceIndex, 0, 0.0f, false);
+            TargetComp->SetCustomDataValue(InstanceIndex, 1, 0.0f, false);
+        }
+    }
+
+    UE_LOG(LogPlanetTess, Log,
+        TEXT("[Tess] Rebuilt HISM spherical tiles: Plain=%d Forest=%d Mountain=%d MissingMeshSkipped=%d Radius=%.1fcm SourceRadius=%.1fcm Scale=%.4f"),
+        PlainCount, ForestCount, MountainCount, MissingMeshCount, TargetRadius, SourceRadius, UniformScale);
+}
+
+void APlanetTessellatedMesh::PrepareHISMHighlightComponent_(UHierarchicalInstancedStaticMeshComponent* Comp)
+{
+    if (!Comp)
+    {
+        return;
+    }
+
+    Comp->SetNumCustomDataFloats(2);
+
+    const int32 MaterialCount = Comp->GetNumMaterials();
+    for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
+    {
+        if (UMaterialInterface* Material = Comp->GetMaterial(MaterialIndex))
+        {
+            UMaterialInstanceDynamic* MID = Cast<UMaterialInstanceDynamic>(Material);
+            if (!MID)
+            {
+                MID = Comp->CreateDynamicMaterialInstance(MaterialIndex, Material);
+            }
+            if (MID)
+            {
+                MID->SetVectorParameterValue(TEXT("HoverColor"), HighlightHoverColor);
+                MID->SetVectorParameterValue(TEXT("SelectColor"), HighlightSelectColor);
+                MID->SetScalarParameterValue(TEXT("HighlightStrength"), HighlightStrength);
+                MID->SetScalarParameterValue(TEXT("HighlightInnerRadius"), HISMHighlightInnerRadius);
+                MID->SetScalarParameterValue(TEXT("HighlightOuterRadius"), HISMHighlightOuterRadius);
+            }
+        }
+    }
+}
+
+void APlanetTessellatedMesh::WriteHISMHighlightForCell_(int32 CellId, bool bMarkRenderStateDirty)
+{
+    if (!bEnableHISMInstanceHighlight || !CellIdToHISMInstance.IsValidIndex(CellId))
+    {
+        return;
+    }
+
+    const FTerraHISMCellInstanceRef& Ref = CellIdToHISMInstance[CellId];
+    if (!Ref.IsValid())
+    {
+        return;
+    }
+
+    const float HoverValue = (HISMCurrentHoverCellId == CellId) ? 1.0f : 0.0f;
+    const float SelectValue = HISMSelectedCellIds.Contains(CellId) ? 1.0f : 0.0f;
+    const bool bHoverWritten = Ref.Component->SetCustomDataValue(Ref.InstanceIndex, 0, HoverValue, false);
+    const bool bSelectWritten = Ref.Component->SetCustomDataValue(Ref.InstanceIndex, 1, SelectValue, bMarkRenderStateDirty);
+
+    if (bMarkRenderStateDirty)
+    {
+        Ref.Component->MarkRenderInstancesDirty();
+    }
+
+    if (!bHoverWritten || !bSelectWritten)
+    {
+        UE_LOG(LogPlanetTess, Warning,
+            TEXT("[Tess] Failed to write HISM highlight custom data. Cell=%d Instance=%d Component=%s HoverWritten=%d SelectWritten=%d Hover=%.1f Select=%.1f"),
+            CellId,
+            Ref.InstanceIndex,
+            *GetNameSafe(Ref.Component),
+            bHoverWritten ? 1 : 0,
+            bSelectWritten ? 1 : 0,
+            HoverValue,
+            SelectValue);
+    }
+}
+
+void APlanetTessellatedMesh::UpdateHISMHover_(int32 NewCellId)
+{
+    if (!bEnableHISMInstanceHighlight)
+    {
+        return;
+    }
+
+    if (NewCellId != INDEX_NONE && !CellIdToHISMInstance.IsValidIndex(NewCellId))
+    {
+        return;
+    }
+
+    if (NewCellId == INDEX_NONE)
+    {
+        LastHISMPickedCellId = INDEX_NONE;
+        if (HISMCurrentHoverCellId == INDEX_NONE)
+        {
+            return;
+        }
+        if (HISMPendingHoverCellId != INDEX_NONE)
+        {
+            HISMPendingHoverCellId = INDEX_NONE;
+            HISMHoverFadeTimer = HISMHoverFadeDuration;
+        }
+        return;
+    }
+
+    LastHISMPickedCellId = NewCellId;
+
+    if (HISMCurrentHoverCellId == INDEX_NONE)
+    {
+        HISMCurrentHoverCellId = NewCellId;
+        HISMPendingHoverCellId = NewCellId;
+        HISMHoverFadeTimer = 0.0f;
+        WriteHISMHighlightForCell_(NewCellId);
+        return;
+    }
+
+    if (NewCellId == HISMCurrentHoverCellId)
+    {
+        HISMPendingHoverCellId = NewCellId;
+        HISMHoverFadeTimer = 0.0f;
+        return;
+    }
+
+    const int32 OldHover = HISMCurrentHoverCellId;
+    HISMCurrentHoverCellId = NewCellId;
+    HISMPendingHoverCellId = NewCellId;
+    HISMHoverFadeTimer = 0.0f;
+    WriteHISMHighlightForCell_(OldHover, false);
+    WriteHISMHighlightForCell_(NewCellId, true);
+}
+
+void APlanetTessellatedMesh::SetHISMSelected_(int32 CellId, bool bSelected)
+{
+    if (!bEnableHISMInstanceHighlight || !CellIdToHISMInstance.IsValidIndex(CellId))
+    {
+        return;
+    }
+
+    const bool bWasSelected = HISMSelectedCellIds.Contains(CellId);
+    if (bWasSelected == bSelected)
+    {
+        return;
+    }
+
+    if (bSelected)
+    {
+        HISMSelectedCellIds.Add(CellId);
+    }
+    else
+    {
+        HISMSelectedCellIds.Remove(CellId);
+    }
+    WriteHISMHighlightForCell_(CellId);
+}
+
+void APlanetTessellatedMesh::ToggleHISMSelected_(int32 CellId)
+{
+    SetHISMSelected_(CellId, !HISMSelectedCellIds.Contains(CellId));
+}
+
+bool APlanetTessellatedMesh::TryResolveHISMHitToCellId(const FHitResult& Hit, int32& OutCellId) const
+{
+    OutCellId = INDEX_NONE;
+
+    if (!bEnableHISMInstanceHighlight || !bEnableHISMTileRendering || !bEnableHISMTileCollision)
+    {
+        return false;
+    }
+
+    const UPrimitiveComponent* HitComp = Hit.GetComponent();
+    const int32 InstanceIndex = Hit.Item;
+    if (!HitComp || InstanceIndex == INDEX_NONE)
+    {
+        return false;
+    }
+
+    const TArray<int32>* InstanceToCellId = nullptr;
+    if (HitComp == PlainTileHISMComp)
+    {
+        InstanceToCellId = &PlainInstanceToCellId;
+    }
+    else if (HitComp == ForestTileHISMComp)
+    {
+        InstanceToCellId = &ForestInstanceToCellId;
+    }
+    else if (HitComp == MountainTileHISMComp)
+    {
+        InstanceToCellId = &MountainInstanceToCellId;
+    }
+
+    if (!InstanceToCellId || !InstanceToCellId->IsValidIndex(InstanceIndex))
+    {
+        return false;
+    }
+
+    const int32 CellId = (*InstanceToCellId)[InstanceIndex];
+    if (!CellIdToHISMInstance.IsValidIndex(CellId))
+    {
+        return false;
+    }
+
+    OutCellId = CellId;
+    return true;
+}
+
+bool APlanetTessellatedMesh::HandleHISMHoverHit(const FHitResult& Hit)
+{
+    int32 CellId = INDEX_NONE;
+    if (!TryResolveHISMHitToCellId(Hit, CellId))
+    {
+        return false;
+    }
+
+    UpdateHISMHover_(CellId);
+
+    if (GEngine && CellId != INDEX_NONE && CellId != LastHISMClickedCellId)
+    {
+        const FString Msg = FString::Printf(TEXT("HISM Hover Cell #%d  Instance=%d  Component=%s"),
+            CellId, Hit.Item, *GetNameSafe(Hit.GetComponent()));
+        GEngine->AddOnScreenDebugMessage(2, 0.25f, FColor::Yellow, Msg);
+    }
+
+    return true;
+}
+
+bool APlanetTessellatedMesh::HandleHISMClickHit(const FHitResult& Hit)
+{
+    int32 CellId = INDEX_NONE;
+    if (!TryResolveHISMHitToCellId(Hit, CellId))
+    {
+        return false;
+    }
+
+    ToggleHISMSelected_(CellId);
+    LastHISMClickedCellId = CellId;
+
+    UE_LOG(LogPlanetTess, Log,
+        TEXT("[Tess] HISM Click -> ToggleSelected Cell=%d Instance=%d Component=%s SelectedNow=%d"),
+        CellId,
+        Hit.Item,
+        *GetNameSafe(Hit.GetComponent()),
+        HISMSelectedCellIds.Contains(CellId) ? 1 : 0);
+
+    return true;
+}
+
+void APlanetTessellatedMesh::ClearHISMHover()
+{
+    UpdateHISMHover_(INDEX_NONE);
+}
+
+void APlanetTessellatedMesh::ClearAllHISMHighlights()
+{
+    const TArray<int32> SelectedCopy = HISMSelectedCellIds.Array();
+    for (const int32 CellId : SelectedCopy)
+    {
+        SetHISMSelected_(CellId, false);
+    }
+
+    if (HISMCurrentHoverCellId != INDEX_NONE)
+    {
+        const int32 OldHover = HISMCurrentHoverCellId;
+        HISMCurrentHoverCellId = INDEX_NONE;
+        HISMPendingHoverCellId = INDEX_NONE;
+        HISMHoverFadeTimer = 0.0f;
+        LastHISMPickedCellId = INDEX_NONE;
+        WriteHISMHighlightForCell_(OldHover);
+    }
+}
+
+void APlanetTessellatedMesh::ApplyRenderModeVisibility_()
+{
+    if (TerrainMeshComp)
+    {
+        TerrainMeshComp->SetVisibility(bShowDebugProceduralSurface, true);
+        TerrainMeshComp->SetHiddenInGame(!bShowDebugProceduralSurface);
+        TerrainMeshComp->SetCollisionEnabled(bUseDebugProceduralCollision ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
+    }
+
+    if (WaterMeshComp)
+    {
+        const bool bShowDebugWater = bShowDebugProceduralSurface && bEnableWaterShell;
+        WaterMeshComp->SetVisibility(bShowDebugWater, true);
+        WaterMeshComp->SetHiddenInGame(!bShowDebugWater);
+        WaterMeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    }
+
+    const ECollisionEnabled::Type HISMCollision =
+        (bEnableHISMTileRendering && bEnableHISMTileCollision)
+        ? ECollisionEnabled::QueryOnly
+        : ECollisionEnabled::NoCollision;
+
+    auto ApplyHISMState = [this, HISMCollision](UHierarchicalInstancedStaticMeshComponent* Comp)
+    {
+        if (!Comp)
+        {
+            return;
+        }
+
+        Comp->SetVisibility(bEnableHISMTileRendering, true);
+        Comp->SetHiddenInGame(!bEnableHISMTileRendering);
+        Comp->SetCollisionEnabled(HISMCollision);
+        Comp->SetCollisionObjectType(ECC_WorldStatic);
+        Comp->SetCollisionResponseToAllChannels(ECR_Block);
+    };
+
+    ApplyHISMState(PlainTileHISMComp);
+    ApplyHISMState(ForestTileHISMComp);
+    ApplyHISMState(MountainTileHISMComp);
+
+    const bool bNeedTick = bEnableHISMInstanceHighlight && bEnableHISMTileRendering;
+    PrimaryActorTick.SetTickFunctionEnable(bNeedTick);
 }
 
 // ===================================================================
