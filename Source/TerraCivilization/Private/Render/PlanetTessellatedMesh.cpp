@@ -5,6 +5,7 @@
 #include "Render/R8RecipeTable.h"
 
 #include "FSphereTopology.h"
+#include "FCell.h"
 #include "FCorner.h"
 
 // T4：WorldGen 接入——仅在 cpp 侧 include（头文件仅使用前向声明）
@@ -27,6 +28,7 @@
 #include "Components/SceneComponent.h"
 #include "Logging/LogMacros.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#include "DrawDebugHelpers.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -152,12 +154,21 @@ void APlanetTessellatedMesh::Tick(float DeltaSeconds)
             }
         }
     }
+
+    DrawG1DebugPieces_();
 }
 
 void APlanetTessellatedMesh::Rebuild()
 {
     RebuildAll_();
 }
+
+#if WITH_EDITOR
+bool APlanetTessellatedMesh::ShouldTickIfViewportsOnly() const
+{
+    return bEnableG1DebugPieces;
+}
+#endif
 
 // ===================================================================
 //  RebuildAll_：T3 完整执行序列
@@ -221,6 +232,9 @@ void APlanetTessellatedMesh::RebuildAll_()
     // SimpleGameplay：主视觉 HISM 静态网格瓦片。
     RebuildHISMTileInstances_();
     ApplyRenderModeVisibility_();
+
+    // SimpleGameplay G1：只生成调试棋子缓存，Tick 中用 DrawDebugSphere 临时绘制。
+    RebuildG1DebugPieces_();
 }
 
 void APlanetTessellatedMesh::RebuildTopologies_()
@@ -1572,6 +1586,281 @@ void APlanetTessellatedMesh::ClearAllHISMHighlights()
     }
 }
 
+void APlanetTessellatedMesh::RebuildG1DebugPieces_()
+{
+    G1DebugPieces.Reset();
+
+    if (!bEnableG1DebugPieces || !CellTopology.IsValid())
+    {
+        return;
+    }
+
+    const int32 NumCells = CellTopology->Cells.Num();
+    TSet<int32> OccupiedCells;
+
+    auto IsValidCellId = [NumCells](int32 CellId)
+    {
+        return CellId >= 0 && CellId < NumCells;
+    };
+
+    auto AddPiece = [this, &OccupiedCells, &IsValidCellId](int32 FactionId, int32 CellId, ETerraG1DebugPieceType PieceType)
+    {
+        if (!IsValidCellId(CellId))
+        {
+            UE_LOG(LogPlanetTess, Warning,
+                TEXT("[Tess][G1] Skip invalid debug piece cell. Faction=%d Cell=%d Type=%d"),
+                FactionId,
+                CellId,
+                static_cast<int32>(PieceType));
+            return false;
+        }
+
+        if (OccupiedCells.Contains(CellId))
+        {
+            UE_LOG(LogPlanetTess, Warning,
+                TEXT("[Tess][G1] Skip occupied debug piece cell. Faction=%d Cell=%d Type=%d"),
+                FactionId,
+                CellId,
+                static_cast<int32>(PieceType));
+            return false;
+        }
+
+        OccupiedCells.Add(CellId);
+
+        FTerraG1DebugPiece& Piece = G1DebugPieces.AddDefaulted_GetRef();
+        Piece.FactionId = FactionId;
+        Piece.CellId = CellId;
+        Piece.PieceType = PieceType;
+        return true;
+    };
+
+    TArray<int32> PentagonCellIds;
+    for (const FCell& Cell : CellTopology->Cells)
+    {
+        if (Cell.bIsPentagon)
+        {
+            PentagonCellIds.Add(Cell.CellId);
+        }
+    }
+
+    PentagonCellIds.Sort();
+
+    if (PentagonCellIds.Num() != 12)
+    {
+        UE_LOG(LogPlanetTess, Warning,
+            TEXT("[Tess][G1] Expected 12 pentagon bases, got %d."),
+            PentagonCellIds.Num());
+    }
+
+    int32 BaseCount = 0;
+    int32 InfantryCount = 0;
+    int32 CavalryCount = 0;
+    int32 ArcherCount = 0;
+
+    for (int32 FactionId = 0; FactionId < PentagonCellIds.Num(); ++FactionId)
+    {
+        const int32 BaseCellId = PentagonCellIds[FactionId];
+        if (!IsValidCellId(BaseCellId))
+        {
+            continue;
+        }
+
+        const FCell& BaseCell = CellTopology->Cells[BaseCellId];
+        if (AddPiece(FactionId, BaseCellId, ETerraG1DebugPieceType::Base))
+        {
+            ++BaseCount;
+        }
+
+        TArray<int32> InfantryCells;
+        TArray<int32> CavalryCells;
+        InfantryCells.Reserve(5);
+        CavalryCells.Reserve(5);
+
+        for (int32 NeighborSlot = 0; NeighborSlot < 5; ++NeighborSlot)
+        {
+            const int32 InfantryCellId = BaseCell.NeighborCellIds[NeighborSlot];
+            if (!IsValidCellId(InfantryCellId))
+            {
+                UE_LOG(LogPlanetTess, Warning,
+                    TEXT("[Tess][G1] Invalid infantry neighbor. Faction=%d Base=%d Slot=%d Cell=%d"),
+                    FactionId,
+                    BaseCellId,
+                    NeighborSlot,
+                    InfantryCellId);
+                continue;
+            }
+
+            InfantryCells.Add(InfantryCellId);
+            if (AddPiece(FactionId, InfantryCellId, ETerraG1DebugPieceType::Infantry))
+            {
+                ++InfantryCount;
+            }
+
+            const FCell& InfantryCell = CellTopology->Cells[InfantryCellId];
+            int32 BackToBaseIndex = INDEX_NONE;
+            int32 NeighborCount = 0;
+            for (int32 I = 0; I < 6; ++I)
+            {
+                const int32 NeighborCellId = InfantryCell.NeighborCellIds[I];
+                if (IsValidCellId(NeighborCellId))
+                {
+                    ++NeighborCount;
+                }
+                if (NeighborCellId == BaseCellId)
+                {
+                    BackToBaseIndex = I;
+                }
+            }
+
+            if (NeighborCount != 6 || BackToBaseIndex == INDEX_NONE)
+            {
+                UE_LOG(LogPlanetTess, Warning,
+                    TEXT("[Tess][G1] Cannot resolve cavalry opposite cell. Faction=%d Base=%d Infantry=%d NeighborCount=%d BackIndex=%d"),
+                    FactionId,
+                    BaseCellId,
+                    InfantryCellId,
+                    NeighborCount,
+                    BackToBaseIndex);
+                CavalryCells.Add(INDEX_NONE);
+                continue;
+            }
+
+            const int32 CavalryCellId = InfantryCell.NeighborCellIds[(BackToBaseIndex + 3) % 6];
+            CavalryCells.Add(CavalryCellId);
+            if (AddPiece(FactionId, CavalryCellId, ETerraG1DebugPieceType::Cavalry))
+            {
+                ++CavalryCount;
+            }
+        }
+
+        for (int32 I = 0; I < CavalryCells.Num(); ++I)
+        {
+            const int32 CavalryAId = CavalryCells[I];
+            const int32 CavalryBId = CavalryCells[(I + 1) % CavalryCells.Num()];
+            if (!IsValidCellId(CavalryAId) || !IsValidCellId(CavalryBId))
+            {
+                continue;
+            }
+
+            const FCell& CavalryA = CellTopology->Cells[CavalryAId];
+            const FCell& CavalryB = CellTopology->Cells[CavalryBId];
+            const FVector MidDir = (CavalryA.UnitCenter + CavalryB.UnitCenter).GetSafeNormal();
+
+            int32 BestArcherCellId = INDEX_NONE;
+            float BestScore = -FLT_MAX;
+
+            for (int32 SlotA = 0; SlotA < 6; ++SlotA)
+            {
+                const int32 CandidateCellId = CavalryA.NeighborCellIds[SlotA];
+                if (!IsValidCellId(CandidateCellId)
+                    || CandidateCellId == BaseCellId
+                    || InfantryCells.Contains(CandidateCellId)
+                    || CavalryCells.Contains(CandidateCellId)
+                    || OccupiedCells.Contains(CandidateCellId))
+                {
+                    continue;
+                }
+
+                bool bAlsoNeighborOfB = false;
+                for (int32 SlotB = 0; SlotB < 6; ++SlotB)
+                {
+                    if (CavalryB.NeighborCellIds[SlotB] == CandidateCellId)
+                    {
+                        bAlsoNeighborOfB = true;
+                        break;
+                    }
+                }
+
+                if (!bAlsoNeighborOfB)
+                {
+                    continue;
+                }
+
+                const float Score = static_cast<float>(FVector::DotProduct(CellTopology->Cells[CandidateCellId].UnitCenter, MidDir));
+                if (Score > BestScore)
+                {
+                    BestScore = Score;
+                    BestArcherCellId = CandidateCellId;
+                }
+            }
+
+            if (BestArcherCellId == INDEX_NONE)
+            {
+                UE_LOG(LogPlanetTess, Warning,
+                    TEXT("[Tess][G1] Cannot resolve archer between cavalry cells. Faction=%d Base=%d CavalryA=%d CavalryB=%d"),
+                    FactionId,
+                    BaseCellId,
+                    CavalryAId,
+                    CavalryBId);
+                continue;
+            }
+
+            if (AddPiece(FactionId, BestArcherCellId, ETerraG1DebugPieceType::Archer))
+            {
+                ++ArcherCount;
+            }
+        }
+    }
+
+    UE_LOG(LogPlanetTess, Log,
+        TEXT("[Tess][G1] Rebuilt debug pieces: Factions=%d Bases=%d Infantry=%d Cavalry=%d Archer=%d Total=%d"),
+        PentagonCellIds.Num(),
+        BaseCount,
+        InfantryCount,
+        CavalryCount,
+        ArcherCount,
+        G1DebugPieces.Num());
+}
+
+void APlanetTessellatedMesh::DrawG1DebugPieces_() const
+{
+    if (!bEnableG1DebugPieces || G1DebugPieces.Num() == 0 || !CellTopology.IsValid())
+    {
+        return;
+    }
+
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    const float DrawRadius = FMath::Max(10.0f, G1DebugPieceRadiusCM);
+    const float DrawDistance = GlobeRadiusCM + G1DebugPieceHeightOffsetCM;
+    const FTransform ActorTransform = GetActorTransform();
+
+    for (const FTerraG1DebugPiece& Piece : G1DebugPieces)
+    {
+        if (!CellTopology->Cells.IsValidIndex(Piece.CellId))
+        {
+            continue;
+        }
+
+        FColor DrawColor = FColor::White;
+        switch (Piece.PieceType)
+        {
+        case ETerraG1DebugPieceType::Base:
+            DrawColor = FColor::Red;
+            break;
+        case ETerraG1DebugPieceType::Infantry:
+            DrawColor = FColor::Yellow;
+            break;
+        case ETerraG1DebugPieceType::Cavalry:
+            DrawColor = FColor::Blue;
+            break;
+        case ETerraG1DebugPieceType::Archer:
+            DrawColor = FColor::Green;
+            break;
+        default:
+            break;
+        }
+
+        const FVector LocalPosition = CellTopology->Cells[Piece.CellId].UnitCenter * DrawDistance;
+        const FVector WorldPosition = ActorTransform.TransformPosition(LocalPosition);
+        DrawDebugSphere(World, WorldPosition, DrawRadius, 12, DrawColor, false, 0.05f, 0, 3.0f);
+    }
+}
+
 void APlanetTessellatedMesh::ApplyRenderModeVisibility_()
 {
     if (TerrainMeshComp)
@@ -1612,7 +1901,7 @@ void APlanetTessellatedMesh::ApplyRenderModeVisibility_()
     ApplyHISMState(ForestTileHISMComp);
     ApplyHISMState(MountainTileHISMComp);
 
-    const bool bNeedTick = bEnableHISMInstanceHighlight && bEnableHISMTileRendering;
+    const bool bNeedTick = (bEnableHISMInstanceHighlight && bEnableHISMTileRendering) || bEnableG1DebugPieces;
     PrimaryActorTick.SetTickFunctionEnable(bNeedTick);
 }
 

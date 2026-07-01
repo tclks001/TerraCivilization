@@ -29,6 +29,21 @@ struct FTerraHISMCellInstanceRef
     bool IsValid() const { return Component != nullptr && InstanceIndex != INDEX_NONE; }
 };
 
+enum class ETerraG1DebugPieceType : uint8
+{
+    Base,
+    Infantry,
+    Cavalry,
+    Archer,
+};
+
+struct FTerraG1DebugPiece
+{
+    int32 FactionId = INDEX_NONE;
+    int32 CellId = INDEX_NONE;
+    ETerraG1DebugPieceType PieceType = ETerraG1DebugPieceType::Infantry;
+};
+
 /**
  * APlanetTessellatedMesh
  *
@@ -346,10 +361,30 @@ public:
     bool bUseDebugProceduralCollision = true;
 
     //----------------------------------------------------------
+    // SimpleGameplay G1：棋子初始化调试绘制
+    //----------------------------------------------------------
+
+    /** true：用 DrawDebugSphere 显示 G1 初始棋子布局。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|SimpleGameplay G1")
+    bool bEnableG1DebugPieces = true;
+
+    /** G1 调试棋子球半径（cm）。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|SimpleGameplay G1", meta = (ClampMin = "10.0", ClampMax = "1000.0"))
+    float G1DebugPieceRadiusCM = 140.0f;
+
+    /** G1 调试棋子相对球面外抬高度（cm）。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|SimpleGameplay G1", meta = (ClampMin = "0.0", ClampMax = "5000.0"))
+    float G1DebugPieceHeightOffsetCM = 260.0f;
+
+    //----------------------------------------------------------
     // 生命周期
     //----------------------------------------------------------
     virtual void OnConstruction(const FTransform& Transform) override;
     virtual void Tick(float DeltaSeconds) override;
+
+#if WITH_EDITOR
+    virtual bool ShouldTickIfViewportsOnly() const override;
+#endif
 
     // 注：不 override BeginDestroy()。
     //   1) BeginDestroy 是 UObject GC 的早期回调（对象逻辑销毁、但 C++ 内存还活着），
@@ -473,6 +508,12 @@ private:
     /** SimpleGameplay：翻转某 Cell 的 HISM select 状态。 */
     void ToggleHISMSelected_(int32 CellId);
 
+    /** SimpleGameplay G1：按 12 个五边形基地重建调试棋子缓存。 */
+    void RebuildG1DebugPieces_();
+
+    /** SimpleGameplay G1：用 DrawDebugSphere 绘制当前调试棋子缓存。 */
+    void DrawG1DebugPieces_() const;
+
     /** 应用 17 参数 MID 到 TerrainMeshComp（详见 §5.1）。 */
     void ApplyTerrainMaterial_(int32 NumCells);
 
@@ -585,6 +626,9 @@ private:
 
     /** HISM select 高亮集合。 */
     TSet<int32> HISMSelectedCellIds;
+
+    /** SimpleGameplay G1：当前初始化出的调试棋子缓存。 */
+    TArray<FTerraG1DebugPiece> G1DebugPieces;
 
     //----------------------------------------------------------
     // D15：PIE 退出后材质恢复（详见 AgentWorkflow.md §3.11）
