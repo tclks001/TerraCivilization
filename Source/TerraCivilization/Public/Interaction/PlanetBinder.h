@@ -7,8 +7,9 @@
 #include "Templates/UniquePtr.h"
 #include "PlanetBinder.generated.h"
 
-// 前向声明，避免在头文件中拉入 PTG / Grid 的实现细节
+// 前向声明，避免在头文件中拉入 PTG / Grid / Render 的实现细节
 class APtgManager;
+class APlanetTessellatedMesh;
 class FSphereTopology;
 class FSphereTopologyQuery;
 class UCellHighlightComponent;
@@ -47,9 +48,19 @@ public:
     virtual ~APlanetBinder();
     APlanetBinder(FVTableHelper& Helper);
 
-    /** 关联的 PTG Manager（持有几何 RuntimeMesh + 物理碰撞）。在关卡里手动绑定。 */
+    /**
+     * 关联的 PTG Manager（旧几何源，R11 后续废弃路径，fallback 使用）。
+     * R11 推荐使用 TessellatedMeshRef；PtgManagerRef 留为向后兼容与调试。
+     */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet")
     TObjectPtr<APtgManager> PtgManagerRef;
+
+    /**
+     * R11 主几何源：T 阶段自研球面网格 actor。鼠标射线、球心位置、半径都从它取。
+     * 优先级：该字段 != null 时走 Tess 路径；否则 fallback 到 PtgManagerRef（详见 GetHostActor）。
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet")
+    TObjectPtr<APlanetTessellatedMesh> TessellatedMeshRef;
 
     /** 正二十面体细分层数。Cells 数 = 10*4^N + 2。N=3 -> 642 cells。 */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet", meta = (ClampMin = "1", ClampMax = "6"))
@@ -116,16 +127,24 @@ public:
     void OnLeavePlanet();
 
     /** 拓扑层只读访问（供 UCellHighlightComponent / 上层系统使用）。 */
-    APtgManager*                GetPtgManager() const { return PtgManagerRef; }
-    const FSphereTopology*      GetTopology()   const { return Topology.Get(); }
-    const FSphereTopologyQuery* GetQuery()      const { return Query.Get(); }
+    APtgManager*                GetPtgManager()      const { return PtgManagerRef; }
+    APlanetTessellatedMesh*     GetTessellatedMesh() const { return TessellatedMeshRef; }
+    UCellHighlightComponent*    GetHighlightComp()   const { return HighlightComp; }
+    const FSphereTopology*      GetTopology()        const { return Topology.Get(); }
+    const FSphereTopologyQuery* GetQuery()           const { return Query.Get(); }
 
     /**
-     * 取 PTG Manager 的名义半径（cm）。
+     * R11 几何源优先级：优先 Tess actor、次选 PTG manager。
+     * 鼠标射线命中判定 + 球心 GetActorLocation 均取该 actor。两者都为 null 时返回 nullptr。
+     */
+    AActor* GetHostActor() const;
+
+    /**
+     * 取球半径（cm）。
      *
-     * APtgManager::Radius 是 protected UPROPERTY，外部无法直接访问，
-     * 此处通过 UE 反射读取，避免修改 PTG 插件源码。
-     * 失败时返回兜底值 15000.0f（与 PTG 默认值一致）。
+     * R11 优先从 TessellatedMeshRef->GlobeRadiusCM 取；fallback 走旧 PTG 反射路径。
+     * 两者都不可用时返回兌底值 15000.0f（与 APtgManager::Radius / Tess GlobeRadiusCM
+     * 默认值一致）。
      */
     float GetRadius() const;
 

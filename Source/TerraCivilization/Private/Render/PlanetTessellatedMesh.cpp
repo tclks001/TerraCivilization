@@ -48,13 +48,18 @@ APlanetTessellatedMesh::APlanetTessellatedMesh()
     USceneComponent* RootScene = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
     SetRootComponent(RootScene);
 
-    // T3 起 RebuildAll_ 真正灌顶点 / 三角形 / 材质。
+    // R11：鼠标射线需要在 TerrainMeshComp 上命中复杂碰撞（§8.1 / §13 Step 1）。
+    // 设为 QueryOnly（允许 LineTrace、不参与物理模拟） + ComplexAsSimple（让简单 trace
+    // 也走复杂网格）。水面 mesh 保留 NoCollision，鼠标射线穿过水面击中地表是
+    // 预期行为。
     TerrainMeshComp = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("TerrainMeshComp"));
     TerrainMeshComp->SetupAttachment(RootScene);
     TerrainMeshComp->bUseAsyncCooking = false;
-    TerrainMeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    TerrainMeshComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    TerrainMeshComp->SetCollisionObjectType(ECC_WorldStatic);
+    TerrainMeshComp->SetCollisionResponseToAllChannels(ECR_Block);
+    TerrainMeshComp->bUseComplexAsSimpleCollision = true;
     TerrainMeshComp->SetCanEverAffectNavigation(false);
-    TerrainMeshComp->bUseComplexAsSimpleCollision = false;
 
     WaterMeshComp = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("WaterMeshComp"));
     WaterMeshComp->SetupAttachment(RootScene);
@@ -774,7 +779,7 @@ void APlanetTessellatedMesh::RebuildTerrainMesh_()
         Vertices, Triangles, Normals,
         UV0, UV1, UV2, UV3,
         VertexColors, Tangents,
-        /*bCreateCollision*/ false);
+        /*bCreateCollision*/ true);   // R11：必须开同复杂碰撞才能被鼠标射线命中（§8.1）
 
     UE_LOG(LogPlanetTess, Log,
         TEXT("[Tess] Rebuilt terrain mesh: MeshTris=%d  OutVerts=%d  Radius=%.1f cm  ElevScale=%.1f cm"),
@@ -841,6 +846,22 @@ void APlanetTessellatedMesh::ApplyTerrainMaterial_(int32 NumCells)
         NewMID->SetScalarParameterValue(TEXT("GlobeRadiusCM"),       GlobeRadiusCM);
         NewMID->SetScalarParameterValue(TEXT("MaxRaymarchDepthCM"),  MaxRaymarchDepthCM);
         NewMID->SetScalarParameterValue(TEXT("MaxRaymarchSteps"),    static_cast<float>(MaxRaymarchSteps));
+
+        // R11 注入：hover/select 描边颜色 + 描边带宽度 + 全局强度（详见 HexHighlightInteractionPlan.md §10.2）。
+        //   - HighlightHoverColor 默认 (1.00, 0.85, 0.10) 暖金
+        //   - HighlightSelectColor 默认 (0.20, 0.90, 1.00) 青蓝
+        //   - HighlightPadding 默认 0.15（cell 张角 15%）
+        //   - HighlightStrength 默认 1.5（加性叠加到 albedo）
+        // CellHighlightLUT 本身由 UCellHighlightComponent::BeginPlay 负责创建 + SetHighlightLUT 注入；
+        // 这里 Rebuild 到这一步可能还没拿到 LUT，需要从保存的成员变量重填一份。
+        NewMID->SetVectorParameterValue(TEXT("HoverColor"),  HighlightHoverColor);
+        NewMID->SetVectorParameterValue(TEXT("SelectColor"), HighlightSelectColor);
+        NewMID->SetScalarParameterValue(TEXT("HighlightPadding"),  HighlightPadding);
+        NewMID->SetScalarParameterValue(TEXT("HighlightStrength"), HighlightStrength);
+        if (HighlightLUT)
+        {
+            NewMID->SetTextureParameterValue(TEXT("CellHighlightLUT"), HighlightLUT);
+        }
     }
 
     TerrainMID = NewMID;
@@ -866,8 +887,12 @@ void APlanetTessellatedMesh::DiagnoseR8Material_() const
     const TConstArrayView<TObjectPtr<UMaterialExpression>> Exprs = BaseMat->GetExpressions();
     int32 CustomFound = 0;
 
-    // 与 R8 actor 完全一致的 18 期望 inputs（小写比较）——R8.2 追加 pbrbaseheight
+    // R8.1 完整 19 项 + R8.2 新增 5 项 = 24 项（与 R8.2 §5.2 完全对应）；
+    // R11 在 Step 8 末尾追加 5 项 Inputs：CellHighlightLUT + HoverColor + SelectColor
+    // + HighlightPadding + HighlightStrength（详见 HexHighlightInteractionPlan.md §9）。
+    // → 反射诊断期望表共 29 inputs（小写比较）。
     const TArray<FString> ExpectedR8Inputs = {
+        // ---- R8.1 baseline 19 项 ----
         TEXT("uv0"), TEXT("uv1"), TEXT("uv2"), TEXT("uv3"),
         TEXT("worldpos"), TEXT("planetcenter"),
         TEXT("cellattrlut"), TEXT("celldirlut"),
@@ -875,8 +900,21 @@ void APlanetTessellatedMesh::DiagnoseR8Material_() const
         TEXT("noiseamplitude"), TEXT("noisescale"),
         TEXT("triplanarsharpness"), TEXT("tilescale"),
         TEXT("pbrbasealbedo"),
+        TEXT("pbrbasenormal"),                                              // R8.1 新增：三通道 Normal
+        TEXT("pbrbaseroughness"),                                           // R8.1 新增：三通道 Roughness
         TEXT("celltintlut"), TEXT("cellhsvroughlut"), TEXT("cellnspeclut"),
+        // ---- R8.2 新增 5 项（SHFRM）----
         TEXT("pbrbaseheight"),                                              // R8.2 新增：SHFRM 高度场
+        TEXT("cameravector"),                                               // R8.2 新增：视线方向
+        TEXT("globeradiuscm"),                                              // R8.2 新增：球半径显式暴露
+        TEXT("maxraymarchdepthcm"),                                         // R8.2 新增：raymarch 深度上限
+        TEXT("cameraworldpos"),                                             // R8.2 新增：相机世界位置
+        // ---- R11 新增 5 项（HexHighlight）----
+        TEXT("cellhighlightlut"),                                           // R11 新增：hover/select 双通道描边 LUT
+        TEXT("hovercolor"),                                                 // R11 新增：hover 描边色（Vector3）
+        TEXT("selectcolor"),                                                // R11 新增：select 描边色（Vector3）
+        TEXT("highlightpadding"),                                           // R11 新增：描边带宽（Scalar）
+        TEXT("highlightstrength"),                                          // R11 新增：全局描边强度（Scalar）
     };
     bool bAnyR8Compliant = false;
 
@@ -1105,4 +1143,22 @@ void APlanetTessellatedMesh::OnPostWorldCleanup_(UWorld* World, bool bSessionEnd
 
     Rebuild();
 #endif
+}
+
+// ===================================================================
+//  R11 §10.2：SetHighlightLUT —— 由 UCellHighlightComponent::BeginPlay 调用
+//
+//  把刚则建好的 1×NumCells / R8G8 LUT 注入现有 TerrainMID。同时把 LUT 指针保存到
+//  HighlightLUT 字段——下次 Rebuild 时（OnConstruction / PIE 退出钩子）会重建 MID，
+//  ApplyTerrainMaterial_ 末尾会反向填回新 MID。
+//
+//  详见 Docs/HexHighlightInteractionPlan.md §8.4。
+// ===================================================================
+void APlanetTessellatedMesh::SetHighlightLUT(UTexture2D* InLUT)
+{
+    HighlightLUT = InLUT;
+    if (TerrainMID && InLUT)
+    {
+        TerrainMID->SetTextureParameterValue(TEXT("CellHighlightLUT"), InLUT);
+    }
 }

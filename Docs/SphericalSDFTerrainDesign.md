@@ -872,7 +872,7 @@ CPU 侧：
 | **W4 验收** | ⏳ 待开始（依赖 T 阶段）| 在 R8 + T 阶段联调通过后，把 CellAttrLUT.R / 4 通道材质 LUT 中的"BaseTexIdx + 17 种配方索引"从 Knuth 哈希 placeholder 切换为 `Def->LayerIndex` + `Def->FTerrainMaterialParams` 真实查表（W4 详稿 [W4_BiomeClassification.md](W4_BiomeClassification.md) 已就绪）。本步**不增加 SDF 端工作量**——SDF 端只是把 17 种配方的 BaseTexIdx 换源 | 球面呈现合理的"赤道沙漠 / 温带森林 / 极地冰原 + 12 五边形 + 大陆东岸森林 vs 西岸沙漠"分布；调试师可在编辑器里改 `T_Forest_Tropical.uasset` 的 `ClimateRules[0].Temperature` 区间立即生效 |
 | **R9** | ⏳ 待开始 | 加 Decor / Owner / Fog 三套独立 LUT（在 R8 4 通道基础上扩展） | 政治版图 + 战争迷雾 + 城市 / 农田装饰上线 |
 | ~~**R10 (已迁出)**~~ | 📄 迁至 [TessellatedMeshDesign.md §5.4 (T6)](TessellatedMeshDesign.md) | 原计划：自研球面网格 LOD（远 sub+0、近 sub+2、超近 sub+3；用 skirt 法消拼缝；可选 morph）。职责上属于 mesh 构建（几何域）而非 SDF 着色（材质域），2026-06-30 拍板迁至 T 阶段主稿为 T6。本行仅作占位。 | 详见 [TessellatedMeshDesign.md §5.4](TessellatedMeshDesign.md) |
-| **R11** | ⏳ 待开始 | 接入 §15 高亮描边带 + 选中 / 鼠标悬停的 LUT 联动 | hex 边发光描边、选中即时反馈 |
+| **R11** | ⏳ 待开始 | 接入 §15 高亮描边带 + hover/select 双通道 LUT 联动（hover 与 select 共享同一管线，仅 LUT.R/G 区分；详见 [HexHighlightInteractionPlan.md](HexHighlightInteractionPlan.md)） | hex 边发光描边、hover 即时跟随、select 持久化、防抖 0.5s |
 | ~~**原 R11/R12/R13 (PTG 路线)**~~ | ❌ 已废弃 | （历史路径：PTG 高细分球皮 + GPU FindNearestCell + WPO 位移 + 高亮）—— T 阶段自研球面网格已替代该路线全部职责，且与 WorldGen `Elevation` 字段直连，不再需要 PTG 插件依赖。§14 章节文字保留作历史档案 | — |
 
 每一阶段单独可验证，不会卡死。R1~R7 在 IsoSphere 上跑通"球面 SDF + Triplanar 真实地表"的全部 HLSL 公式；R8 把单纹理 19-slice 路径升级为 3-base 参数化 tint，并加入水面层；T 阶段把 mesh 切到自研球面网格做径向位移；之后 W4/R9/R11 跑在自研网格上，LOD（原 R10，现 T6）作为几何域验收点迁至 [TessellatedMeshDesign.md §5.4](TessellatedMeshDesign.md)。
@@ -1572,96 +1572,132 @@ float3 SphericalBarycentric(float3 dir, float3 V_A, float3 V_B, float3 V_C)
 
 ### 15.2 数学定义
 
-设当前像素在 Cell `(c0, c1, c2)` 内的权重为 `(w0, w1, w2)`，每个 Cell 在 `HighlightLUT` 中存储两个属性：
+> ⚠ **R11 拍板修订（2026-06-30）**：LUT 通道从 `RGBA8 (Color, bSelected)` 改为 `R8G8 (HoverIntensity, SelectIntensity)`——hover 与 select 共享同一管线、不同通道；颜色不再挂在 LUT 里，而是改用 MID 全局参数 `HoverColor` / `SelectColor`。完整交互层规范见 [HexHighlightInteractionPlan.md](HexHighlightInteractionPlan.md) §6。
+
+设当前像素在 Cell `(c0, c1, c2)` 内的权重为 `(w0, w1, w2)`，每个 Cell 在 `CellHighlightLUT` 中存储两个 byte：
 
 ```cpp
 struct FCellHighlight
 {
-    uint8 bSelected;     // 0 或 255
-    uint8 ColorR;        // 高亮颜色 R
-    uint8 ColorG;
-    uint8 ColorB;
+    uint8 HoverIntensity;   // R 通道：0 或 255（R11 二值切换；不做渐变 fade）
+    uint8 SelectIntensity;  // G 通道：0 或 255（toggle）
 };
 ```
 
-定义 **Cell A 的高亮强度函数**：
+并通过 MID 全局参数指定描边色：
+
+| 参数 | 默认值 |
+| --- | --- |
+| `HoverColor` (Vector RGB) | `(1.00, 0.85, 0.10)` 暖金 |
+| `SelectColor` (Vector RGB) | `(0.20, 0.90, 1.00)` 青蓝 |
+| `HighlightPadding` (Scalar) | `0.15` |
+| `HighlightStrength` (Scalar) | `1.50` |
+
+定义 **Cell A 的高亮 edge 强度函数**：
 
 ```
-gap_A     = w_A - max(w_others)         // ∈ [-1, 1]，正值说明 A 是最大权重
-edge_A    = max(0, gap_A)               // 仅在 A 是最大时考虑
-intensity = 1 - smoothstep(0, padding, edge_A) × bSelected_A
+gap_A   = w_A - max(w_others)         // ∈ [-1, 1]，正值说明 A 是最大权重
+edge_A  = 1 - smoothstep(0, padding, max(0, gap_A))
 ```
 
 - `padding ∈ (0, 1]` 是描边带宽度参数（推荐 0.15）；越小描边带越窄；
-- 当 `edge_A = 0`（在边界上）→ `smoothstep = 0` → `intensity = 1`（最亮）；
-- 当 `edge_A ≥ padding`（深入 Cell 内部）→ `smoothstep = 1` → `intensity = 0`（不亮）；
-- 当 `edge_A < 0`（A 不是最大权重，像素不属于 A）→ `intensity = 0`；
-- `bSelected_A = 0` → `intensity = 0`。
+- 当 `gap_A = 0`（在边界上）→ `smoothstep = 0` → `edge_A = 1`（最亮）；
+- 当 `gap_A ≥ padding`（深入 Cell 内部）→ `smoothstep = 1` → `edge_A = 0`（不亮）；
+- 当 `gap_A < 0`（A 不是最大权重，像素不属于 A）→ `edge_A = 0`。
 
-最终高亮颜色：对三个 Cell 各算一次，加性叠加：
+最终高亮颜色：对三个 Cell 各算一次 `edge_i`，按 hover / select 两路分别累加，再叠到 albedo：
 
 ```
-highlight = Σᵢ intensity_i × ColorOfCellᵢ
+hoverSum_total  = Σᵢ edge_i × HoverIntensity_i
+selectSum_total = Σᵢ edge_i × SelectIntensity_i
+
+# select 优先：当 cell 已 select 时，hover 不再叠加（避免过曝）
+hoverSum_total *= saturate(1 - selectSum_total)
+
+highlight = (HoverColor × hoverSum_total + SelectColor × selectSum_total) × HighlightStrength
 ```
 
-### 15.3 多 Cell 同时高亮
+### 15.3 多 Cell 同时高亮 / hover-select 共存
 
-当 A、B 都被选中时，在 A-B 共享边上：
-- 对 A 评估：`w_A = 0.5, w_others_max = w_B = 0.5, gap_A = 0` → A 全亮
-- 对 B 评估：`w_B = 0.5, w_others_max = w_A = 0.5, gap_B = 0` → B 全亮
-- 两个高亮叠加（如果 ColorA、ColorB 不同会得到混合色，相同则加倍 → 自动饱和钳制即可）
+当 A、B 都被 select 时，在 A-B 共享边上：
+- 对 A 评估：`w_A = 0.5, w_others_max = w_B = 0.5, gap_A = 0` → A `edge_A = 1`
+- 对 B 评估：`w_B = 0.5, w_others_max = w_A = 0.5, gap_B = 0` → B `edge_B = 1`
+- 两侧 selectSum 都是满值，相加得 2 → `(SelectColor × 2)`（用 `HighlightStrength` 调或饱和钳制即可）
 
-当只有 A 被选中时，B 一侧的描边带不会出现——因为 `bSelected_B = 0`，B 评估贡献为 0；A 一侧的描边带正常显示。
+当只有 A 被 select 时，B 一侧的描边带不会出现——因为 `SelectIntensity_B = 0`，B 在 selectSum 上贡献为 0；A 一侧 `edge_A` 仍是 1，select 描边正常显示。
+
+**hover 与 select 同 cell**（用户点击选中 X 后又把鼠标停在 X 上）：`hoverSum_total = selectSum_total = 1`，但 `select 优先` 公式让 `hoverSum_total *= (1 - 1) = 0`——hover 不叠加，最终只看到 SelectColor 描边。
 
 > **特性**：算法**完全在重心权重空间里完成**，不依赖任何"我在哪条边附近"的几何判断；所有边界、角点、内部退化都自动消化。
 
 ### 15.4 GPU 实现
 
+> ⚠ **R11.1 修订（2026-07-01）**：初版 `gap_i = w_i - max(w_others)` 公式在**真正球面重心坐标**下才是对的；但 R8.2 主 HLSL 里传给 ComputeHighlight 的 `wA/wB/wC` 是 R5 软边**归属权重**（`smoothstep(halfEW, -halfEW, deltaI)`），本质是二值 0/1 的软化——用它算 gap 会导致整个 cell 领地内 gap ≈ 1、外边界完全由 R5 `EdgeWidth` 决定与 `HighlightPadding` 无关，视觉是"整个 cell 都发光"（bug 现象详见 [HexHighlightInteractionPlan.md §9.2](HexHighlightInteractionPlan.md)）。
+>
+> **修法**：改用 R8.2 §5.6 Step 6 已算好的 `deltaI = thetaI - min(thetaOthers)`——这才是"到 hex 边的角距离（弧度）"。`-deltaI > 0` 表示在 I 领地内、值就是"离边多深"。`HighlightPadding` 语义从"gap 阈值（无量纲）"改为"到边角距离（弧度）"，推荐默认 **0.03 rad ≈ 1.7°**（sub=3 时 cell 张角约 0.2 rad）。
+
 ```hlsl
-// 输入：3 CellId 与 3 权重（来自 §14.3 的 PS 主着色）
-//       HighlightLUT: R8G8B8A8_UNORM，A=bSelected, RGB=高亮色
-// 参数：HighlightPadding ∈ (0, 1], 推荐 0.15
-//       HighlightStrength: 全局描边强度倍率
+// 输入：3 CellId 与 3 delta（来自 R8.2 §5.6 Step 6：deltaI = thetaI - min(thetaOthers)，弧度）
+//       CellHighlightLUT: PF_R8G8，R=HoverIntensity, G=SelectIntensity
+// 参数：HighlightPadding：到 hex 边的角距离带宽（弧度），推荐 0.03（约 1.7°，cell 半径的 15%）
+//       HighlightStrength: 全局描边强度倍率（推荐 1.5）
+//       HoverColor / SelectColor: MID 全局 Vector 参数（RGB）
 
-float3 ComputeHighlight(int c0, int c1, int c2, float w0, float w1, float w2)
+float3 ComputeHighlight(int c0, int c1, int c2, float d0, float d1, float d2)
 {
-    float4 h0 = HighlightLUT.Load(int3(c0, 0, 0));
-    float4 h1 = HighlightLUT.Load(int3(c1, 0, 0));
-    float4 h2 = HighlightLUT.Load(int3(c2, 0, 0));
+    // R = HoverIntensity, G = SelectIntensity
+    float2 h0 = CellHighlightLUT.Load(int3(c0, 0, 0)).rg;
+    float2 h1 = CellHighlightLUT.Load(int3(c1, 0, 0)).rg;
+    float2 h2 = CellHighlightLUT.Load(int3(c2, 0, 0)).rg;
 
-    // gap_i = w_i - max(其它两个)
-    float gap0 = w0 - max(w1, w2);
-    float gap1 = w1 - max(w0, w2);
-    float gap2 = w2 - max(w0, w1);
+    // depth_i = -delta_i：> 0 表示在 i 领地内，值就是到 hex 边的弧度距离。
+    float depth0 = -d0;
+    float depth1 = -d1;
+    float depth2 = -d2;
 
-    // 仅在 i 是最大权重时贡献（gap_i >= 0）；
-    // gap=0 → 边界上 → intensity=1；gap>=padding → 内部 → intensity=0
-    float i0 = (1.0 - smoothstep(0.0, HighlightPadding, max(0.0, gap0))) * h0.a;
-    float i1 = (1.0 - smoothstep(0.0, HighlightPadding, max(0.0, gap1))) * h1.a;
-    float i2 = (1.0 - smoothstep(0.0, HighlightPadding, max(0.0, gap2))) * h2.a;
+    // depth=0 → 正在 hex 边上 → edge=1；depth>=padding → 深入内部 → edge=0；depth<0 → 不属 i → edge=0
+    // step(0, depth) 显式门控"只在 i 领地内发光"。
+    float edge0 = (1.0 - smoothstep(0.0, HighlightPadding, depth0)) * step(0.0, depth0);
+    float edge1 = (1.0 - smoothstep(0.0, HighlightPadding, depth1)) * step(0.0, depth1);
+    float edge2 = (1.0 - smoothstep(0.0, HighlightPadding, depth2)) * step(0.0, depth2);
 
-    return (h0.rgb * i0 + h1.rgb * i1 + h2.rgb * i2) * HighlightStrength;
+    // 双通道叠加
+    float hoverSum  = edge0 * h0.r + edge1 * h1.r + edge2 * h2.r;
+    float selectSum = edge0 * h0.g + edge1 * h1.g + edge2 * h2.g;
+
+    // select 优先：hover 在 selected cell 上不叠加（避免亮度过曝）
+    hoverSum *= saturate(1.0 - selectSum);
+
+    return (HoverColor * hoverSum + SelectColor * selectSum) * HighlightStrength;
 }
 ```
 
-调用方（在 §14.3 的 Step 5 末尾）：
+调用方（在 R8.2 主材质 Step 8 加权混合末尾、主 `return` 之前）：
 
 ```hlsl
-albedo += ComputeHighlight(c0, c1, c2, w0, w1, w2);
+// R8.2 现行末尾原行：
+//     return (albA * wA + albB * wB + albC * wC) / wsum;
+// R11 把它拆成下面两行（注意 ComputeHighlight 传 deltaA/B/C 而不是 wA/wB/wC）：
+float3 baseRGB = (albA * wA + albB * wB + albC * wC) / wsum;
+return baseRGB + ComputeHighlight(c0, c1, c2, deltaA, deltaB, deltaC);
 ```
+
+> ⚠ R8.2 Custom 节点**主出口是 Float3**（连 BaseColor）；roughness / normal / pixel-depth-offset 走 `OutRoughness` / `OutNormalTS` / `OutPixelDepthOffset` 三个 Additional Outputs（详见 [R8 §4.4.3.R8.1](R8_ParametricTint.md) + [R8.2 §4.6](R8.2_SphericalHeightFieldRaymarching.md)），R11 描边带**只加到 albedo**，不动其他三路。
+
+> **R11 实施细节**：完整 cpp 端 LUT 状态机、几何源对接、关卡接线请见 [HexHighlightInteractionPlan.md](HexHighlightInteractionPlan.md)。
 
 ### 15.5 与既有 SelectLUT 的关系
 
-§9 描述的 `SelectLUT` 方案是**整 Cell 涂色**（按重心权重的线性加权），适合"可达范围预览"等"整片着色"语义；本节的 `HighlightLUT` 方案是**沿 hex 边描边**，适合"当前选中 Cell"语义。两者**正交并存**：
+§9 描述的 `SelectLUT` 方案是**整 Cell 涂色**（按重心权重的线性加权），适合"可达范围预览"等"整片着色"语义；本节的 `CellHighlightLUT` 方案是**沿 hex 边描边**，适合"当前 hover / 选中 Cell"语义。两者**正交并存**：
 
-| 视觉用途 | 推荐方案 | LUT |
+| 视觉用途 | 推荐方案 | LUT 通道 |
 | --- | --- | --- |
-| 当前选中 Cell（聚焦） | 描边带（§15） | HighlightLUT |
-| 单位可达范围 | 整 Cell 涂色（§9） | SelectLUT |
-| 鼠标悬停 hover | 测地线描边（[HexHighlightInteractionPlan.md](HexHighlightInteractionPlan.md)） | LineBatcher |
-| 战争迷雾 | 整 Cell 暗化（§8/§9 式） | FogLUT |
+| 当前选中 Cell（聚焦）| 描边带（§15）| `CellHighlightLUT.G` (SelectIntensity) |
+| 鼠标悬停 hover | 描边带（§15）| `CellHighlightLUT.R` (HoverIntensity) |
+| 单位可达范围 | 整 Cell 涂色（§9）| SelectLUT |
+| 战争迷雾 | 整 Cell 暗化（§8/§9 式）| FogLUT |
 
-它们共享同一套 "GPU FindNearestCell + 3 个 CellId + 3 个权重" 的查询基础，**只在最后的混合公式上有所区别**——这是本设计稿"采样函数与混合策略解耦"思想的最佳体现。
+> ⚠ **R11 拍板修订（2026-06-30）**：旧版 §15.5 表中 hover 走 `LineBatcher` 测地线描边的方案已废弃——hover 与 select 现在共享同一套 §15 描边管线，仅在 LUT R/G 通道上区分。LineBatch 路径不再保留为 hover 备用——视觉风格分裂、几何源绑死 PTG 插件、性能也比 LUT 更高一个数量级，详细分析见 [HexHighlightInteractionPlan.md 附录 A](HexHighlightInteractionPlan.md#附录-a旧-linebatch-方案存档不再使用)。它们共享同一套 "GPU FindNearestCell + 3 个 CellId + 3 个权重" 的查询基础，**只在最后的混合公式上有所区别**——这是本设计稿"采样函数与混合策略解耦"思想的最佳体现。
 
 ---
 

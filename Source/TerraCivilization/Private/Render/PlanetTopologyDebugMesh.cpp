@@ -722,8 +722,12 @@ void APlanetTopologyDebugMesh::Rebuild()
         {
             const TConstArrayView<TObjectPtr<UMaterialExpression>> Exprs = BaseMat->GetExpressions();
             int32 CustomFound = 0;
-            // R8 期望 Inputs 集合（小写比较，容错命名风格）
+            // R8.1 完整 19 项 + R8.2 新增 5 项 = 24 项（与 R8.2 §5.2 完全对应）；
+            // R11 在 Step 8 末尾追加 5 项 Inputs：CellHighlightLUT + HoverColor + SelectColor
+            // + HighlightPadding + HighlightStrength（详见 HexHighlightInteractionPlan.md §9）。
+            // → 反射诊断期望表共 29 inputs（小写比较）。
             const TArray<FString> ExpectedR8Inputs = {
+                // ---- R8.1 baseline 19 项 ----
                 TEXT("uv0"), TEXT("uv1"), TEXT("uv2"), TEXT("uv3"),
                 TEXT("worldpos"), TEXT("planetcenter"),
                 TEXT("cellattrlut"), TEXT("celldirlut"),
@@ -731,8 +735,21 @@ void APlanetTopologyDebugMesh::Rebuild()
                 TEXT("noiseamplitude"), TEXT("noisescale"),
                 TEXT("triplanarsharpness"), TEXT("tilescale"),
                 TEXT("pbrbasealbedo"),                                              // R8 替代 terrainalbedoarray
+                TEXT("pbrbasenormal"),                                              // R8.1 新增：三通道 Normal
+                TEXT("pbrbaseroughness"),                                           // R8.1 新增：三通道 Roughness
                 TEXT("celltintlut"), TEXT("cellhsvroughlut"), TEXT("cellnspeclut"), // R8 新增 3 LUT
+                // ---- R8.2 新增 5 项（SHFRM）----
                 TEXT("pbrbaseheight"),                                              // R8.2 新增：SHFRM 高度场
+                TEXT("cameravector"),                                               // R8.2 新增：视线方向
+                TEXT("globeradiuscm"),                                              // R8.2 新增：球半径显式暴露
+                TEXT("maxraymarchdepthcm"),                                         // R8.2 新增：raymarch 深度上限
+                TEXT("cameraworldpos"),                                             // R8.2 新增：相机世界位置
+                // ---- R11 新增 5 项（HexHighlight）----
+                TEXT("cellhighlightlut"),                                           // R11 新增：hover/select 双通道描边 LUT
+                TEXT("hovercolor"),                                                 // R11 新增：hover 描边色（Vector3）
+                TEXT("selectcolor"),                                                // R11 新增：select 描边色（Vector3）
+                TEXT("highlightpadding"),                                           // R11 新增：描边带宽（Scalar）
+                TEXT("highlightstrength"),                                          // R11 新增：全局描边强度（Scalar）
             };
             bool bAnyR8Compliant = false;
 

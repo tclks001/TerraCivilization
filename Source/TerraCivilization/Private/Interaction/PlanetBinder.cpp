@@ -3,6 +3,7 @@
 #include "Interaction/PlanetBinder.h"
 
 #include "Interaction/CellHighlightComponent.h"
+#include "Render/PlanetTessellatedMesh.h"
 
 #include "FCell.h"
 #include "FSphereTopology.h"
@@ -126,13 +127,14 @@ void APlanetBinder::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void APlanetBinder::OnHoverWorldPoint(const FVector& WorldHit)
 {
-    if (!PtgManagerRef || !Query.IsValid())
+    AActor* Host = GetHostActor();
+    if (!Host || !Query.IsValid())
     {
         return;
     }
 
     // 1) 命中点 -> 球心局部 -> 单位方向
-    const FVector Center  = PtgManagerRef->GetActorLocation();
+    const FVector Center  = Host->GetActorLocation();
     const FVector Local   = WorldHit - Center;
     const FVector UnitDir = Local.GetSafeNormal();
     if (UnitDir.IsNearlyZero())
@@ -148,11 +150,10 @@ void APlanetBinder::OnHoverWorldPoint(const FVector& WorldHit)
         return;
     }
 
-    // 3) 高亮该 Cell 的边界。每帧都重画一次，因为 LineBatcher 是瞬时线（受 LineLifeTime 控制）；
-    //    放在抖动抑制之前，确保鼠标静止时线条也持续可见。
+    // 3) R11：每帧都调 UpdateHover——状态机内部决定是否写 LUT，以及是否启动防抖。
     if (HighlightComp)
     {
-        HighlightComp->SetHighlightedCell(R.CellId);
+        HighlightComp->UpdateHover(R.CellId);
     }
 
     // 4) 抖动抑制：CellId 没变就跳过下面"屏幕日志 + DebugSphere"的更新。
@@ -181,10 +182,8 @@ void APlanetBinder::OnHoverWorldPoint(const FVector& WorldHit)
             Msg);
     }
 
-    // 5) 在 Cell 中心位置画 DebugSphere 用作肉眼校准。
-    //    位置 = Cell.UnitCenter * Radius + Center （PTG 球心是 Manager 的 Location）。
-    //    使用 PersistentLines=false + Lifetime=2s，让旧球自动消失，
-    //    与 hover 的频次相匹配；调试用，不需要严格管理生命周期。
+    // 6) 在 Cell 中心位置画 DebugSphere 用作肉眼校准。
+    //    位置 = Cell.UnitCenter * Radius + Center （球心是 Host actor 的 Location）。
     if (UWorld* World = GetWorld())
     {
         const FVector CellWorldCenter = Cell.UnitCenter * Radius + Center;
@@ -207,13 +206,36 @@ void APlanetBinder::OnHoverWorldPoint(const FVector& WorldHit)
 
 void APlanetBinder::OnClickWorldPoint(const FVector& WorldHit)
 {
-    // 占位：后续 Step 将切换到"持久高亮"状态。
-    (void)WorldHit;
+    // R11：点击 → 在鼠标命中的 Cell 上 toggle select 状态。
+    // CellHighlightComponent 内部会写 LUT.G 通道，马上看到 SelectColor 描边。
+    AActor* Host = GetHostActor();
+    if (!Host || !Query.IsValid() || !HighlightComp)
+    {
+        return;
+    }
+    const FVector Center  = Host->GetActorLocation();
+    const FVector Local   = WorldHit - Center;
+    const FVector UnitDir = Local.GetSafeNormal();
+    if (UnitDir.IsNearlyZero())
+    {
+        return;
+    }
+    const FSurfaceQueryResult R = Query->FindNearestCell(UnitDir);
+    if (R.CellId == INDEX_NONE)
+    {
+        return;
+    }
+    HighlightComp->ToggleSelected(R.CellId);
+
+    UE_LOG(LogPlanetBinder, Log,
+        TEXT("[PlanetBinder] Click -> ToggleSelected(Cell %d)"), R.CellId);
 }
 
 void APlanetBinder::OnLeavePlanet()
 {
-    // 当鼠标移出球体时，清掉抖动抑制缓存，并把屏幕消息、高亮都清掉。
+    // 当鼠标移出球体时，清掉抖动抑制缓存、屏幕消息、调 ClearHover。
+    // 注意：这里不调 ClearAll，避免把 select 纯牌也清掉；ClearHover 内部
+    // 走 UpdateHover(INDEX_NONE)，仅启动 0.5s 防抖、不动 select。
     LastHoveredCellId = INDEX_NONE;
     if (GEngine)
     {
@@ -221,25 +243,40 @@ void APlanetBinder::OnLeavePlanet()
     }
     if (HighlightComp)
     {
-        HighlightComp->ClearHighlight();
+        HighlightComp->ClearHover();
     }
+}
+
+AActor* APlanetBinder::GetHostActor() const
+{
+    if (TessellatedMeshRef)
+    {
+        return TessellatedMeshRef.Get();
+    }
+    return PtgManagerRef.Get();
 }
 
 float APlanetBinder::GetRadius() const
 {
-    constexpr float DefaultRadius = 15000.0f; // 与 APtgManager::Radius 默认值一致
-    if (!PtgManagerRef)
+    constexpr float DefaultRadius = 15000.0f;
+
+    // R11 优先：从 TessellatedMeshRef->GlobeRadiusCM 取（公开字段，无需反射）。
+    if (TessellatedMeshRef)
     {
-        return DefaultRadius;
+        return TessellatedMeshRef->GlobeRadiusCM;
     }
 
-    // APtgManager::Radius 是 protected UPROPERTY，无法直接 PtgManagerRef->Radius；
-    // 这里用 UE 反射在不修改插件源码的前提下获取它。
-    if (const FFloatProperty* Prop = FindFProperty<FFloatProperty>(
-            PtgManagerRef->GetClass(), TEXT("Radius")))
+    // Fallback：旧 PTG 反射路径。APtgManager::Radius 是 protected UPROPERTY，
+    // 这里用 UE 反射在不修改插件源码的前提下获取。
+    if (PtgManagerRef)
     {
-        return Prop->GetPropertyValue_InContainer(PtgManagerRef);
+        if (const FFloatProperty* Prop = FindFProperty<FFloatProperty>(
+                PtgManagerRef->GetClass(), TEXT("Radius")))
+        {
+            return Prop->GetPropertyValue_InContainer(PtgManagerRef);
+        }
     }
+
     return DefaultRadius;
 }
 

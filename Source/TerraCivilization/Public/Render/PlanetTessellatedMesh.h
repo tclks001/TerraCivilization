@@ -194,6 +194,54 @@ public:
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|R8")
     TObjectPtr<UTexture2DArray> TerrainNormalArray;
 
+    // R8.1 baseline = 19 inputs，R8.2 追加 5 项（pbrbaseheight/cameravector/globeradiuscm/
+    // maxraymarchdepthcm/cameraworldpos）= 24 inputs；R11 在 Step 8 末尾追加 5 项 Inputs
+    // （CellHighlightLUT + HoverColor + SelectColor + HighlightPadding + HighlightStrength）
+    // → 反射诊断期望表共 29 inputs（详见 R8.2 §5.2 + HexHighlightInteractionPlan.md §9 + DiagnoseR8Material_）。
+
+    //----------------------------------------------------------
+    // R11：Hex/Pent 高亮描边带（hover + select 统一管线）
+    //
+    // 详见 Docs/HexHighlightInteractionPlan.md §6。这 4 个参数仅以 MID Vector / Scalar
+    // 参数形式注入 TerrainMID，**不走 LUT**——颜色 / 描边宽度 / 全局强度都是
+    // 跨 cell 全局设定，提供运行期调色能力（例如"我方选中蓝 / 敌方选中红"未来可在
+    // 必要时上升为多个 SelectColor + LUT.B 分组编号）。
+    //
+    // 调色取值推荐：
+    //   - HighlightHoverColor  = 暖金（(1.00, 0.85, 0.10)）——Civ 系默认黑金色调。
+    //   - HighlightSelectColor = 青蓝（(0.20, 0.90, 1.00)）——与 hover 反差明显，且在合色
+    //                            17 酒色 tint 上均可辨识。
+    //   - HighlightPadding     = 0.03（弧度，约 1.7°；R11.1 修订：新算法下 padding 是从 hex 边向内延伸的
+    //                                    角距离带宽——sub=3 时 cell 张角约 0.2 rad ≈ 12°，0.03 rad 描边带占约 15%）。
+    //   - HighlightStrength    = 1.5（加性叠加到 albedo，1.5 倍令描边越过环境光仔细看得出）。
+    //----------------------------------------------------------
+
+    /** R11：hover 状态 cell 描边颜色（RGB）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|R11 Highlight")
+    FLinearColor HighlightHoverColor = FLinearColor(1.0f, 0.85f, 0.10f, 1.0f);
+
+    /** R11：select 状态 cell 描边颜色（RGB）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|R11 Highlight")
+    FLinearColor HighlightSelectColor = FLinearColor(0.20f, 0.90f, 1.00f, 1.0f);
+
+    /** R11：描边带宽度（**弧度**语义，R11.1 修订）——从 hex 边向内延伸的角距离带宽。
+     *  sub=3 时 cell 张角约 0.2 rad；推荐 0.02~0.05 rad（cell 张角的 10%~25%），默认 0.03。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|R11 Highlight",
+              meta = (ClampMin = "0.005", ClampMax = "0.15"))
+    float HighlightPadding = 0.03f;
+
+    /** R11：全局描边强度倍率（加性叠加到 albedo，>1 表示超过环境光多亮）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|R11 Highlight",
+              meta = (ClampMin = "0.0", ClampMax = "5.0"))
+    float HighlightStrength = 1.50f;
+
+    /**
+     * R11：由 UCellHighlightComponent::BeginPlay() 调用，把刚则建好的 1×NumCells / R8G8
+     * 高亮 LUT 注入现有 TerrainMID。该函数会在内部保存 LUT 指针，以便后续 Rebuild
+     * 后重建 MID 时反向填回。
+     */
+    void SetHighlightLUT(class UTexture2D* InLUT);
+
     //----------------------------------------------------------
     // T4：WorldGen 流水线参数（详见 Docs/T4_RealElevation.md §3.2）
     //----------------------------------------------------------
@@ -356,6 +404,10 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UMaterialInstanceDynamic> TerrainMID;
+
+    /** R11：高亮 LUT（UCellHighlightComponent 拥有，这里仅保存 weak 引用以便 Rebuild 后重套 MID）。 */
+    UPROPERTY(Transient)
+    TObjectPtr<UTexture2D> HighlightLUT;
 
     //----------------------------------------------------------
     // T3+ 字段
