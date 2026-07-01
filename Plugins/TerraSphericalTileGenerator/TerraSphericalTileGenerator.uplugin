@@ -1,0 +1,29 @@
+﻿{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1.0",
+	"FriendlyName": "Terra Spherical Tile Generator",
+	"Description": "Editor-only GeometryScript utility for generating spherical heightfield tile StaticMesh assets for TerraCivilization simple gameplay.",
+	"Category": "TerraCivilization",
+	"CreatedBy": "TerraCivilization",
+	"EngineVersion": "5.8.0",
+	"CanContainContent": true,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "TerraSphericalTileGenerator",
+			"Type": "Editor",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64",
+				"Linux"
+			]
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "GeometryScripting",
+			"Enabled": true
+		}
+	]
+}

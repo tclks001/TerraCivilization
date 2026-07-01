@@ -9,12 +9,10 @@
  * ETerrainPlacementMask
  *
  * UTerrainDefinition::ClimateRules[].Placement 取值。表达"该规则适用于哪种几何位置"。
- * 由 FWorldGenerator::Step_ClassifyBiomes 与 FCellGeoData 的 bIsLand/bIsCoast/bIsMountain 联合判别。
+ * 该枚举保留给旧地理生物群系评分器或未来扩展使用；当前 SimpleGameplay WorldGen 不再执行
+ * Step_ClassifyBiomes，只直接写入平原 / 森林 / 山脉三种 TerrainTag。
  *
- * 几何短路（海/陆/山）通过 Placement 表达，不在 cpp 里硬编码——
- * 设计师可在 DataAsset 中调整，与"完全数据驱动"原则一致。
- *
- * 详见 Docs/W4_BiomeClassification.md §2.1 / §2.2。
+ * 详见 Docs/W4_BiomeClassification.md §2.1 / §2.2 与 Docs/SimpleGameplay/WorldGenDesign.md。
  */
 UENUM(BlueprintType)
 enum class ETerrainPlacementMask : uint8

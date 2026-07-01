@@ -243,11 +243,11 @@ public:
     void SetHighlightLUT(class UTexture2D* InLUT);
 
     //----------------------------------------------------------
-    // T4：WorldGen 流水线参数（详见 Docs/T4_RealElevation.md §3.2）
+    // SimpleGameplay：WorldGen 三地形参数
     //----------------------------------------------------------
 
     /**
-     * D19：WorldGen 流水线参数（RandomSeed / PlateCount / SeaLevel / TerrainSet / DebugView 等都在内部）。
+     * SimpleGameplay WorldGen 参数（RandomSeed / 山脉数量与平均节点数 / 森林数量与平均节点数 / TerrainSet）。
      * 改动后 OnConstruction 自动重跑 Generator->Generate() → ComputeCellElevation_ 取新 Elevation。
      * 与 APlanetTopologyDebugMesh 的 WorldGenSettings 字段语义完全一致（两 actor 各跑各自的实例）。
      */

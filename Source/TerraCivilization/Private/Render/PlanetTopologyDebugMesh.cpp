@@ -996,10 +996,10 @@ void APlanetTopologyDebugMesh::RebuildCellAttrLUT_(int32 NumCells)
     // Knuth 整数哈希常数（黄金分割比 × 2^32）：保证相邻 CellId 也能落到不同 layer。
     constexpr uint32 KnuthHash = 2654435761u;
 
-    // ★ W4：预构建 Tag → UTerrainDefinition 反查表，供 Biome / None 默认分支按 Def->LayerIndex 写 LUT.R。
-    //   - Step_ClassifyBiomes 已把各 cell 的 TerrainTag 写入 CellData[]；
+    // SimpleGameplay：预构建 Tag → UTerrainDefinition 反查表，供 Biome / None 默认分支按 Def->LayerIndex 写 LUT.R。
+    //   - WorldGen 已把平原 / 森林 / 山脉 TerrainTag 写入 CellData[]；
     //   - 本函数仅需查一次 LayerIndex 写入 R 通道。
-    //   - 详见 Docs/W4_BiomeClassification.md §A.10。
+    //   - TerrainSet 当前作为渲染兼容查表，不再驱动 WorldGen 分类。
     TMap<FGameplayTag, UTerrainDefinition*> TagToDefMap;
     if (UTerrainSet* TSet = WorldGenSettings.TerrainSet.LoadSynchronous())
     {

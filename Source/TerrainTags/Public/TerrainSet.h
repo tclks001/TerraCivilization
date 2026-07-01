@@ -11,12 +11,12 @@
  * UTerrainSet
  *
  * 一组 UTerrainDefinition 引用的 DataAsset 集合；FWorldGenSettings::TerrainSet 通过
- * SoftObjectPtr 显式指向（关卡可携带不同 TerrainSet 实现星球风格切换）。
+ * SoftObjectPtr 显式指向。
  *
- * 软引用（TSoftObjectPtr）原因：避免编辑器打开 SettingsActor 时瀑布式硬加载所有 Def。
- * LoadSynchronous() 在 Step_ClassifyBiomes 入口处显式调用一次，把全部 Def 加载到 cache。
+ * 当前 SimpleGameplay WorldGen 直接写入三种 TerrainTag；TerrainSet 主要供渲染调试层
+ * 将 TerrainTag 反查到 UTerrainDefinition::LayerIndex。旧地理生物群系评分器仍可复用该资产能力。
  *
- * 详见 Docs/W4_BiomeClassification.md §2.1。
+ * 详见 Docs/W4_BiomeClassification.md §2.1 与 Docs/SimpleGameplay/WorldGenDesign.md。
  */
 UCLASS(BlueprintType)
 class TERRAINTAGS_API UTerrainSet : public UPrimaryDataAsset

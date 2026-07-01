@@ -11,8 +11,8 @@
 /**
  * FClimateSample
  *
- * UTerrainDefinition::ScoreFor 的输入。由 FWorldGenerator::Step_ClassifyBiomes
- * 在每个 cell 上拼装：FCellGeoData 的标量场 + 几何标志位。
+ * UTerrainDefinition::ScoreFor 的输入。该评分器属于旧地理生物群系流水线的资产能力，
+ * 当前 SimpleGameplay WorldGen 不再调用它；TerrainSet 主要作为 TerrainTag -> LayerIndex 查表兼容项。
  */
 USTRUCT()
 struct TERRAINTAGS_API FClimateSample
@@ -33,10 +33,11 @@ struct TERRAINTAGS_API FClimateSample
  * 单个地形（Terrain.*）的完整定义：身份（Tag + LayerIndex）、适用条件（ClimateRules[]）、
  * 玩法属性（MoveCost/Defense/Resources）。
  *
- * W4 关键设计：分类规则属于地形定义本身——每个 Def 是"自描述的"，它知道自己适用于哪些
- * (T,M,E,Placement) 组合，无需外部 BiomeTable。WorldGen 仅作为评分器，不知道任何具体生物群系语义。
+ * 旧 W4 关键设计：分类规则属于地形定义本身——每个 Def 是"自描述的"，它知道自己适用于哪些
+ * (T,M,E,Placement) 组合，无需外部 BiomeTable。
+ * 当前 SimpleGameplay WorldGen 直接生成平原 / 森林 / 山脉三种 TerrainTag，不再执行跨 Def 评分。
  *
- * 详见 Docs/W4_BiomeClassification.md §2.1。
+ * 详见 Docs/W4_BiomeClassification.md §2.1 与 Docs/SimpleGameplay/WorldGenDesign.md。
  */
 UCLASS(BlueprintType)
 class TERRAINTAGS_API UTerrainDefinition : public UPrimaryDataAsset
@@ -91,7 +92,7 @@ public:
 
     /**
      * 评估匹配分数。0 = 不匹配；越大越优先。
-     * WorldGen 端 argmax 跨 Def 取分数最高者作为该 cell 的地形。
+     * 保留给旧地理生物群系流水线或未来扩展使用；当前 SimpleGameplay WorldGen 不调用。
      * 详见 Docs/W4_BiomeClassification.md §2.2。
      */
     float ScoreFor(const FClimateSample& Sample) const;
