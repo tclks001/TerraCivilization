@@ -15,26 +15,26 @@
 
        ┌────────────────────────┐
        │ ① 需求澄清               │       ← 用户提出方向性需求时
-       │   • 列 2~3 条候选方案   │       ← 不立刻动手；列权衡
-       │   • 等用户拍板           │
+       │   ? 列 2~3 条候选方案   │       ← 不立刻动手；列权衡
+       │   ? 等用户拍板           │
        └─────────┬──────────────┘
                  ▼
        ┌────────────────────────┐
        │ ② 主稿简述               │       ← 在 SphericalSDFTerrainDesign.md
-       │   • §6.x.1 / §11        │           只写公式 + 跳转
-       │   • 不超过 30 行         │
+       │   ? §6.x.1 / §11        │           只写公式 + 跳转
+       │   ? 不超过 30 行         │
        └─────────┬──────────────┘
                  ▼
        ┌────────────────────────┐
        │ ③ 当期独立详稿            │       ← R<N>_<Topic>.md
-       │   • 8 主章节 + 附录       │           几何/HLSL/cpp/材质/验收/排错
-       │   • 含完整可粘贴 HLSL    │
+       │   ? 8 主章节 + 附录       │           几何/HLSL/cpp/材质/验收/排错
+       │   ? 含完整可粘贴 HLSL    │
        └─────────┬──────────────┘
                  ▼
        ┌────────────────────────┐
        │ ④ cpp 落地 + 反射诊断    │       ← 编辑器内手工材质验收
-       │   • 编译验证 0 警 0 错   │       ← Output Log 反射诊断
-       │   • Roadmap 状态联动    │
+       │   ? 编译验证 0 警 0 错   │       ← Output Log 反射诊断
+       │   ? Roadmap 状态联动    │
        └─────────┬──────────────┘
                  ▼
             视觉验收 + 踩坑沉淀
@@ -59,8 +59,8 @@
 - **明确"为什么、做什么、怎么验收"**：把视觉效果、量化指标（弧度数、ms 增量、显存）一次说清。
 
 #### 1.1.2 禁止做
-- ❌ 用户没明确选择就直接编码或写文档。
-- ❌ 用户已选 A 路径，私下用 B 路径"顺便"实现。
+- ? 用户没明确选择就直接编码或写文档。
+- ? 用户已选 A 路径，私下用 B 路径"顺便"实现。
 
 ### 1.2 段 ② — 主稿简述
 
@@ -73,8 +73,8 @@
 - §14 GPU 资源表新增对应资源（如新 LUT、新 Texture2DArray）。
 
 #### 1.2.2 禁止做
-- ❌ 把当期完整 HLSL / cpp 改动塞进主稿。
-- ❌ 主稿章节超过 30 行还不拆出独立详稿（R4 早期把详细方案塞进 §11.3 144 行，后被压缩至 12 行并移出独立文档；这是教训）。
+- ? 把当期完整 HLSL / cpp 改动塞进主稿。
+- ? 主稿章节超过 30 行还不拆出独立详稿（R4 早期把详细方案塞进 §11.3 144 行，后被压缩至 12 行并移出独立文档；这是教训）。
 
 ### 1.3 段 ③ — 当期独立详稿
 
@@ -84,14 +84,14 @@
 
 | 章 | 内容 | 是否必须 |
 | --- | --- | --- |
-| §0 | 一句话目标 + 视觉对比矩阵 | ✅ |
-| §1 | 几何与数学（含与上一期的差分） | ✅ |
-| §2 | HLSL 实现（UE Custom 节点限制 + 完整可粘贴代码） | ✅ |
-| §3 | cpp 端改动（UPROPERTY、MID 注入、反射诊断升级） | ✅ |
-| §4 | 材质资产搭建（节点级 + Sampler Type + Inputs 表） | ✅ |
-| §5 | 验收清单（A~J 项可勾选） | ✅ |
-| §6 | 排错表（症状 → 根因 → 修复） | ✅ |
-| §7 | 与上下游关系（与 R<N-1> / R<N+1> / T 阶段自研网格同构性） | ✅ |
+| §0 | 一句话目标 + 视觉对比矩阵 | ? |
+| §1 | 几何与数学（含与上一期的差分） | ? |
+| §2 | HLSL 实现（UE Custom 节点限制 + 完整可粘贴代码） | ? |
+| §3 | cpp 端改动（UPROPERTY、MID 注入、反射诊断升级） | ? |
+| §4 | 材质资产搭建（节点级 + Sampler Type + Inputs 表） | ? |
+| §5 | 验收清单（A~J 项可勾选） | ? |
+| §6 | 排错表（症状 → 根因 → 修复） | ? |
+| §7 | 与上下游关系（与 R<N-1> / R<N+1> / T 阶段自研网格同构性） | ? |
 | 附录 | 数值上限分析、参数调参参考、跨阶段同构性论证 | 推荐 |
 
 #### 1.3.2 必须做
@@ -100,8 +100,8 @@
 - §7 必须明确与上下游阶段的关系（关键约束：本项目 PMC 与 T 阶段自研网格共用同一套 HLSL。原 R11 PTG 同构性要求已作废）。
 
 #### 1.3.3 禁止做
-- ❌ 在详稿里写「请参考 §X.Y」却不在 §6 排错表给出操作步骤。
-- ❌ 详稿落地后忘记反向更新主稿 §11 Roadmap 状态字段。
+- ? 在详稿里写「请参考 §X.Y」却不在 §6 排错表给出操作步骤。
+- ? 详稿落地后忘记反向更新主稿 §11 Roadmap 状态字段。
 
 ### 1.4 段 ④ — cpp 落地 + 编辑器验收
 
@@ -126,7 +126,7 @@
 
 ##### 反模式（必须避免）
 
-| ❌ 反模式 | 为什么错 | 正确做法 |
+| ? 反模式 | 为什么错 | 正确做法 |
 | --- | --- | --- |
 | 凭语义记忆写字段名（"应该叫 Neighbors 吧"） | 工程实际命名通常更精确（`NeighborCellIds` / `NeighborCornerIds`） | 写之前 grep / 读 .h |
 | 只看设计稿摘要不看源码 | 设计稿可能省略前缀/后缀；摘要可能截断 | 设计稿确定语义后**仍要核对源码** |
@@ -154,6 +154,17 @@
 4. **Output Log 升级**：阶段标题字符串 + 新增字段（如 `EdgeWidth=%.4f rad (%.2f°)`）。
 5. **立即编译**：`Result: Succeeded` + 0 warnings + 0 errors。
 
+   - 本项目当前验证通过、可直接复用的 Unreal Editor 目标编译命令如下：
+
+   ```powershell
+   & 'C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat' TerraCivilizationEditor Win64 Development -Project='C:\workspace\TerraCivilization\TerraCivilization.uproject' -WaitMutex -NoHotReloadFromIDE
+   ```
+
+   - 注意：
+     - `Build.bat` 的完整路径必须包在单引号里，因为 `Program Files` 路径中含空格。
+     - `-Project=` 后面的 `.uproject` 绝对路径也必须包在单引号里，避免路径解析失败。
+     - 后续若 AI Agent 在本项目内执行“改完代码立即编译”，默认优先复用上面这条命令，不要手写省略引号的变体。
+
 #### 1.4.2 反射诊断（贯穿 R3~R7 的核心机制）
 
 > **核心原则**：UE 材质资产是用户在编辑器手工搭的，C++ 不能直接读 `.uasset` 验证连线 → 必须在 cpp `Rebuild()` 中遍历 Custom 节点的 Inputs 反射数据做合规性检查。
@@ -176,12 +187,12 @@ if (UMaterial* BaseMat = Material->GetMaterial())
             // 1. 打印 Description / OutputType / Code.Length / Inputs.Num
             // 2. 逐个 Input 输出 Name=...  Connected=YES/NO
             // 3. 按 8 KB 分段打印 Code 字段（用于排查 HLSL 语法错）
-            // 4. 检查与 ExpectedR<N>Inputs 交集 → ✓ R<N> compliance / ✗ missing / ✗ disconnected
+            // 4. 检查与 ExpectedR<N>Inputs 交集 → ? R<N> compliance / ? missing / ? disconnected
         }
     }
     if (CustomFound == 0)        UE_LOG(..., Error, TEXT("NO Custom nodes!"));
     else if (!bAnyR7Compliant)   UE_LOG(..., Error, TEXT("NONE is R7-compliant"));
-    else                         UE_LOG(..., Log,   TEXT("is R7-compliant ✓"));
+    else                         UE_LOG(..., Log,   TEXT("is R7-compliant ?"));
 }
 #endif
 ```
@@ -208,9 +219,9 @@ Cell0 : R=-0.5257 G=+0.8507 B=+0.0000 A=1.0  |V|=1.0000  isPent=YES
 
 #### 1.4.4 Roadmap 状态联动（强制）
 
-cpp 编译通过后必须立即把 §11 Roadmap 当期行状态从 `⏳ 待开始` 升级为：
-- `🛠 cpp 完成（待材质验收）`：cpp 已落地、等用户在 UE Editor 内手工创建材质资产
-- `✅ 已完成`：用户视觉验收通过
+cpp 编译通过后必须立即把 §11 Roadmap 当期行状态从 `? 待开始` 升级为：
+- `?? cpp 完成（待材质验收）`：cpp 已落地、等用户在 UE Editor 内手工创建材质资产
+- `? 已完成`：用户视觉验收通过
 
 漏改这一步是该工作流最常见的疏忽。
 
@@ -251,10 +262,10 @@ cpp 落地后给用户一份"下一步该做什么"清单，包含：
 | 探索语义概念 | `codebase_search` | — | `grep_search`（不擅长语义） |
 | 已知字符串精确匹配 | `grep_search` | — | `codebase_search`（语义模糊） |
 | 改单个文件多处 | `multi_replace` | `replace_in_file` × N | `edit_file`（大文件） |
-| 改大文件（isBigFile=true） | `replace_in_file` / `multi_replace` | — | ❌ `edit_file` |
+| 改大文件（isBigFile=true） | `replace_in_file` / `multi_replace` | — | ? `edit_file` |
 | 创建新文件 | `edit_file`（write 模式） | — | — |
-| 读 `.uasset` 二进制资产 | ❌ 都不行 | cpp 反射诊断 | `read_file`（返回乱码） |
-| 验证刚编辑过的文件 | `read_file` / `grep_search` | — | ❌ `codebase_search` / `view_code_item`（有索引延迟） |
+| 读 `.uasset` 二进制资产 | ? 都不行 | cpp 反射诊断 | `read_file`（返回乱码） |
+| 验证刚编辑过的文件 | `read_file` / `grep_search` | — | ? `codebase_search` / `view_code_item`（有索引延迟） |
 | 用户截图诊断 | `read_image` | — | 仅读文字日志（会臆断） |
 | 探索历史踩坑 | `grep_history_context` / `read_history_context` | — | — |
 
@@ -263,7 +274,7 @@ cpp 落地后给用户一份"下一步该做什么"清单，包含：
 > 见 `<search_replace_spec_rule>` 顶部规范。复述要点：
 
 - `old_string` 必须是文件中**真实字符**（含真实 `\t` 制表符、空格、换行）
-- ❌ 绝不要把 `\t` 错误转义成 `\\t`
+- ? 绝不要把 `\t` 错误转义成 `\\t`
 - `old_string` ≠ `new_string`（否则替换无效）
 - 编辑大文件（`isBigFile=true` 或 > 2000 行）必须用 `replace_in_file` / `multi_replace`，不用 `edit_file`
 - 一个文件多处改动 → 用 `multi_replace`，不要发 N 次 `replace_in_file`
@@ -279,7 +290,7 @@ cpp 落地后给用户一份"下一步该做什么"清单，包含：
 - 输入 contextID（在 `<system_reminder>` 中给出）
 - 用于读完整历史对话细节（参数、文件路径、返回值等）
 
-### 2.5 ⚠ 文件 / 资产删除策略：禁止主动调用删除命令
+### 2.5 ? 文件 / 资产删除策略：禁止主动调用删除命令
 
 > **用户偏好（2026-06-30 锁定）**：用户可能在不值守状态下让 Agent 长时间自跑，对话中弹出的删除型 terminal 命令（`Remove-Item` / `rm` / `del` 等）很难被及时同意，会阻塞工作流；同时"残留过时文件 / 临时脚本"在最终对话末尾集中列出由用户手动清理是更安全的做法。
 
@@ -302,14 +313,14 @@ cpp 落地后给用户一份"下一步该做什么"清单，包含：
 
 | # | 路径 | 类别 | 已无下游引用？ | 建议操作 |
 |---|------|------|----------------|----------|
-| 1 | C:\workspace\...\R8.5_TessellatedMesh.md | 废弃 stub | ✅ 是（已 grep 确认） | `Remove-Item <path> -Force` |
-| 2 | C:\workspace\...\Scripts\_tmp\xxx.ps1 | 临时调试脚本 | ✅ 是 | `Remove-Item <path> -Force` |
+| 1 | C:\workspace\...\R8.5_TessellatedMesh.md | 废弃 stub | ? 是（已 grep 确认） | `Remove-Item <path> -Force` |
+| 2 | C:\workspace\...\Scripts\_tmp\xxx.ps1 | 临时调试脚本 | ? 是 | `Remove-Item <path> -Force` |
 ```
 
 要求：
 - **每条都附完整绝对路径**（用户可直接复制粘贴）。
 - **类别**字段：`废弃 stub` / `临时调试脚本` / `过时 cpp` / `过时资产` / `临时日志` 等。
-- **已无下游引用**列必须先 grep 验证后再写 `✅ 是`，未验证则写 `⚠ 待复核`。
+- **已无下游引用**列必须先 grep 验证后再写 `? 是`，未验证则写 `? 待复核`。
 - **建议操作**给出可直接执行的 shell 命令字符串，但**不要**自己尝试执行。
 - 若本次任务无任何待清理项，则无需追加该清单（保持回复整洁）。
 
@@ -319,47 +330,47 @@ cpp 落地后给用户一份"下一步该做什么"清单，包含：
 
 > 这是本项目最重要的"领域知识沉淀"——AI 助手在 R8+ 必须默认掌握。
 
-### 3.1 ⚠ 三重 Material 槽位陷阱（R3 / R7 都踩过）
+### 3.1 ? 三重 Material 槽位陷阱（R3 / R7 都踩过）
 
 | 槽位 | 在 Details 哪里 | 数据流向 | cpp 反射诊断会触发吗 |
 | --- | --- | --- | --- |
-| ❌ 错的：Element 0 | `Rendering > Materials > Element 0`（PMC 通用槽） | 直接覆盖 PMC 材质，但 cpp 看不到 | **不会** |
-| ✅ 对的：PlanetTopology > Material | 自定义分组 `PlanetTopology > Material`（cpp UPROPERTY） | cpp 读取 → 包装 MID → SetMaterial(0) | **会** |
+| ? 错的：Element 0 | `Rendering > Materials > Element 0`（PMC 通用槽） | 直接覆盖 PMC 材质，但 cpp 看不到 | **不会** |
+| ? 对的：PlanetTopology > Material | 自定义分组 `PlanetTopology > Material`（cpp UPROPERTY） | cpp 读取 → 包装 MID → SetMaterial(0) | **会** |
 
 判别法：Output Log 没有反射诊断 Warning 行 = 没进入 `if (Material)` = 挂错槽。
 
-### 3.2 ⚠ Texture Object Parameter 的两套默认值（R7 经典踩坑）
+### 3.2 ? Texture Object Parameter 的两套默认值（R7 经典踩坑）
 
 ```
 ┌───────────────────────────────────────────────────────────┐
 │ 位置 A：材质图节点本身的 Details > Texture                  │
-│ • shader 编译期资源绑定源                                   │
-│ • 留空 → 1×1 白纹理 fallback（不报错！）                   │
-│ • R7 必须填 T_TerrainAlbedoArray                           │
+│ ? shader 编译期资源绑定源                                   │
+│ ? 留空 → 1×1 白纹理 fallback（不报错！）                   │
+│ ? R7 必须填 T_TerrainAlbedoArray                           │
 └───────────────────────────────────────────────────────────┘
 ┌───────────────────────────────────────────────────────────┐
 │ 位置 B：主材质 / MI 的 Parameter Defaults 聚合面板          │
-│ • 仅 UI 投影 / MI 覆盖                                     │
-│ • 不回写位置 A、不影响 shader 编译                          │
+│ ? 仅 UI 投影 / MI 覆盖                                     │
+│ ? 不回写位置 A、不影响 shader 编译                          │
 └───────────────────────────────────────────────────────────┘
 ```
 
-**典型症状**：Stats ✓ + R7-compliance ✓ + cpp 反射 ✓，但 Lit 模式米白、Unlit 纯白 → 位置 A 空槽 fallback 到 1×1 白纹理。
+**典型症状**：Stats ? + R7-compliance ? + cpp 反射 ?，但 Lit 模式米白、Unlit 纯白 → 位置 A 空槽 fallback 到 1×1 白纹理。
 
 **强制要求**：位置 A 必须挂 Texture2DArray 资产、`Sampler Type=Color`、`Sampler Source=Shared: Wrap`、`Parameter Name=TerrainAlbedoArray`（与 cpp `SetTextureParameterValue` 名一致）。
 
-### 3.3 ⚠ HLSL 在 UE Custom 节点的 4 项硬性限制
+### 3.3 ? HLSL 在 UE Custom 节点的 4 项硬性限制
 
 | 限制 | 错误现象 | 正确写法 |
 | --- | --- | --- |
-| ❌ 不允许嵌套定义函数 | `function definition is not allowed here` + `use of undeclared identifier 'Noise3D'`；**或编辑器静默失败、材质 stats 显示 0 instructions** | scoped block 内联（`{ ... }` 包局部变量）**或** `#define MACRO(IN, OUT) { ... }` 宏 |
-| ❌ 不允许 `#include` | 无（要用节点的 `IncludeFilePaths` 字段） | inline 全部依赖 |
-| ❌ RT ClosestHit 阶段不允许 `Sample(...)` | `Opcode Sample not valid in shader model lib_6_6(closesthit)` | 一律 `SampleLevel(samp, uv, 0)` |
-| ⚠ Inputs 顺序必须与 HLSL 形参一一对应 | 颜色出现不连续色块 / 编译错位 | 严格按详稿 §4.3.1 顺序声明 Inputs |
+| ? 不允许嵌套定义函数 | `function definition is not allowed here` + `use of undeclared identifier 'Noise3D'`；**或编辑器静默失败、材质 stats 显示 0 instructions** | scoped block 内联（`{ ... }` 包局部变量）**或** `#define MACRO(IN, OUT) { ... }` 宏 |
+| ? 不允许 `#include` | 无（要用节点的 `IncludeFilePaths` 字段） | inline 全部依赖 |
+| ? RT ClosestHit 阶段不允许 `Sample(...)` | `Opcode Sample not valid in shader model lib_6_6(closesthit)` | 一律 `SampleLevel(samp, uv, 0)` |
+| ? Inputs 顺序必须与 HLSL 形参一一对应 | 颜色出现不连续色块 / 编译错位 | 严格按详稿 §4.3.1 顺序声明 Inputs |
 
 > R6 函数定义错误 + R7 RT Sample 错误 = HLSL 在 UE Custom 节点的两个最经典坑，必须默认掌握。
 
-#### 3.3.1 ⚠ "不允许函数定义"的根因与修复模板（R6 / R8 反复踩坑）
+#### 3.3.1 ? "不允许函数定义"的根因与修复模板（R6 / R8 反复踩坑）
 
 **根因**：UE 把 Custom 节点的 Code 字段直接拼接进 PS / VS 主函数体——所以 Code 字段本身就**已经在一个函数体内**了。在函数体里再写 `float Foo(...) { ... }` = 嵌套函数定义，HLSL 不允许。
 
@@ -372,7 +383,7 @@ cpp 落地后给用户一份"下一步该做什么"清单，包含：
 **路径 A — `#define` 宏（推荐，多处复用时）**：
 
 ```hlsl
-// ❌ 错误：嵌套函数
+// ? 错误：嵌套函数
 float ValueNoise(float2 p)
 {
     return frac(sin(dot(p, float2(12.9, 78.2))) * 43758.5);
@@ -380,7 +391,7 @@ float ValueNoise(float2 p)
 float n1 = ValueNoise(uvA);
 float n2 = ValueNoise(uvB);
 
-// ✅ 正确：用宏，宏体 { ... } block 创建子作用域，输出变量在外部声明
+// ? 正确：用宏，宏体 { ... } block 创建子作用域，输出变量在外部声明
 #define VN(IN_P, OUT_N)                                          \
 {                                                                \
     float2 _vp = (IN_P);                                         \
@@ -414,7 +425,7 @@ float n1;
 | --- | --- | --- |
 | ① | 直接复制 ShaderToy / Substance 的 `float Foo(...) { return ... }` 代码到 Code 字段 | ShaderToy 是顶层函数级（`mainImage` 主函数外可定义辅助函数）；UE Custom 是 PS 主函数体内，规则不同 |
 | ② | 误以为"`#define MACRO(p) frac(sin(p))` 这种单行表达式宏可以"——然后宏内有多个语句 | 单行表达式宏只能写**单个表达式**，多语句必须用 `{ ... }` block 包装 |
-| ③ | 文档里写"`float Foo(...) { ... }`"作为算法参考，没标注"不能直接粘贴" | 后人会直接 Ctrl+C/V 然后踩坑——务必在算法参考块顶部标记"⚠ 这是数学参考，落地必须改为宏 / 内联" |
+| ③ | 文档里写"`float Foo(...) { ... }`"作为算法参考，没标注"不能直接粘贴" | 后人会直接 Ctrl+C/V 然后踩坑——务必在算法参考块顶部标记"? 这是数学参考，落地必须改为宏 / 内联" |
 
 #### 3.3.3 项目内已落地样板
 
@@ -422,7 +433,7 @@ float n1;
 - [R8_ParametricTint.md §4.5.3.3 节点 ③](R8_ParametricTint.md)：`#define HASH21` + `#define VN2D` 水面材质宏化版
 - [R8_ParametricTint.md §2.2 / §2.3](R8_ParametricTint.md)：函数语法只作算法参考，章节顶部已加显著警示
 
-### 3.4 ⚠ `SetTextureParameterValue` 类型一致性
+### 3.4 ? `SetTextureParameterValue` 类型一致性
 
 > UE 5.x 隐藏约束：注入纹理类型必须与位置 A 默认纹理类型完全一致。
 
@@ -431,7 +442,7 @@ float n1;
 
 修复：位置 A 必须先挂正确类型的占位 Texture2DArray，MID 才能在运行时覆盖。
 
-### 3.5 ⚠ Sampler Type 与纹理格式必须对齐
+### 3.5 ? Sampler Type 与纹理格式必须对齐
 
 | 纹理类型 | Sampler Type | Compression Settings |
 | --- | --- | --- |
@@ -442,11 +453,11 @@ float n1;
 
 不对齐：编辑器红色错误，材质 fallback 到 WorldGridMaterial。
 
-### 3.6 ⚠ 顶点法线写法通则（UE5 左手系 + CCW 约定，经 R8 实测修订）
+### 3.6 ? 顶点法线写法通则（UE5 左手系 + CCW 约定，经 R8 实测修订）
 
 > **核心结论**（已修订）：UE5 是左手坐标系 + CCW frontface（[`D3D12State.cpp:356`](../../Program%20Files/Epic%20Games/UE_5.8/Engine/Source/Runtime/D3D12RHI/Private/D3D12State.cpp) `FrontCounterClockwise = true`）+ 漫反射用 `saturate(dot(N, L))`（[`ForwardLightingCommon.ush:387-392`](../../Program%20Files/Epic%20Games/UE_5.8/Engine/Shaders/Private/ForwardLightingCommon.ush)）。**对球外渲染的球面 mesh，顶点法线应朝外**（`+UnitCenter`）——与几何直觉完全一致。
 >
-> ⚠ 早期版本（R7 期）曾误推为"应朝球心"，该结论已于 R8 期被实测证伪（详见 [SphereTopologyReference.md §11.4](SphereTopologyReference.md#114-关联踩坑历史与文档修订)）。
+> ? 早期版本（R7 期）曾误推为"应朝球心"，该结论已于 R8 期被实测证伪（详见 [SphereTopologyReference.md §11.4](SphereTopologyReference.md#114-关联踩坑历史与文档修订)）。
 
 #### 3.6.1 硬性要求
 
@@ -458,28 +469,28 @@ float n1;
 
 #### 3.6.2 判别法
 
-- View Mode 切 Lit ↔ Unlit：**Unlit 正常 + Lit 漆黑**是法线方向反向的指纹（不是材质 fallback、不是绕序错误、不是相机位置）；在本项目中最常见的原因是**误写 `-UnitCenter`**，改回 `+UnitCenter` 即恢复
+- View Mode 切 Lit ? Unlit：**Unlit 正常 + Lit 漆黑**是法线方向反向的指纹（不是材质 fallback、不是绕序错误、不是相机位置）；在本项目中最常见的原因是**误写 `-UnitCenter`**，改回 `+UnitCenter` 即恢复
 - Buffer Visualization → World Normal viewmode：**朝光源一侧的半球应在 lit 后呈亮**；若反过来 → 法线方向反了
 
 #### 3.6.3 错误归因路径（已避免重蹈，R7→R8 复盘）
 
 R7 期曾报告一次 Lit 漆黑并被误归因为"需要朝内法线"，其实是多个问题被 KismetTangents 同时掩盖。R8 阶段用同一段代码独立 sign 翻转复现证伪了这个误结论。详见 [SphereTopologyReference.md §11.4](SphereTopologyReference.md#114-关联踩坑历史与文档修订)。
 
-**详见**：[SphereTopologyReference.md §11](SphereTopologyReference.md#11-顶点法线与-ue5-光照约定重要结论--经验沉淀)（权威参考，已修订） / [SphericalSDFTerrainDesign.md §11.2](SphericalSDFTerrainDesign.md#112-pmcptg-渲染契约顶点法线与-ue5-光照约定)（PMC↔PTG 跨期契约） / [R7_TerrainTriplanar.md §6](R7_TerrainTriplanar.md) 排错表"整球 Lit 模式漆黑"行。
+**详见**：[SphereTopologyReference.md §11](SphereTopologyReference.md#11-顶点法线与-ue5-光照约定重要结论--经验沉淀)（权威参考，已修订） / [SphericalSDFTerrainDesign.md §11.2](SphericalSDFTerrainDesign.md#112-pmcptg-渲染契约顶点法线与-ue5-光照约定)（PMC?PTG 跨期契约） / [R7_TerrainTriplanar.md §6](R7_TerrainTriplanar.md) 排错表"整球 Lit 模式漆黑"行。
 
-### 3.7 ⚠ UE5 左手系 + Z up 下的"自西向东"方向（W3 经典踩坑）
+### 3.7 ? UE5 左手系 + Z up 下的"自西向东"方向（W3 经典踩坑）
 
-> **核心结论**：UE5 是**左手坐标系** + **Z up**。从 +Z 俯视，+X→+Y 是**顺时针**——这与地球北极俯视自转方向（**逆时针**，即"自西向东"）相反。所以在 UE5 中：**自西向东**（地理意义上的"东向"、即经度递增方向）= **+X → −Y**，而不是凭"2D 逆时针旋转 90°"直觉的 +X → +Y。
+> **核心结论**：UE5 是**左手坐标系** + **Z up**。从 +Z 俯视，+X→+Y 是**顺时针**——这与地球北极俯视自转方向（**逆时针**，即"自西向东"）相反。所以在 UE5 中：**自西向东**（地理意义上的"东向"、即经度递增方向）= **+X → ?Y**，而不是凭"2D 逆时针旋转 90°"直觉的 +X → +Y。
 
 #### 3.7.1 推导
 
-> 球面以 +Z 为北极、本初子午线穿过 +X 方向。赤道上点 P = (cos λ, **−**sin λ, 0)（λ 是经度，λ=0 时 P=+X，向东转 → −Y 方向）。
+> 球面以 +Z 为北极、本初子午线穿过 +X 方向。赤道上点 P = (cos λ, **?**sin λ, 0)（λ 是经度，λ=0 时 P=+X，向东转 → ?Y 方向）。
 >
-> 东向切向量 = dP/dλ = (−sin λ, **−**cos λ, 0)。
+> 东向切向量 = dP/dλ = (?sin λ, **?**cos λ, 0)。
 >
-> 在 P = (x, y, 0) 时：sin λ = −y、cos λ = x，故：
+> 在 P = (x, y, 0) 时：sin λ = ?y、cos λ = x，故：
 >
-> **East(P) = (y, −x, 0)**——也即代码里 `FVector East(U.Y, -U.X, 0.0f);`
+> **East(P) = (y, ?x, 0)**——也即代码里 `FVector East(U.Y, -U.X, 0.0f);`
 
 #### 3.7.2 错误归因路径（W3 实际踩坑，2026-06-28 复盘）
 
@@ -487,7 +498,7 @@ W3 第一版落地的 `Step_SimulateMoisture` 凭"2D 逆时针旋转 90°"直觉
 
 | 反模式 | 表象 | 修复 |
 | --- | --- | --- |
-| 把"绕 +Z 逆时针 90° 旋转 (x,y,0)" 当成东向 → `(-y, x, 0)` | 在右手系 + Z up 下没问题，但 **UE5 是左手系**，"绕 +Z 逆时针" 在 UE5 里是 +X→−Y 而非 +X→+Y | `(y, -x, 0)`（**先验证手系再写公式**） |
+| 把"绕 +Z 逆时针 90° 旋转 (x,y,0)" 当成东向 → `(-y, x, 0)` | 在右手系 + Z up 下没问题，但 **UE5 是左手系**，"绕 +Z 逆时针" 在 UE5 里是 +X→?Y 而非 +X→+Y | `(y, -x, 0)`（**先验证手系再写公式**） |
 | 想当然认为 +Y 是"东" | UE5 默认惯例确实把 +Y 视作"屏幕右"，但**地图上的"东"= 经度递增方向 = 从 +X 出发的旋转方向**，与"屏幕右"无关 | 永远从"经度公式 P(λ) → dP/dλ"推导，不靠几何直觉 |
 | 忘记先验证：调试时不分东西、误以为是设计问题 | "湿度梯度反"被误归为参数过弱、SSSP 未收敛、风向选错 | **任何与"方位"挂钩的代码都先打 DrawDebug 红箭头沿 East 画一笔**，目视核对再继续 |
 
@@ -495,7 +506,7 @@ W3 第一版落地的 `Step_SimulateMoisture` 凭"2D 逆时针旋转 90°"直觉
 
 | # | 要求 | 实施 |
 | --- | --- | --- |
-| ① | **任何"东/南/西/北"语义的轴向公式都先验证手系** | UE5 = 左手系 + Z up；"自西向东" = +X→−Y；"自南向北" = 沿 +Z（北极）方向 |
+| ① | **任何"东/南/西/北"语义的轴向公式都先验证手系** | UE5 = 左手系 + Z up；"自西向东" = +X→?Y；"自南向北" = 沿 +Z（北极）方向 |
 | ② | **不要把 2D 旋转矩阵直觉迁移到 3D 球面** | 2D 课本默认右手系 + 逆时针正向；UE5 是左手系，旋转方向相反 |
 | ③ | **先打 DrawDebug 箭头目视验证再写大段算法** | `DrawDebugDirectionalArrow(World, Cell.Center, Cell.Center + East*100, 5, FColor::Red, ...)`，看是否真的指向地球图上"东"那一侧 |
 
@@ -509,7 +520,7 @@ W3 第一版落地的 `Step_SimulateMoisture` 凭"2D 逆时针旋转 90°"直觉
 
 > **教训**：本通则的存在是因为 W3.5 第一次落地时凭直觉写错了东向公式，导致大陆东西岸湿度梯度反。任何"自西向东"/"东风"/"上风"等方位语义的代码，**都必须先核对左手系下的公式再写**。
 
-### 3.8 ⚠ GameplayTag 注册：手放 `Config/Tags/*.ini` 重启**无效**——必须经编辑器"Add New Tag Source"动作（W4 经典踩坑）
+### 3.8 ? GameplayTag 注册：手放 `Config/Tags/*.ini` 重启**无效**——必须经编辑器"Add New Tag Source"动作（W4 经典踩坑）
 
 > **核心结论**（2026-06-28 W4 用户实测纠正）：把 `Terrain.ini` 文件直接放到 `Config/Tags/` 目录下、然后重启编辑器**完全无效**——下拉框依旧为空。引擎在启动期虽然会 `AddTagIniSearchPath(FPaths::ProjectConfigDir()/"Tags")`（[`GameplayTagsManager.cpp:683`](../../Program%20Files/Epic%20Games/UE_5.8/Engine/Source/Runtime/GameplayTags/Private/GameplayTagsManager.cpp)），但实际 ini 的"被注册"还需要 GameplayTagsSettings/`UGameplayTagsList` 子对象在引擎启动期把它认作合法 Source。**必须经过编辑器内 "Add New Tag Source" 一次显式动作**，让引擎写盘并把该 ini 注册进 Source 列表，之后该 ini 才会被纳入扫描；否则即使文件已存在、内容格式正确、重启编辑器，依然不被加载。
 
@@ -531,7 +542,7 @@ W3 第一版落地的 `Step_SimulateMoisture` 凭"2D 逆时针旋转 90°"直觉
 | 第一版 | Agent 在 `Config/Tags/Terrain.ini` 写了 17 个 `+GameplayTagList=`；不进编辑器，期望它会被自动扫描 | DA 资产 `TerrainTag` 下拉框为空 |
 | 第二版 | 进入 Project Settings → GameplayTags → 点了"导入"按钮 | **仍为空**（"导入"按钮只重读已注册 Source 列表中已纳入的 ini，不重扫文件系统） |
 | 第三版 | 完全关闭并重启 UnrealEditor.exe | **仍为空**（即便引擎启动期 SearchPath 注册的是 `Config/Tags/` 目录，该目录下的 ini 也不会自动成为 GameplayTagsSettings 认可的 Source） |
-| 第四版（实测有效） | 在编辑器内 "Add New Gameplay Tag Source" 输入 `Terrain.ini` → 编辑器自动创建/覆盖 `Config/Tags/Terrain.ini` 并把它注册为合法 Source → 把详稿给的完整 ini 内容粘贴覆盖 → 重启编辑器 | ✅ 17 个 Tag 全部出现 |
+| 第四版（实测有效） | 在编辑器内 "Add New Gameplay Tag Source" 输入 `Terrain.ini` → 编辑器自动创建/覆盖 `Config/Tags/Terrain.ini` 并把它注册为合法 Source → 把详稿给的完整 ini 内容粘贴覆盖 → 重启编辑器 | ? 17 个 Tag 全部出现 |
 
 > **错误根源**：作者前几版误读了 `AddTagIniSearchPath` 在第 683 行的字面行为，以为 SearchPath 注册了就等于自动扫描；实际上**目录被 SearchPath 注册 ≠ 该目录下的新文件会被自动当作 Source**——必须经编辑器 UI 动作或 `FindOrAddTagSource(...)` 显式登记。
 
@@ -545,11 +556,11 @@ W3 第一版落地的 `Step_SimulateMoisture` 凭"2D 逆时针旋转 90°"直觉
                           ▼
 ┌────────────────────────────────────────────────────────────────┐
 │ Step 2: 启动编辑器（此时 ini 不必预先存在）                      │
-│   • Project Settings → GameplayTags                            │
-│   • Manage Gameplay Tags → 顶部 "Add New Gameplay Tag"         │
-│   • Source 下拉框中输入新 ini 文件名（如 Terrain.ini）          │
-│   • Tag 字段填随便一个占位 Tag（之后会被覆盖）                   │
-│   • 点 Add New Tag                                              │
+│   ? Project Settings → GameplayTags                            │
+│   ? Manage Gameplay Tags → 顶部 "Add New Gameplay Tag"         │
+│   ? Source 下拉框中输入新 ini 文件名（如 Terrain.ini）          │
+│   ? Tag 字段填随便一个占位 Tag（之后会被覆盖）                   │
+│   ? 点 Add New Tag                                              │
 │   → 编辑器自动创建/覆盖 Config/Tags/Terrain.ini，并把它注册     │
 └────────────────────────────────────────────────────────────────┘
                           │
@@ -571,27 +582,27 @@ W3 第一版落地的 `Step_SimulateMoisture` 凭"2D 逆时针旋转 90°"直觉
 ```
 ┌──────────────────────────────────────────────────────────┐
 │ Layer 1: ini 是否被引擎注册为 Source（最常见根因）         │
-│   • 进 Project Settings → GameplayTags → Manage           │
+│   ? 进 Project Settings → GameplayTags → Manage           │
 │     Gameplay Tags → 看 "Sources" 列表是否包含该 ini      │
-│   • 不在列表中 → 走 §3.8.3 Step 2 用编辑器 Add New Source │
-│   • 已在列表中 → 跳到 Layer 2                              │
+│   ? 不在列表中 → 走 §3.8.3 Step 2 用编辑器 Add New Source │
+│   ? 已在列表中 → 跳到 Layer 2                              │
 └──────────────────────────────────────────────────────────┘
                         │
                         ▼
 ┌──────────────────────────────────────────────────────────┐
 │ Layer 2: ini 文件内容                                     │
-│   • 路径 Config/Tags/*.ini（不是 Config/*.ini）             │
-│   • Section [/Script/GameplayTags.GameplayTagsList]       │
-│   • 行格式 +GameplayTagList=(Tag="Foo.Bar",DevComment="…") │
-│   • 编码 UTF-8 / UTF-8 BOM 都可                            │
+│   ? 路径 Config/Tags/*.ini（不是 Config/*.ini）             │
+│   ? Section [/Script/GameplayTags.GameplayTagsList]       │
+│   ? 行格式 +GameplayTagList=(Tag="Foo.Bar",DevComment="…") │
+│   ? 编码 UTF-8 / UTF-8 BOM 都可                            │
 └──────────────────────────────────────────────────────────┘
                         │
                         ▼
 ┌──────────────────────────────────────────────────────────┐
 │ Layer 3: UPROPERTY 元数据 Categories                     │
-│   • 字段是否加了 meta=(Categories="...")？                  │
-│   • 如有，前缀必须与 ini 中 Tag 命名空间一致                │
-│   • 拿掉 Categories 测一次；立即出现 → 元数据写错了        │
+│   ? 字段是否加了 meta=(Categories="...")？                  │
+│   ? 如有，前缀必须与 ini 中 Tag 命名空间一致                │
+│   ? 拿掉 Categories 测一次；立即出现 → 元数据写错了        │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -606,7 +617,7 @@ W3 第一版落地的 `Step_SimulateMoisture` 凭"2D 逆时针旋转 90°"直觉
 
 ---
 
-### 3.9 ⚠ `TUniquePtr<前向声明类型>` 的析构契约（R8 水面 Actor 经典踩坑）
+### 3.9 ? `TUniquePtr<前向声明类型>` 的析构契约（R8 水面 Actor 经典踩坑）
 
 #### 3.9.1 现象
 
@@ -677,7 +688,7 @@ APlanetWaterShell::APlanetWaterShell(FVTableHelper& Helper) : Super(Helper) {}  
 
 ---
 
-### 3.10 ⚠ `OnConstruction` 中 `SpawnActor` 的 Editor / PIE 生命周期错位（R8 水面层经典踩坑）
+### 3.10 ? `OnConstruction` 中 `SpawnActor` 的 Editor / PIE 生命周期错位（R8 水面层经典踩坑）
 
 #### 3.10.1 现象
 
@@ -750,7 +761,7 @@ RebuildWaterMesh_();   // 内部按 bEnableWaterShell + WaterMaterial 重建 mes
 
 ---
 
-### 3.11 ⚠ PIE 退出后 Editor 中 MID/Material 引用失效（R8 反复踩坑）
+### 3.11 ? PIE 退出后 Editor 中 MID/Material 引用失效（R8 反复踩坑）
 
 #### 3.11.1 现象
 
@@ -865,7 +876,7 @@ void AMyActor::OnPostWorldCleanup_(UWorld* World, bool bSessionEnded, bool bClea
 
 ---
 
-### 3.12 ⚠ Translucent 不接收 SSR / 反射探针 → 水体应使用 Single Layer Water shading model（R8 水面层经典踩坑）
+### 3.12 ? Translucent 不接收 SSR / 反射探针 → 水体应使用 Single Layer Water shading model（R8 水面层经典踩坑）
 
 #### 3.12.1 现象
 
@@ -886,11 +897,11 @@ R8 验收期把水面材质 `M_WaterShell` 配置为：
 
 | 反射源 | Translucent 接收？ |
 | --- | --- |
-| ScreenSpaceReflection | ❌（除非在 Translucency 分组里勾 Screen Space Reflections，且效果有限）|
-| ReflectionCapture（Box/Sphere）| ❌ |
-| SkyLight 实时 capture | ❌ |
-| Lumen Reflections | ❌ |
-| 太阳 specular（DirectionalLight）| ✅（但只是单方向，不算"反射"，是"高光"）|
+| ScreenSpaceReflection | ?（除非在 Translucency 分组里勾 Screen Space Reflections，且效果有限）|
+| ReflectionCapture（Box/Sphere）| ? |
+| SkyLight 实时 capture | ? |
+| Lumen Reflections | ? |
+| 太阳 specular（DirectionalLight）| ?（但只是单方向，不算"反射"，是"高光"）|
 
 所以 Translucent 水面只能看到一点点太阳高光（如果 Roughness 极低且光向恰好对着相机），但**永远看不到天空映在水面上**。这与"水的反射"视觉直觉强烈冲突，也是新手在 UE5 中做水体的最高频踩坑。
 
@@ -900,9 +911,9 @@ R8 验收期把水面材质 `M_WaterShell` 配置为：
 
 | 配置项 | 改为 |
 | --- | --- |
-| Blend Mode | `Opaque` ⚠ |
-| Shading Model | `Single Layer Water` ⚠ |
-| Two Sided | ✓ |
+| Blend Mode | `Opaque` ? |
+| Shading Model | `Single Layer Water` ? |
+| Two Sided | ? |
 | Translucency Lighting Mode | 失效（Opaque 模式下不可见）|
 | 主节点 Opacity 引脚 | 失效（Opaque 模式下不可见）|
 
@@ -927,7 +938,7 @@ SLW 本质是不透明渲染（写深度、参与 GBuffer），但内置"水下�
 
 完整 R8 SLW 实现见 [R8_ParametricTint.md §4.5.3](R8_ParametricTint.md)。
 
-**次选**（不推荐，仅作记录）：保留 Translucent，开启 Project Settings → Rendering → **Forward Shading** ✓ + 材质 Translucency 勾 Screen Space Reflections + Forward Shading 勾 High Quality Reflections。这条路会**全项目所有材质切到 Forward 渲染**——影响 Lumen / Nanite 兼容性，R8/T 阶段不要为一个测试球开此项目级开关。
+**次选**（不推荐，仅作记录）：保留 Translucent，开启 Project Settings → Rendering → **Forward Shading** ? + 材质 Translucency 勾 Screen Space Reflections + Forward Shading 勾 High Quality Reflections。这条路会**全项目所有材质切到 Forward 渲染**——影响 Lumen / Nanite 兼容性，R8/T 阶段不要为一个测试球开此项目级开关。
 
 **末选**（伪反射，仅作 placeholder）：保留 Translucent + Default Lit，承认无真反射，把 sparkle 通过 Emissive 显式画出来。视觉够用但不是物理反射，跟相机角度 / 光源位置无关。R8 验收期已抛弃此路径。
 
@@ -968,7 +979,7 @@ SLW 本质是不透明渲染（写深度、参与 GBuffer），但内置"水下�
 
 ---
 
-### 3.13 ⚠ 独立顶点 mesh + KismetTangents 自动法线 = 隐式 flat shading（R8 水面层经典踩坑）
+### 3.13 ? 独立顶点 mesh + KismetTangents 自动法线 = 隐式 flat shading（R8 水面层经典踩坑）
 
 #### 3.13.1 现象
 
@@ -1015,7 +1026,7 @@ R8 主 mesh 同样是"每 Corner 展开 3 独立顶点"——但你不会在 R7/
 **水面 mesh 的修复代码**（已落地于 [PlanetTopologyDebugMesh.cpp `RebuildWaterMesh_`](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp)）：
 
 ```cpp
-// ❌ 错误：顶点不共享 mesh + KismetTangents = flat shading
+// ? 错误：顶点不共享 mesh + KismetTangents = flat shading
 // const FVector NZero = FVector::ZeroVector;
 // Vertices.Add(PA); Normals.Add(NZero);   // 占位
 // ...
@@ -1023,7 +1034,7 @@ R8 主 mesh 同样是"每 Corner 展开 3 独立顶点"——但你不会在 R7/
 //     Vertices, Triangles, UV0, AutoNormals, AutoTangents);
 // Normals = MoveTemp(AutoNormals);        // 实际是 flat 法线
 
-// ✅ 正确：球面 mesh 直接用 UnitCenter 作为顶点法线
+// ? 正确：球面 mesh 直接用 UnitCenter 作为顶点法线
 const FVector NA = WaterTopology->Cells[CA].UnitCenter;
 const FVector NB = WaterTopology->Cells[CB].UnitCenter;
 const FVector NC = WaterTopology->Cells[CC].UnitCenter;
@@ -1055,13 +1066,13 @@ Tangents.Reset();
 > - [APlanetTopologyDebugMesh::RebuildWaterMesh_](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp)（水面 SLW 光滑反射球，§3.13 复盘对象，+UnitCenter）
 > - [APlanetTopologyDebugMesh::Rebuild](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp)（主 mesh 同样用 +UnitCenter，**§3.14 复盘对象**）
 >
-> ⚠ **本结论的修订史**：
+> ? **本结论的修订史**：
 > - 早期版本的 §3.13 曾说"主 mesh 仍走 KismetTangents 路径，因为材质 PS 端 `normalize(WorldPosition - PlanetCenter)` 反算法线"——但 R8 主材质 PS 的 dir 只用作 Triplanar 投影方向、**未覆盖 Normal 引脚**，Lit 走的仍是顶点法线。该说法已修正为"主 mesh 也应取 +UnitCenter、不调 KismetTangents"（§3.14）。
 > - 早期版本的 §3.14 / [SphereTopologyReference.md §11](../Docs/SphereTopologyReference.md) 曾说"主 mesh 顶点法线应取 -UnitCenter（朝球心）以匹配 UE5 face_normal_LH"——该结论已于 R8 阶段被用户实测 sign 翻转复现证伪（朝内法线令整球漆黑）。现已修订为"+UnitCenter、朝外"，详见 [SphereTopologyReference.md §11.4](../Docs/SphereTopologyReference.md#114-关联踩坑历史与文档修订) 修订史。
 
 ---
 
-### 3.14 ⚠ Flat 顶点法线在 PS 反算法线材质上的"阴影边界尖刺锯齿"（§3.13 的兄弟坑）
+### 3.14 ? Flat 顶点法线在 PS 反算法线材质上的"阴影边界尖刺锯齿"（§3.13 的兄弟坑）
 
 #### 3.14.1 现象
 
@@ -1069,9 +1080,9 @@ Tangents.Reset();
 
 但实际 PIE 测试显示：
 
-- **球面着色本身光滑**（PS 反算法线工作正常）✓
-- **昼夜分割线（光照明暗过渡边界）沿 mesh 三角形边缘呈现锯齿状阶梯**——肉眼可清晰数出 sub=3 的 1280 个三角形面 ✗
-- **远距离投射阴影**（CSM）边界同样呈三角棱面阶梯 ✗
+- **球面着色本身光滑**（PS 反算法线工作正常）?
+- **昼夜分割线（光照明暗过渡边界）沿 mesh 三角形边缘呈现锯齿状阶梯**——肉眼可清晰数出 sub=3 的 1280 个三角形面 ?
+- **远距离投射阴影**（CSM）边界同样呈三角棱面阶梯 ?
 - 调高 `WaterSurfaceOffset` 后水面遮挡了部分锯齿 → 误判为 Z-fighting，但**真实根因不在水面**
 
 #### 3.14.2 根因：阴影 / N·L 判定不走材质 PS
@@ -1080,12 +1091,12 @@ UE5 渲染管线中**消费顶点法线**的路径远多于材质 PS：
 
 | 路径 | 是否消费 VertexNormal | 是否走材质 PS 反算 |
 | --- | --- | --- |
-| Base pass 着色 | ✓ 默认；但材质可在 PS 端覆盖 Normal 引脚 | ✓ |
-| Shadow caster pass（DepthOnly + 三角形 face cull）| ✓（VS 阶段算 dot(N, LightDir) < 0 的三角形不投影）| ✗ 完全不走 PS |
-| CSM 接收阴影 / Lit cull | ✓ | ✗ |
-| **N·L back-face self-shadow**（昼夜分割线核心）| ✓ | ✗ |
-| Lumen 反射几何代理 | ✓ | ✗ |
-| Distance Field 阴影 | ✓ | ✗ |
+| Base pass 着色 | ? 默认；但材质可在 PS 端覆盖 Normal 引脚 | ? |
+| Shadow caster pass（DepthOnly + 三角形 face cull）| ?（VS 阶段算 dot(N, LightDir) < 0 的三角形不投影）| ? 完全不走 PS |
+| CSM 接收阴影 / Lit cull | ? | ? |
+| **N·L back-face self-shadow**（昼夜分割线核心）| ? | ? |
+| Lumen 反射几何代理 | ? | ? |
+| Distance Field 阴影 | ? | ? |
 
 主材质 PS 反算 Normal 只能解决**第 1 项**——剩下的 5 条全部用顶点法线，**flat 顶点法线在这些路径上原汁原味呈现 1280 个三角面**。
 
@@ -1109,22 +1120,22 @@ Material Editor 的 Normal 引脚**只影响 base pass 的反射 / 漫反射**�
 | Single Layer Water（球外渲染）| **`+UnitCenter`**（朝外）| SLW 期待"朝外法线 = 入射光反射方向"，与 Default Lit **同向** |
 | Unlit | 任意 / 留空 | 不消费法线 |
 
-⚠ **早期版本的错误说法**：该表曾写"Default Lit 用 -UnitCenter（朝球心）"——该结论被 R8 阶段用户实测 sign 翻转复现证伪（-UnitCenter 令整球漆黑）。详见 [SphereTopologyReference.md §11.4](../Docs/SphereTopologyReference.md#114-关联踩坑历史与文档修订)。**主 mesh 和水面 mesh 均取 +UnitCenter**。
+? **早期版本的错误说法**：该表曾写"Default Lit 用 -UnitCenter（朝球心）"——该结论被 R8 阶段用户实测 sign 翻转复现证伪（-UnitCenter 令整球漆黑）。详见 [SphereTopologyReference.md §11.4](../Docs/SphereTopologyReference.md#114-关联踩坑历史与文档修订)。**主 mesh 和水面 mesh 均取 +UnitCenter**。
 
 **主 mesh 修复代码**（已落地于 [PlanetTopologyDebugMesh.cpp `Rebuild`](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp)）：
 
 ```cpp
-// ❌ 错误：占位 + KismetTangents 自动覆盖 = flat shading
+// ? 错误：占位 + KismetTangents 自动覆盖 = flat shading
 // const FVector NA = FVector::ZeroVector;
 // const FVector NB = FVector::ZeroVector;
 // const FVector NC = FVector::ZeroVector;
 // ...
 // UKismetProceduralMeshLibrary::CalculateTangentsForMesh(...);  // 覆盖成 flat 面法线
 
-// ❌ 也错误：-UnitCenter（朝球心）会让 dot(N, L) ≤ 0 全像素 → 整球漆黑
+// ? 也错误：-UnitCenter（朝球心）会让 dot(N, L) ≤ 0 全像素 → 整球漆黑
 // const FVector NA = -Topology->Cells[CA].UnitCenter;
 
-// ✅ 正确：每个顶点（位置 = Cell 中心）的光滑顶点法线 = +UnitCenter（朝外）
+// ? 正确：每个顶点（位置 = Cell 中心）的光滑顶点法线 = +UnitCenter（朝外）
 const FVector NA = Topology->Cells[CA].UnitCenter;
 const FVector NB = Topology->Cells[CB].UnitCenter;
 const FVector NC = Topology->Cells[CC].UnitCenter;
@@ -1143,7 +1154,7 @@ Tangents = MoveTemp(AutoTangents);
 | --- | --- | --- |
 | 旋转 mesh 看锯齿是否跟着转 | 跟着 mesh 几何走 | 阴影边界跟 vertex buffer 法线 → **顶点法线 flat** |
 | Buffer Visualization → World Normal | 球面显示 1280 个色块（每三角形一种颜色）| 顶点法线 = 面法线 = flat |
-| Buffer Visualization → World Normal | 球面显示连续色调（极少数缝隙）| 顶点法线 smooth ✓ |
+| Buffer Visualization → World Normal | 球面显示连续色调（极少数缝隙）| 顶点法线 smooth ? |
 | 关掉 DirectionalLight 锯齿是否消失 | 消失 | 锯齿来自 N·L self-shadow，根因在顶点法线 |
 
 #### 3.14.6 三条不要犯的子错
@@ -1166,17 +1177,17 @@ Tangents = MoveTemp(AutoTangents);
 > - [APlanetTopologyDebugMesh::Rebuild](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp)（主 mesh，本节复盘对象，+UnitCenter）
 > - [APlanetTopologyDebugMesh::RebuildWaterMesh_](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp)（水面 SLW，§3.13 复盘对象，+UnitCenter）
 
-### 3.15 ⚠ SLW 水体光程随 1/cos(θ) 离散化导致的水面三角锯齿（§3.14 之后的子坑）
+### 3.15 ? SLW 水体光程随 1/cos(θ) 离散化导致的水面三角锯齿（§3.14 之后的子坑）
 
 #### 3.15.1 现象
 
 §3.14 修复主 mesh 顶点法线为 `+UnitCenter`（光滑朝外）后，主球昼夜分割线本身已经光滑、无三角棱面锯齿。**但水面 SLW 表面在昼夜分割线附近仍呈现与 sub=3 球面 1280 个三角形精确对应的色块状锯齿**——色调过渡按三角面分段而非连续。
 
 排查时首先排除的（不是这些）：
-1. ❌ 水面 mesh 顶点法线 flat → 已实测水面 mesh 顶点法线也是 `+UnitCenter` 光滑
-2. ❌ Z-fighting → 调高 `WaterSurfaceOffset` 锯齿不消失，甚至在更小 σ 下不调 Offset 也无锯齿
-3. ❌ 绕序错误 / KismetTangents → 水面 mesh 跟主 mesh 同样的法线工作流，均无问题
-4. ❌ 主 mesh 法线（已经是 `+UnitCenter`）
+1. ? 水面 mesh 顶点法线 flat → 已实测水面 mesh 顶点法线也是 `+UnitCenter` 光滑
+2. ? Z-fighting → 调高 `WaterSurfaceOffset` 锯齿不消失，甚至在更小 σ 下不调 Offset 也无锯齿
+3. ? 绕序错误 / KismetTangents → 水面 mesh 跟主 mesh 同样的法线工作流，均无问题
+4. ? 主 mesh 法线（已经是 `+UnitCenter`）
 
 实际根因是 **SLW 物理参数在球面拓扑上的尺度问题**——与几何法线无关。
 
@@ -1242,7 +1253,7 @@ T(λ) = exp(-(σ_a + σ_s)(λ) · L)
 
 ---
 
-### 3.16 ⚠ 不要在 `BeginDestroy` 里手动 `Reset()` TUniquePtr 字段（T2 关闭编辑器经典踩坑）
+### 3.16 ? 不要在 `BeginDestroy` 里手动 `Reset()` TUniquePtr 字段（T2 关闭编辑器经典踩坑）
 
 #### 3.16.1 现象
 
@@ -1294,10 +1305,10 @@ APlanetTessellatedMesh::APlanetTessellatedMesh(FVTableHelper& H) : Super(H) {}
 
 | 场景 | 是否要 override BeginDestroy |
 | --- | --- |
-| `TUniquePtr<非 UObject 类>`（如 `FSphereTopology` / `FMeshDisplacementBuilder`）| ❌ 不要——编译器生成的 dtor 自动释放，时机正确 |
-| 取消 `FWorldDelegates::OnPostWorldCleanup` 等订阅 | ✅ 可以——但更推荐放在 `~Actor()` 中（`PlanetTopologyDebugMesh` 写法）|
-| 释放 RHI 资源 / GPU buffer | ✅ 必须——`BeginDestroy` 是 GPU 资源解绑的官方时机 |
-| 通知其他 UObject 解除引用 | ✅ 可以——此时其他 UObject 仍有效 |
+| `TUniquePtr<非 UObject 类>`（如 `FSphereTopology` / `FMeshDisplacementBuilder`）| ? 不要——编译器生成的 dtor 自动释放，时机正确 |
+| 取消 `FWorldDelegates::OnPostWorldCleanup` 等订阅 | ? 可以——但更推荐放在 `~Actor()` 中（`PlanetTopologyDebugMesh` 写法）|
+| 释放 RHI 资源 / GPU buffer | ? 必须——`BeginDestroy` 是 GPU 资源解绑的官方时机 |
+| 通知其他 UObject 解除引用 | ? 可以——此时其他 UObject 仍有效 |
 
 #### 3.16.5 验证清单
 
@@ -1311,7 +1322,7 @@ APlanetTessellatedMesh::APlanetTessellatedMesh(FVTableHelper& H) : Super(H) {}
 
 ---
 
-### 3.17 ⚠ R8 PS 端的 c0/c1/c2 是**三角形级常量**——T3 共享顶点路径会破坏这一假设导致整球破碎（T3 经典踩坑）
+### 3.17 ? R8 PS 端的 c0/c1/c2 是**三角形级常量**——T3 共享顶点路径会破坏这一假设导致整球破碎（T3 经典踩坑）
 
 > **修订历史**：2026-06-30 第一版诊断把根因归为"UV0 漏写 → c2 默认为 cell 0 → PS 错选"。修复后视觉症状不变 → 重新推演发现真正根因是**共享顶点路径下，邻接 mesh 三角形对同一个共享顶点写入了不同的 (c0, c1, c2) 代表组**，光栅化插值后 PS 端解出毫无意义的 cell ID。"UV0 漏写"是早期版本的附属症状之一，不是根因。
 
@@ -1320,7 +1331,7 @@ APlanetTessellatedMesh::APlanetTessellatedMesh(FVTableHelper& H) : Super(H) {}
 T3 拖入 [APlanetTessellatedMesh](../Source/TerraCivilization/Public/Render/PlanetTessellatedMesh.h) actor、挂上同一份 R8 合规材质 `M_TopologyDebug_R8`，与右侧 R8 的 [APlanetTopologyDebugMesh](../Source/TerraCivilization/Public/Render/PlanetTopologyDebugMesh.h) 并排：
 
 - **R8 actor**：每个 hex/pent 内部颜色一致，cell 边界整齐（17 配方 placeholder 视觉）
-- **T3 actor**：依稀可见 hex 形状（颜色块尺寸与 R8 接近），但**每个 hex 内部按 mesh 三角形粒度破碎**——sub=4 的每个三角形都呈现一块独立颜色，相邻三角形之间颜色完全不同；Output Log `✓ R8 compliance (all 17 inputs present & connected)`，无 Error
+- **T3 actor**：依稀可见 hex 形状（颜色块尺寸与 R8 接近），但**每个 hex 内部按 mesh 三角形粒度破碎**——sub=4 的每个三角形都呈现一块独立颜色，相邻三角形之间颜色完全不同；Output Log `? R8 compliance (all 17 inputs present & connected)`，无 Error
 
 #### 3.17.2 根因（订正版）
 
@@ -1435,7 +1446,7 @@ per-cell noise on δ  # R6 旧路径
 凡用户实际踩过的坑：
 1. 当期详稿 §6 排错表追加一行（症状 / 根因 / 修复）
 2. 主稿 §11.x 加 1~2 行警示（如 R3 阶段把 PMC 槽位陷阱写入 §11.2.2）
-3. 必要时加红框警示：`> ⚠ 关键陷阱（必读）：...`
+3. 必要时加红框警示：`> ? 关键陷阱（必读）：...`
 
 ---
 
@@ -1446,30 +1457,30 @@ per-cell noise on δ  # R6 旧路径
 ```
 ┌──────────────────────────┐
 │ Layer 1: cpp 层           │
-│   • 反射诊断打印是否齐全？  │
-│   • LUT 自检日志正常？     │
-│   • Rebuild 总结行 OK？   │
+│   ? 反射诊断打印是否齐全？  │
+│   ? LUT 自检日志正常？     │
+│   ? Rebuild 总结行 OK？   │
 └──────────────────────────┘
               │
               ▼
 ┌──────────────────────────┐
 │ Layer 2: 材质层           │
-│   • Stats 面板有红错？     │
-│   • Custom 节点 Code OK？ │
-│   • Texture Object 位置 A 槽位有值？ │
+│   ? Stats 面板有红错？     │
+│   ? Custom 节点 Code OK？ │
+│   ? Texture Object 位置 A 槽位有值？ │
 └──────────────────────────┘
               │
               ▼
 ┌──────────────────────────┐
 │ Layer 3: 运行时层          │
-│   • Lit / Unlit 模式分别看 │
-│   • Unlit 直接显示 BaseColor，是排查纹理 fallback 的金标准 │
+│   ? Lit / Unlit 模式分别看 │
+│   ? Unlit 直接显示 BaseColor，是排查纹理 fallback 的金标准 │
 └──────────────────────────┘
 ```
 
 ### 5.2 "假绿灯"陷阱识别
 
-**警钟**：R7-compliance ✓ + Stats ✓ + Output Log ✓ ≠ 视觉效果正确。
+**警钟**：R7-compliance ? + Stats ? + Output Log ? ≠ 视觉效果正确。
 
 当所有日志都通过但视觉不对：
 1. 第一怀疑：材质槽位挂错（PMC 通用槽 vs cpp UPROPERTY 槽）
@@ -1511,7 +1522,7 @@ per-cell noise on δ  # R6 旧路径
 | --- | --- | --- | --- |
 | R3~R8 | IsoSphere primal | 顶点流 UV 还原 c0/c1/c2 + 硬件重心坐标 | 无 Elevation 位移 |
 | T 阶段+ | 自研 `MeshTopology = FSphereTopology(4)` 独立实例 | cpp 端按 mesh 顶点 → 父 CellTopology 三角形 → 三 Cell `dot` 线性插值 + 多重三角形算术平均；详见 [TessellatedMeshDesign.md §3](TessellatedMeshDesign.md) | 含径向位移；顶点法线直取 `+UnitCenter`、Tangent 留空、不调 KismetTangents |
-| ~~R11 PTG~~ | ~~PTG 高细分球皮~~ | ~~GPU FindNearestCell + acos~~ | ❌ 已废弃（T 阶段自研网格取代）|
+| ~~R11 PTG~~ | ~~PTG 高细分球皮~~ | ~~GPU FindNearestCell + acos~~ | ? 已废弃（T 阶段自研网格取代）|
 ---
 
 ## 7. 协作守则速查卡
@@ -1537,7 +1548,7 @@ per-cell noise on δ  # R6 旧路径
 
 ## 8. 应做 / 不可做 全表
 
-### 8.1 ✅ 应做
+### 8.1 ? 应做
 
 - 列候选方案让用户拍板
 - 主稿简述 + 详稿落地
@@ -1552,7 +1563,7 @@ per-cell noise on δ  # R6 旧路径
 - 改完用 grep 验证
 - 用户截图必 read_image
 
-### 8.2 ❌ 不可做
+### 8.2 ? 不可做
 
 - 用户没拍板就动手
 - **凭直觉 / 设计稿摘要 / 记忆写字段名（必须以源码 .h 为准；高频坑：`NeighborCellIds` 误写为 `Neighbors`、`EdgeIds` 误写为 `Edges`）**
@@ -1567,7 +1578,7 @@ per-cell noise on δ  # R6 旧路径
 - 漏改 §11 Roadmap 状态
 - 擅自重命名 LUT / 参数（必须配套全文 grep 替换）
 - 顺序调用本可并行的工具
-- **凭"2D 逆时针旋转 90°"直觉写球面东向公式（UE5 是左手系 + Z up，"自西向东" = +X→−Y，故 East = `(U.Y, -U.X, 0)` 而非 `(-U.Y, U.X, 0)`；详见 §3.7）**
+- **凭"2D 逆时针旋转 90°"直觉写球面东向公式（UE5 是左手系 + Z up，"自西向东" = +X→?Y，故 East = `(U.Y, -U.X, 0)` 而非 `(-U.Y, U.X, 0)`；详见 §3.7）**
 - **新增 GameplayTag ini 时直接手放 `Config/Tags/Foo.ini` 期望重启即可（无效——必须经编辑器内 "GameplayTags → Manage Gameplay Tags → Add New Gameplay Tag → Source 输入 Foo.ini" 一次让它被注册为合法 Source；详见 §3.8）**
 
 ---

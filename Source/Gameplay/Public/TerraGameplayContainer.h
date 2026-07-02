@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "TerraGameplayTypes.h"
@@ -13,6 +13,8 @@ public:
     int32 GetTurnIndex() const { return TurnIndex; }
     int32 GetSelectedPieceId() const { return SelectedPieceId; }
     ETerraGameplayInteractionPhase GetInteractionPhase() const { return InteractionPhase; }
+    bool IsMatchEnded() const { return bMatchEnded; }
+    int32 GetWinningFactionId() const { return WinningFactionId; }
 
     bool HandleCellClick(int32 CellId, TArray<int32>& OutDirtyCellIds);
     void SetDebugKeepSameFactionOnEndTurn(bool bInKeepSameFaction) { bDebugKeepSameFactionOnEndTurn = bInKeepSameFaction; }
@@ -55,6 +57,9 @@ private:
     void LockPendingCapturesForActionTarget_(int32 ActionTargetCellId, TArray<int32>& OutDirtyCellIds);
     void RebuildPendingCapturesForSelectedPieceCell_(TArray<int32>& OutDirtyCellIds);
     void ResolvePendingCaptures_(TArray<int32>& OutDirtyCellIds);
+    void EliminateFaction_(int32 FactionId, TArray<int32>& OutDirtyCellIds);
+    void EvaluateWinStateAfterCaptures_();
+    void FinalizeTurnAfterResolution_();
 
     bool TrySelectPieceAtCell_(int32 CellId, TArray<int32>& OutDirtyCellIds);
     bool TryMoveSelectedPieceToOrdinaryTarget_(int32 TargetCellId, TArray<int32>& OutDirtyCellIds);
@@ -82,11 +87,17 @@ private:
     TSet<int32> PendingCaptureCellIds;
 
     bool bDebugKeepSameFactionOnEndTurn = false;
+    bool bMatchEnded = false;
 
     int32 CurrentFactionId = INDEX_NONE;
     int32 TurnIndex = 0;
+    int32 WinningFactionId = INDEX_NONE;
     int32 SelectedPieceId = INDEX_NONE;
     int32 SelectedPieceStartCellId = INDEX_NONE;
     int32 LastJumpStartCellId = INDEX_NONE;
     ETerraGameplayInteractionPhase InteractionPhase = ETerraGameplayInteractionPhase::Idle;
 };
+
+
+
+

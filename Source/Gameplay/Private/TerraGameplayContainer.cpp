@@ -1,4 +1,4 @@
-﻿#include "TerraGameplayContainer.h"
+#include "TerraGameplayContainer.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogTerraGameplay, Log, All);
 
@@ -31,7 +31,7 @@ bool FTerraGameplayContainer::HandleCellClick(int32 CellId, TArray<int32>& OutDi
 {
     OutDirtyCellIds.Reset();
 
-    if (!bInitialized || !IsValidCellId_(CellId) || CurrentFactionId == INDEX_NONE)
+    if (!bInitialized || bMatchEnded || !IsValidCellId_(CellId) || CurrentFactionId == INDEX_NONE)
     {
         return false;
     }
@@ -176,10 +176,12 @@ void FTerraGameplayContainer::ResetRuntimeState_()
 
     CurrentFactionId = INDEX_NONE;
     TurnIndex = 0;
+    WinningFactionId = INDEX_NONE;
     SelectedPieceId = INDEX_NONE;
     SelectedPieceStartCellId = INDEX_NONE;
     LastJumpStartCellId = INDEX_NONE;
     InteractionPhase = ETerraGameplayInteractionPhase::Idle;
+    bMatchEnded = false;
     bInitialized = false;
 }
 
@@ -831,12 +833,19 @@ void FTerraGameplayContainer::RebuildPendingCapturesForSelectedPieceCell_(TArray
 
 void FTerraGameplayContainer::ResolvePendingCaptures_(TArray<int32>& OutDirtyCellIds)
 {
+    TSet<int32> DefeatedFactionIds;
+
     for (const int32 CapturePieceId : PendingCapturePieceIds)
     {
         FTerraGameplayPieceState* CapturePiece = GetMutablePiece_(CapturePieceId);
         if (!CapturePiece || !CapturePiece->bAlive)
         {
             continue;
+        }
+
+        if (CapturePiece->PieceType == ETerraGameplayPieceType::Flag)
+        {
+            DefeatedFactionIds.Add(CapturePiece->OwnerFactionId);
         }
 
         const int32 CaptureCellId = CapturePiece->CellId;
@@ -851,6 +860,96 @@ void FTerraGameplayContainer::ResolvePendingCaptures_(TArray<int32>& OutDirtyCel
 
     PendingCapturePieceIds.Reset();
     PendingCaptureCellIds.Reset();
+
+    for (const int32 FactionId : DefeatedFactionIds)
+    {
+        EliminateFaction_(FactionId, OutDirtyCellIds);
+    }
+
+    EvaluateWinStateAfterCaptures_();
+}
+
+void FTerraGameplayContainer::EliminateFaction_(int32 FactionId, TArray<int32>& OutDirtyCellIds)
+{
+    if (!Factions.IsValidIndex(FactionId) || !Factions[FactionId].bAlive)
+    {
+        return;
+    }
+
+    FTerraGameplayFactionState& Faction = Factions[FactionId];
+    Faction.bAlive = false;
+
+    for (FTerraGameplayPieceState& Piece : Pieces)
+    {
+        if (!Piece.bAlive || Piece.OwnerFactionId != FactionId)
+        {
+            continue;
+        }
+
+        const int32 PieceCellId = Piece.CellId;
+        if (IsValidCellId_(PieceCellId) && GetPieceIdAtCell_(PieceCellId) == Piece.PieceId)
+        {
+            CellToPieceId[PieceCellId] = INDEX_NONE;
+        }
+
+        Piece.CellId = INDEX_NONE;
+        Piece.bAlive = false;
+        AddDirtyCell_(PieceCellId, OutDirtyCellIds);
+    }
+
+    UE_LOG(LogTerraGameplay, Log,
+        TEXT("[Gameplay][G6] FactionEliminated Faction=%d"),
+        FactionId);
+}
+
+void FTerraGameplayContainer::EvaluateWinStateAfterCaptures_()
+{
+    WinningFactionId = INDEX_NONE;
+    bMatchEnded = false;
+
+    int32 AliveFactionCount = 0;
+    int32 LastAliveFactionId = INDEX_NONE;
+    for (const FTerraGameplayFactionState& Faction : Factions)
+    {
+        if (!Faction.bAlive)
+        {
+            continue;
+        }
+
+        ++AliveFactionCount;
+        LastAliveFactionId = Faction.FactionId;
+    }
+
+    if (AliveFactionCount == 1)
+    {
+        bMatchEnded = true;
+        WinningFactionId = LastAliveFactionId;
+        CurrentFactionId = WinningFactionId;
+
+        UE_LOG(LogTerraGameplay, Log,
+            TEXT("[Gameplay][G6] MatchEnded WinnerFaction=%d TurnIndex=%d"),
+            WinningFactionId,
+            TurnIndex);
+    }
+    else if (AliveFactionCount <= 0)
+    {
+        bMatchEnded = true;
+        CurrentFactionId = INDEX_NONE;
+
+        UE_LOG(LogTerraGameplay, Warning,
+            TEXT("[Gameplay][G6] MatchEndedWithoutWinner TurnIndex=%d"),
+            TurnIndex);
+    }
+}
+
+void FTerraGameplayContainer::FinalizeTurnAfterResolution_()
+{
+    if (bMatchEnded)
+    {
+        return;
+    }
+
+    AdvanceTurn_();
 }
 
 void FTerraGameplayContainer::RefreshSelectedPieceHighlights_(bool bIncludeOrdinaryMoves, TArray<int32>& OutDirtyCellIds)
@@ -993,6 +1092,8 @@ bool FTerraGameplayContainer::TryEndTurnOnSelectedCell_(int32 CellId, TArray<int
         return false;
     }
 
+    const int32 EndedFactionId = CurrentFactionId;
+
     ClearGameplayHighlights_(OutDirtyCellIds);
     if (InteractionPhase == ETerraGameplayInteractionPhase::PieceJumpingCanContinue)
     {
@@ -1003,20 +1104,21 @@ bool FTerraGameplayContainer::TryEndTurnOnSelectedCell_(int32 CellId, TArray<int
     ClearGameplayHighlights_(OutDirtyCellIds);
     AddDirtyCell_(CellId, OutDirtyCellIds);
 
-    const int32 EndedFactionId = CurrentFactionId;
     SelectedPieceId = INDEX_NONE;
     SelectedPieceStartCellId = INDEX_NONE;
     LastJumpStartCellId = INDEX_NONE;
     ActionTargetCellIdToCaptureCellIds.Reset();
     InteractionPhase = ETerraGameplayInteractionPhase::Idle;
-    AdvanceTurn_();
+    FinalizeTurnAfterResolution_();
 
     UE_LOG(LogTerraGameplay, Log,
-        TEXT("[Gameplay][G4] EndTurn. EndedFaction=%d NewFaction=%d TurnIndex=%d Captures=%d KeepSameFaction=%d"),
+        TEXT("[Gameplay][G6] EndTurn. EndedFaction=%d NewFaction=%d TurnIndex=%d Captures=%d Winner=%d MatchEnded=%d KeepSameFaction=%d"),
         EndedFactionId,
         CurrentFactionId,
         TurnIndex,
         CaptureCount,
+        WinningFactionId,
+        bMatchEnded ? 1 : 0,
         bDebugKeepSameFactionOnEndTurn ? 1 : 0);
     return true;
 }
@@ -1082,3 +1184,5 @@ void FTerraGameplayContainer::AdvanceTurn_()
 
     ++TurnIndex;
 }
+
+
