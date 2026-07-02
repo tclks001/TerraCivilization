@@ -6,6 +6,7 @@ namespace
 {
     constexpr FLinearColor GSelectedPieceCellColor(1.0f, 1.0f, 0.0f, 1.0f);
     constexpr FLinearColor GMovedPieceCanEndTurnColor(0.0f, 0.35f, 1.0f, 1.0f);
+    constexpr FLinearColor GActionTargetCellColor(0.35f, 0.80f, 1.0f, 1.0f);
 }
 
 void FTerraGameplayContainer::Initialize(const TArray<FTerraGameplayCellState>& InCells)
@@ -40,7 +41,11 @@ bool FTerraGameplayContainer::HandleCellClick(int32 CellId, TArray<int32>& OutDi
         return TrySelectPieceAtCell_(CellId, OutDirtyCellIds);
 
     case ETerraGameplayInteractionPhase::PieceSelected:
-        if (TryMoveSelectedPieceTo_(CellId, OutDirtyCellIds))
+        if (TryMoveSelectedPieceToOrdinaryTarget_(CellId, OutDirtyCellIds))
+        {
+            return true;
+        }
+        if (TryJumpSelectedPieceTo_(CellId, OutDirtyCellIds))
         {
             return true;
         }
@@ -48,6 +53,13 @@ bool FTerraGameplayContainer::HandleCellClick(int32 CellId, TArray<int32>& OutDi
 
     case ETerraGameplayInteractionPhase::PieceMovedCanEndTurn:
         return TryEndTurnOnSelectedCell_(CellId, OutDirtyCellIds);
+
+    case ETerraGameplayInteractionPhase::PieceJumpingCanContinue:
+        if (TryEndTurnOnSelectedCell_(CellId, OutDirtyCellIds))
+        {
+            return true;
+        }
+        return TryJumpSelectedPieceTo_(CellId, OutDirtyCellIds);
 
     default:
         return false;
@@ -73,9 +85,19 @@ int32 FTerraGameplayContainer::GetCurrentFactionBaseCellId() const
 
 bool FTerraGameplayContainer::IsCurrentFactionPieceCell(int32 CellId) const
 {
+    if (InteractionPhase != ETerraGameplayInteractionPhase::Idle)
+    {
+        return false;
+    }
+
     const int32 PieceId = GetPieceIdAtCell_(CellId);
     const FTerraGameplayPieceState* Piece = GetPiece_(PieceId);
     return Piece && IsCurrentFactionPiece_(*Piece);
+}
+
+bool FTerraGameplayContainer::IsCurrentActionTargetCell(int32 CellId) const
+{
+    return OrdinaryMoveTargetCellIds.Contains(CellId) || JumpTargetCellIds.Contains(CellId);
 }
 
 bool FTerraGameplayContainer::CollectFactionPieceCellIds(int32 FactionId, TArray<int32>& OutCellIds) const
@@ -119,12 +141,15 @@ void FTerraGameplayContainer::ResetRuntimeState_()
     Pieces.Reset();
     Factions.Reset();
     GameplayHighlights.Reset();
+    OrdinaryMoveTargetCellIds.Reset();
+    JumpTargetCellIds.Reset();
     CellToPieceId.Init(INDEX_NONE, Cells.Num());
 
     CurrentFactionId = INDEX_NONE;
     TurnIndex = 0;
     SelectedPieceId = INDEX_NONE;
     SelectedPieceStartCellId = INDEX_NONE;
+    LastJumpStartCellId = INDEX_NONE;
     InteractionPhase = ETerraGameplayInteractionPhase::Idle;
     bInitialized = false;
 }
@@ -354,12 +379,187 @@ bool FTerraGameplayContainer::IsPieceSelectable_(const FTerraGameplayPieceState&
         && Piece.PieceType != ETerraGameplayPieceType::Flag;
 }
 
+bool FTerraGameplayContainer::CanEnterTerrain_(const FTerraGameplayPieceState& Piece, int32 TargetCellId) const
+{
+    if (!IsValidCellId_(TargetCellId))
+    {
+        return false;
+    }
+
+    if (Piece.PieceType == ETerraGameplayPieceType::Cavalry
+        && Cells[TargetCellId].TerrainType == ETerraGameplayTerrainType::Mountain)
+    {
+        return false;
+    }
+
+    return true;
+}
+
 bool FTerraGameplayContainer::CanOrdinaryMove_(const FTerraGameplayPieceState& Piece, int32 TargetCellId) const
 {
     return IsPieceSelectable_(Piece)
         && IsValidCellId_(TargetCellId)
         && IsCellEmpty_(TargetCellId)
-        && IsNeighbor_(Piece.CellId, TargetCellId);
+        && IsNeighbor_(Piece.CellId, TargetCellId)
+        && CanEnterTerrain_(Piece, TargetCellId);
+}
+
+bool FTerraGameplayContainer::StepForwardBranches_(int32 PrevCellId, int32 CurCellId, TArray<int32>& OutNextCellIds) const
+{
+    OutNextCellIds.Reset();
+    if (!IsValidCellId_(PrevCellId) || !IsValidCellId_(CurCellId))
+    {
+        return false;
+    }
+
+    const FTerraGameplayCellState& CurCell = Cells[CurCellId];
+    const int32 NeighborCount = CurCell.bIsPentagon ? 5 : 6;
+    int32 PrevNeighborIndex = INDEX_NONE;
+    for (int32 I = 0; I < NeighborCount; ++I)
+    {
+        if (CurCell.NeighborCellIds[I] == PrevCellId)
+        {
+            PrevNeighborIndex = I;
+            break;
+        }
+    }
+
+    if (PrevNeighborIndex == INDEX_NONE)
+    {
+        return false;
+    }
+
+    if (CurCell.bIsPentagon)
+    {
+        const int32 NextA = CurCell.NeighborCellIds[(PrevNeighborIndex + 2) % 5];
+        const int32 NextB = CurCell.NeighborCellIds[(PrevNeighborIndex + 3) % 5];
+        if (IsValidCellId_(NextA))
+        {
+            OutNextCellIds.AddUnique(NextA);
+        }
+        if (IsValidCellId_(NextB))
+        {
+            OutNextCellIds.AddUnique(NextB);
+        }
+    }
+    else
+    {
+        const int32 Next = CurCell.NeighborCellIds[(PrevNeighborIndex + 3) % 6];
+        if (IsValidCellId_(Next))
+        {
+            OutNextCellIds.AddUnique(Next);
+        }
+    }
+
+    return OutNextCellIds.Num() > 0;
+}
+
+void FTerraGameplayContainer::CollectOrdinaryMoveTargets_(const FTerraGameplayPieceState& Piece, TSet<int32>& OutTargetCellIds) const
+{
+    OutTargetCellIds.Reset();
+    if (!IsPieceSelectable_(Piece))
+    {
+        return;
+    }
+
+    for (int32 I = 0; I < 6; ++I)
+    {
+        const int32 NeighborCellId = Cells[Piece.CellId].NeighborCellIds[I];
+        if (CanOrdinaryMove_(Piece, NeighborCellId))
+        {
+            OutTargetCellIds.Add(NeighborCellId);
+        }
+    }
+}
+
+void FTerraGameplayContainer::CollectJumpTargets_(const FTerraGameplayPieceState& Piece, TSet<int32>& OutTargetCellIds) const
+{
+    OutTargetCellIds.Reset();
+    if (!IsPieceSelectable_(Piece))
+    {
+        return;
+    }
+
+    for (int32 I = 0; I < 6; ++I)
+    {
+        const int32 MiddleCellId = Cells[Piece.CellId].NeighborCellIds[I];
+        if (!IsValidCellId_(MiddleCellId) || IsCellEmpty_(MiddleCellId))
+        {
+            continue;
+        }
+
+        if (Piece.PieceType == ETerraGameplayPieceType::Cavalry
+            && Cells[MiddleCellId].TerrainType == ETerraGameplayTerrainType::Mountain)
+        {
+            continue;
+        }
+
+        TArray<int32> FirstLandingCandidates;
+        if (!StepForwardBranches_(Piece.CellId, MiddleCellId, FirstLandingCandidates))
+        {
+            continue;
+        }
+
+        for (const int32 FirstLandingCellId : FirstLandingCandidates)
+        {
+            if (FirstLandingCellId == LastJumpStartCellId
+                || !IsCellEmpty_(FirstLandingCellId)
+                || !CanEnterTerrain_(Piece, FirstLandingCellId))
+            {
+                continue;
+            }
+
+            OutTargetCellIds.Add(FirstLandingCellId);
+
+            if (Piece.PieceType != ETerraGameplayPieceType::Cavalry)
+            {
+                continue;
+            }
+
+            TArray<int32> SecondLandingCandidates;
+            if (!StepForwardBranches_(MiddleCellId, FirstLandingCellId, SecondLandingCandidates))
+            {
+                continue;
+            }
+
+            for (const int32 SecondLandingCellId : SecondLandingCandidates)
+            {
+                if (SecondLandingCellId != LastJumpStartCellId
+                    && IsCellEmpty_(SecondLandingCellId)
+                    && CanEnterTerrain_(Piece, SecondLandingCellId))
+                {
+                    OutTargetCellIds.Add(SecondLandingCellId);
+                }
+            }
+        }
+    }
+}
+
+void FTerraGameplayContainer::RefreshSelectedPieceHighlights_(bool bIncludeOrdinaryMoves, TArray<int32>& OutDirtyCellIds)
+{
+    const FTerraGameplayPieceState* Piece = GetPiece_(SelectedPieceId);
+    if (!Piece || !Piece->bAlive)
+    {
+        return;
+    }
+
+    OrdinaryMoveTargetCellIds.Reset();
+    JumpTargetCellIds.Reset();
+    if (bIncludeOrdinaryMoves)
+    {
+        CollectOrdinaryMoveTargets_(*Piece, OrdinaryMoveTargetCellIds);
+    }
+    CollectJumpTargets_(*Piece, JumpTargetCellIds);
+
+    SetSingleHighlight_(Piece->CellId, GSelectedPieceCellColor, 1.0f, OutDirtyCellIds);
+    for (const int32 TargetCellId : OrdinaryMoveTargetCellIds)
+    {
+        SetSingleHighlight_(TargetCellId, GActionTargetCellColor, 1.0f, OutDirtyCellIds);
+    }
+    for (const int32 TargetCellId : JumpTargetCellIds)
+    {
+        SetSingleHighlight_(TargetCellId, GActionTargetCellColor, 1.0f, OutDirtyCellIds);
+    }
 }
 
 bool FTerraGameplayContainer::TrySelectPieceAtCell_(int32 CellId, TArray<int32>& OutDirtyCellIds)
@@ -375,22 +575,25 @@ bool FTerraGameplayContainer::TrySelectPieceAtCell_(int32 CellId, TArray<int32>&
 
     SelectedPieceId = PieceId;
     SelectedPieceStartCellId = Piece->CellId;
+    LastJumpStartCellId = INDEX_NONE;
     InteractionPhase = ETerraGameplayInteractionPhase::PieceSelected;
-    SetSingleHighlight_(Piece->CellId, GSelectedPieceCellColor, 1.0f, OutDirtyCellIds);
+    RefreshSelectedPieceHighlights_(true, OutDirtyCellIds);
 
     UE_LOG(LogTerraGameplay, Log,
-        TEXT("[Gameplay][G2] Select Piece=%d Type=%d Cell=%d Faction=%d"),
+        TEXT("[Gameplay][G3] Select Piece=%d Type=%d Cell=%d Faction=%d OrdinaryTargets=%d JumpTargets=%d"),
         Piece->PieceId,
         static_cast<int32>(Piece->PieceType),
         Piece->CellId,
-        CurrentFactionId);
+        CurrentFactionId,
+        OrdinaryMoveTargetCellIds.Num(),
+        JumpTargetCellIds.Num());
     return true;
 }
 
-bool FTerraGameplayContainer::TryMoveSelectedPieceTo_(int32 TargetCellId, TArray<int32>& OutDirtyCellIds)
+bool FTerraGameplayContainer::TryMoveSelectedPieceToOrdinaryTarget_(int32 TargetCellId, TArray<int32>& OutDirtyCellIds)
 {
     FTerraGameplayPieceState* Piece = GetMutablePiece_(SelectedPieceId);
-    if (!Piece || !CanOrdinaryMove_(*Piece, TargetCellId))
+    if (!Piece || !OrdinaryMoveTargetCellIds.Contains(TargetCellId) || !CanOrdinaryMove_(*Piece, TargetCellId))
     {
         return false;
     }
@@ -404,16 +607,49 @@ bool FTerraGameplayContainer::TryMoveSelectedPieceTo_(int32 TargetCellId, TArray
     CellToPieceId[FromCellId] = INDEX_NONE;
     CellToPieceId[TargetCellId] = Piece->PieceId;
     Piece->CellId = TargetCellId;
+    LastJumpStartCellId = INDEX_NONE;
 
     InteractionPhase = ETerraGameplayInteractionPhase::PieceMovedCanEndTurn;
     SetSingleHighlight_(TargetCellId, GMovedPieceCanEndTurnColor, 1.0f, OutDirtyCellIds);
 
     UE_LOG(LogTerraGameplay, Log,
-        TEXT("[Gameplay][G2] Move Piece=%d Faction=%d From=%d To=%d. Click same cell to end turn."),
+        TEXT("[Gameplay][G3] OrdinaryMove Piece=%d Faction=%d From=%d To=%d. Click same cell to end turn."),
         Piece->PieceId,
         CurrentFactionId,
         FromCellId,
         TargetCellId);
+    return true;
+}
+
+bool FTerraGameplayContainer::TryJumpSelectedPieceTo_(int32 TargetCellId, TArray<int32>& OutDirtyCellIds)
+{
+    FTerraGameplayPieceState* Piece = GetMutablePiece_(SelectedPieceId);
+    if (!Piece || !JumpTargetCellIds.Contains(TargetCellId) || !IsCellEmpty_(TargetCellId) || !CanEnterTerrain_(*Piece, TargetCellId))
+    {
+        return false;
+    }
+
+    const int32 FromCellId = Piece->CellId;
+
+    ClearGameplayHighlights_(OutDirtyCellIds);
+    AddDirtyCell_(FromCellId, OutDirtyCellIds);
+    AddDirtyCell_(TargetCellId, OutDirtyCellIds);
+
+    CellToPieceId[FromCellId] = INDEX_NONE;
+    CellToPieceId[TargetCellId] = Piece->PieceId;
+    Piece->CellId = TargetCellId;
+    LastJumpStartCellId = FromCellId;
+
+    InteractionPhase = ETerraGameplayInteractionPhase::PieceJumpingCanContinue;
+    RefreshSelectedPieceHighlights_(false, OutDirtyCellIds);
+
+    UE_LOG(LogTerraGameplay, Log,
+        TEXT("[Gameplay][G3] Jump Piece=%d Faction=%d From=%d To=%d. ContinueJumpTargets=%d"),
+        Piece->PieceId,
+        CurrentFactionId,
+        FromCellId,
+        TargetCellId,
+        JumpTargetCellIds.Num());
     return true;
 }
 
@@ -431,14 +667,16 @@ bool FTerraGameplayContainer::TryEndTurnOnSelectedCell_(int32 CellId, TArray<int
     const int32 EndedFactionId = CurrentFactionId;
     SelectedPieceId = INDEX_NONE;
     SelectedPieceStartCellId = INDEX_NONE;
+    LastJumpStartCellId = INDEX_NONE;
     InteractionPhase = ETerraGameplayInteractionPhase::Idle;
     AdvanceTurn_();
 
     UE_LOG(LogTerraGameplay, Log,
-        TEXT("[Gameplay][G2] EndTurn. EndedFaction=%d NewFaction=%d TurnIndex=%d"),
+        TEXT("[Gameplay][G3] EndTurn. EndedFaction=%d NewFaction=%d TurnIndex=%d KeepSameFaction=%d"),
         EndedFactionId,
         CurrentFactionId,
-        TurnIndex);
+        TurnIndex,
+        bDebugKeepSameFactionOnEndTurn ? 1 : 0);
     return true;
 }
 
@@ -462,6 +700,8 @@ void FTerraGameplayContainer::ClearGameplayHighlights_(TArray<int32>& OutDirtyCe
         AddDirtyCell_(Pair.Key, OutDirtyCellIds);
     }
     GameplayHighlights.Reset();
+    OrdinaryMoveTargetCellIds.Reset();
+    JumpTargetCellIds.Reset();
 }
 
 void FTerraGameplayContainer::AddDirtyCell_(int32 CellId, TArray<int32>& OutDirtyCellIds) const
@@ -477,6 +717,12 @@ void FTerraGameplayContainer::AdvanceTurn_()
     if (Factions.Num() == 0)
     {
         CurrentFactionId = INDEX_NONE;
+        ++TurnIndex;
+        return;
+    }
+
+    if (bDebugKeepSameFactionOnEndTurn)
+    {
         ++TurnIndex;
         return;
     }

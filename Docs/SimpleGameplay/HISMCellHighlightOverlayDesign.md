@@ -139,8 +139,11 @@ float FinalHighlightIntensity = 0.0f;
 FTerraGameplayCellHighlight GameplayHighlight;
 if (GameplayContainer.IsValid() && GameplayContainer->GetHighlightForCell(CellId, GameplayHighlight))
 {
-    // Gameplay 高亮优先：选中棋子脚下黄色、移动后可停下蓝色，后续可扩展任意颜色。
-    FinalHighlightColor = GameplayHighlight.Color;
+    // Gameplay 高亮优先：选中棋子脚下黄色、行走后可停下蓝色、G3 下一步落点淡蓝色。
+    // 如果 Cell 是 G3 下一步落点且正在 hover，则渲染桥把淡蓝色加深。
+    FinalHighlightColor = GameplayContainer->IsCurrentActionTargetCell(CellId) && HoverIntensity > 0.0f
+        ? G3ActionTargetHoverColor
+        : GameplayHighlight.Color;
     FinalHighlightIntensity = GameplayHighlight.Intensity;
 }
 else if (HoverIntensity > KINDA_SMALL_NUMBER)
@@ -157,9 +160,11 @@ else if (HoverIntensity > KINDA_SMALL_NUMBER)
 普通 Hover：Color=HighlightHoverColor, Intensity=1
 G2.5 当前阵营棋子底色：Color=(1,0.45,0.68), Intensity=1
 G2.5 hover 当前阵营棋子：Color=(1,0.22,0.32), Intensity=1
-G2 选中棋子脚下：Color=(1,1,0), Intensity=1
-G2 移动后可停下：Color=(0,0.35,1), Intensity=1
-Gameplay 行动高亮 + Hover 同时存在：Gameplay 行动高亮覆盖 Hover / 当前阵营底色
+G3 可行走 / 可跳跃落点：Color=(0.35,0.80,1), Intensity=1
+G3 hover 可行走 / 可跳跃落点：Color=(0.08,0.45,1), Intensity=1
+G2/G3 选中棋子脚下：Color=(1,1,0), Intensity=1
+G2/G3 行走后可停下：Color=(0,0.35,1), Intensity=1
+Gameplay 行动高亮 + Hover 同时存在：Gameplay 行动高亮覆盖 Hover / 当前阵营底色，G3 落点 hover 例外加深
 ```
 
 后续如果要显示“绿色可移动格”“红色攻击目标”“紫色技能范围”，只需要 Gameplay/C++ 写入对应最终颜色，不需要继续修改材质图。
@@ -471,9 +476,11 @@ Custom.MF_HISM_FinalHighlightTintedBaseColor
 | 普通 Hover | `HighlightHoverColor`，默认 `(1.0, 0.85, 0.10)` | `1` |
 | G2.5 当前阵营棋子底色 | 淡粉色 `(1,0.45,0.68)` | `1` |
 | G2.5 hover 当前阵营棋子 | 红粉色 `(1,0.22,0.32)` | `1` |
-| G2 选中棋子脚下 | 黄色 `(1,1,0)` | `1` |
-| G2 移动后可停下 | 蓝色 `(0,0.35,1)` | `1` |
-| Gameplay 行动高亮 + Hover | Gameplay 行动高亮颜色 | `1` |
+| G3 可行走 / 可跳跃落点 | 淡蓝色 `(0.35,0.80,1)` | `1` |
+| G3 hover 可行走 / 可跳跃落点 | 深淡蓝色 `(0.08,0.45,1)` | `1` |
+| G2/G3 选中棋子脚下 | 黄色 `(1,1,0)` | `1` |
+| G2/G3 行走后可停下 | 蓝色 `(0,0.35,1)` | `1` |
+| Gameplay 行动高亮 + Hover | Gameplay 行动高亮颜色，G3 落点 hover 时加深 | `1` |
 
 如果瓦片 UV 并非中心对称，需要先检查烘焙出的 tile 资产 UV 是否以 `(0.5,0.5)` 为中心。
 

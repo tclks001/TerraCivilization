@@ -1400,7 +1400,10 @@ void APlanetTessellatedMesh::WriteHISMHighlightForCell_(int32 CellId, bool bMark
 
     if (bHasGameplayActionHighlight)
     {
-        FinalHighlightColor = GameplayHighlight.Color;
+        const bool bIsActionTargetHover = HoverIntensity > KINDA_SMALL_NUMBER
+            && GameplayContainer.IsValid()
+            && GameplayContainer->IsCurrentActionTargetCell(CellId);
+        FinalHighlightColor = bIsActionTargetHover ? G3ActionTargetHoverColor : GameplayHighlight.Color;
         FinalHighlightIntensity = GameplayHighlight.Intensity;
     }
     else if (bIsCurrentFactionPieceCell && HoverIntensity > KINDA_SMALL_NUMBER)
@@ -1555,6 +1558,7 @@ void APlanetTessellatedMesh::RebuildGameplay_()
 
     GameplayContainer = MakeUnique<FTerraGameplayContainer>();
     GameplayContainer->Initialize(GameplayCells);
+    GameplayContainer->SetDebugKeepSameFactionOnEndTurn(bG3DebugKeepSameFactionOnEndTurn);
 
     G2_5LastHighlightedFactionId = GameplayContainer->GetCurrentFactionId();
     G2_5LastCameraFocusedTurnIndex = INDEX_NONE;
@@ -1791,8 +1795,11 @@ bool APlanetTessellatedMesh::HandleHISMClickHit(const FHitResult& Hit)
         return true;
     }
 
+    GameplayContainer->SetDebugKeepSameFactionOnEndTurn(bG3DebugKeepSameFactionOnEndTurn);
+
     const int32 PrevFactionId = GameplayContainer->GetCurrentFactionId();
     const int32 PrevSelectedPieceId = GameplayContainer->GetSelectedPieceId();
+    const ETerraGameplayInteractionPhase PrevPhase = GameplayContainer->GetInteractionPhase();
 
     TArray<int32> DirtyCellIds;
     const bool bGameplayHandled = GameplayContainer->HandleCellClick(CellId, DirtyCellIds);
@@ -1810,7 +1817,7 @@ bool APlanetTessellatedMesh::HandleHISMClickHit(const FHitResult& Hit)
         G2_5LastCameraFocusedTurnIndex = GameplayContainer->GetTurnIndex();
         FocusCameraOnCurrentFactionBase_();
     }
-    else
+    else if (NewPhase != PrevPhase || bGameplayHandled)
     {
         RefreshFactionPieceHighlights_(NewFactionId);
     }

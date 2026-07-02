@@ -15,9 +15,11 @@ public:
     ETerraGameplayInteractionPhase GetInteractionPhase() const { return InteractionPhase; }
 
     bool HandleCellClick(int32 CellId, TArray<int32>& OutDirtyCellIds);
+    void SetDebugKeepSameFactionOnEndTurn(bool bInKeepSameFaction) { bDebugKeepSameFactionOnEndTurn = bInKeepSameFaction; }
     bool GetHighlightForCell(int32 CellId, FTerraGameplayCellHighlight& OutHighlight) const;
     int32 GetCurrentFactionBaseCellId() const;
     bool IsCurrentFactionPieceCell(int32 CellId) const;
+    bool IsCurrentActionTargetCell(int32 CellId) const;
     bool CollectFactionPieceCellIds(int32 FactionId, TArray<int32>& OutCellIds) const;
     bool CollectCurrentFactionPieceCellIds(TArray<int32>& OutCellIds) const;
     bool TryGetPieceCellId(int32 PieceId, int32& OutCellId) const;
@@ -40,12 +42,18 @@ private:
     const FTerraGameplayPieceState* GetPiece_(int32 PieceId) const;
     bool IsCurrentFactionPiece_(const FTerraGameplayPieceState& Piece) const;
     bool IsPieceSelectable_(const FTerraGameplayPieceState& Piece) const;
+    bool CanEnterTerrain_(const FTerraGameplayPieceState& Piece, int32 TargetCellId) const;
     bool CanOrdinaryMove_(const FTerraGameplayPieceState& Piece, int32 TargetCellId) const;
+    bool StepForwardBranches_(int32 PrevCellId, int32 CurCellId, TArray<int32>& OutNextCellIds) const;
+    void CollectOrdinaryMoveTargets_(const FTerraGameplayPieceState& Piece, TSet<int32>& OutTargetCellIds) const;
+    void CollectJumpTargets_(const FTerraGameplayPieceState& Piece, TSet<int32>& OutTargetCellIds) const;
 
     bool TrySelectPieceAtCell_(int32 CellId, TArray<int32>& OutDirtyCellIds);
-    bool TryMoveSelectedPieceTo_(int32 TargetCellId, TArray<int32>& OutDirtyCellIds);
+    bool TryMoveSelectedPieceToOrdinaryTarget_(int32 TargetCellId, TArray<int32>& OutDirtyCellIds);
+    bool TryJumpSelectedPieceTo_(int32 TargetCellId, TArray<int32>& OutDirtyCellIds);
     bool TryEndTurnOnSelectedCell_(int32 CellId, TArray<int32>& OutDirtyCellIds);
 
+    void RefreshSelectedPieceHighlights_(bool bIncludeOrdinaryMoves, TArray<int32>& OutDirtyCellIds);
     void SetSingleHighlight_(int32 CellId, const FLinearColor& Color, float Intensity, TArray<int32>& OutDirtyCellIds);
     void ClearGameplayHighlights_(TArray<int32>& OutDirtyCellIds);
     void AddDirtyCell_(int32 CellId, TArray<int32>& OutDirtyCellIds) const;
@@ -59,10 +67,15 @@ private:
     TArray<FTerraGameplayFactionState> Factions;
     TArray<int32> CellToPieceId;
     TMap<int32, FTerraGameplayCellHighlight> GameplayHighlights;
+    TSet<int32> OrdinaryMoveTargetCellIds;
+    TSet<int32> JumpTargetCellIds;
+
+    bool bDebugKeepSameFactionOnEndTurn = false;
 
     int32 CurrentFactionId = INDEX_NONE;
     int32 TurnIndex = 0;
     int32 SelectedPieceId = INDEX_NONE;
     int32 SelectedPieceStartCellId = INDEX_NONE;
+    int32 LastJumpStartCellId = INDEX_NONE;
     ETerraGameplayInteractionPhase InteractionPhase = ETerraGameplayInteractionPhase::Idle;
 };

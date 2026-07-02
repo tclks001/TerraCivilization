@@ -398,6 +398,18 @@ public:
     FLinearColor G2_5CurrentFactionPieceHoverColor = FLinearColor(1.0f, 0.22f, 0.32f, 1.0f);
 
     //----------------------------------------------------------
+    // SimpleGameplay G3：跳跃与调试
+    //----------------------------------------------------------
+
+    /** true：调试时回合结束不跳到下一个玩家，下一回合仍保持当前玩家。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G3|Debug")
+    bool bG3DebugKeepSameFactionOnEndTurn = false;
+
+    /** hover 到可行走 / 可跳跃淡蓝落点时使用的加深颜色。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G3")
+    FLinearColor G3ActionTargetHoverColor = FLinearColor(0.08f, 0.45f, 1.0f, 1.0f);
+
+    //----------------------------------------------------------
     // 生命周期
     //----------------------------------------------------------
     virtual void OnConstruction(const FTransform& Transform) override;

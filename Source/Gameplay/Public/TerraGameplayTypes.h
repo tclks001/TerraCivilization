@@ -26,6 +26,7 @@ enum class ETerraGameplayInteractionPhase : uint8
     Idle UMETA(DisplayName = "Idle"),
     PieceSelected UMETA(DisplayName = "Piece Selected"),
     PieceMovedCanEndTurn UMETA(DisplayName = "Piece Moved Can End Turn"),
+    PieceJumpingCanContinue UMETA(DisplayName = "Piece Jumping Can Continue"),
 };
 
 USTRUCT(BlueprintType)

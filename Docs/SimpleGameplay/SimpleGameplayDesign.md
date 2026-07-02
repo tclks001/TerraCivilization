@@ -798,10 +798,11 @@ struct FTerraFactionState
 ### G3：标准跳跃与连跳
 
 - 实现 `StepForwardBranches`。
-- 实现 `BuildForwardRayBranches`。
+- 选择棋子后高亮所有下一步普通行走 / 跳跃落点。
 - 实现标准跳跃。
 - 实现骑兵特殊跳跃。
-- 实现连跳交互。
+- 实现跳跃后只能继续跳跃或点击自身结束回合的连跳交互。
+- 暴露 debug 选项：回合结束后仍保持当前玩家。
 
 ### G4：基础二吃一
 
