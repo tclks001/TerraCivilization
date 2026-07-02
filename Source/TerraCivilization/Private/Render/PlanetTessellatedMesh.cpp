@@ -154,7 +154,8 @@ void APlanetTessellatedMesh::Tick(float DeltaSeconds)
             LastHISMPickedCellId = INDEX_NONE;
             if (OldHover != INDEX_NONE)
             {
-                WriteHISMHighlightForCell_(OldHover);
+                WriteHISMHighlightForCell_(OldHover, false);
+                RefreshG4CapturePreviewCellsForActionTarget_(OldHover, true);
             }
         }
     }
@@ -1400,10 +1401,15 @@ void APlanetTessellatedMesh::WriteHISMHighlightForCell_(int32 CellId, bool bMark
 
     if (bHasGameplayActionHighlight)
     {
+        const bool bIsG4CaptureTargetHover = GameplayContainer.IsValid()
+            && HISMCurrentHoverCellId != INDEX_NONE
+            && GameplayContainer->IsCapturePreviewCellForActionTarget(CellId, HISMCurrentHoverCellId);
         const bool bIsActionTargetHover = HoverIntensity > KINDA_SMALL_NUMBER
             && GameplayContainer.IsValid()
             && GameplayContainer->IsCurrentActionTargetCell(CellId);
-        FinalHighlightColor = bIsActionTargetHover ? G3ActionTargetHoverColor : GameplayHighlight.Color;
+        FinalHighlightColor = bIsG4CaptureTargetHover
+            ? G4CaptureTargetHoverColor
+            : (bIsActionTargetHover ? G3ActionTargetHoverColor : GameplayHighlight.Color);
         FinalHighlightIntensity = GameplayHighlight.Intensity;
     }
     else if (bIsCurrentFactionPieceCell && HoverIntensity > KINDA_SMALL_NUMBER)
@@ -1453,58 +1459,6 @@ void APlanetTessellatedMesh::WriteHISMHighlightForCell_(int32 CellId, bool bMark
     }
 }
 
-void APlanetTessellatedMesh::UpdateHISMHover_(int32 NewCellId)
-{
-    if (!bEnableHISMInstanceHighlight)
-    {
-        return;
-    }
-
-    if (NewCellId != INDEX_NONE && !CellIdToHISMInstance.IsValidIndex(NewCellId))
-    {
-        return;
-    }
-
-    if (NewCellId == INDEX_NONE)
-    {
-        LastHISMPickedCellId = INDEX_NONE;
-        if (HISMCurrentHoverCellId == INDEX_NONE)
-        {
-            return;
-        }
-        if (HISMPendingHoverCellId != INDEX_NONE)
-        {
-            HISMPendingHoverCellId = INDEX_NONE;
-            HISMHoverFadeTimer = HISMHoverFadeDuration;
-        }
-        return;
-    }
-
-    LastHISMPickedCellId = NewCellId;
-
-    if (HISMCurrentHoverCellId == INDEX_NONE)
-    {
-        HISMCurrentHoverCellId = NewCellId;
-        HISMPendingHoverCellId = NewCellId;
-        HISMHoverFadeTimer = 0.0f;
-        WriteHISMHighlightForCell_(NewCellId);
-        return;
-    }
-
-    if (NewCellId == HISMCurrentHoverCellId)
-    {
-        HISMPendingHoverCellId = NewCellId;
-        HISMHoverFadeTimer = 0.0f;
-        return;
-    }
-
-    const int32 OldHover = HISMCurrentHoverCellId;
-    HISMCurrentHoverCellId = NewCellId;
-    HISMPendingHoverCellId = NewCellId;
-    HISMHoverFadeTimer = 0.0f;
-    WriteHISMHighlightForCell_(OldHover, false);
-    WriteHISMHighlightForCell_(NewCellId, true);
-}
 
 void APlanetTessellatedMesh::RebuildGameplay_()
 {
@@ -1763,7 +1717,7 @@ bool APlanetTessellatedMesh::HandleHISMHoverHit(const FHitResult& Hit)
         return false;
     }
 
-    UpdateHISMHover_(CellId);
+UpdateHISMHoverCell_(CellId);
 
     if (GEngine && CellId != INDEX_NONE && CellId != LastHISMClickedCellId)
     {
@@ -1804,6 +1758,7 @@ bool APlanetTessellatedMesh::HandleHISMClickHit(const FHitResult& Hit)
     TArray<int32> DirtyCellIds;
     const bool bGameplayHandled = GameplayContainer->HandleCellClick(CellId, DirtyCellIds);
     RefreshGameplayHighlights_(DirtyCellIds);
+    RefreshG4CapturePreviewCellsForActionTarget_(HISMCurrentHoverCellId);
 
     const int32 NewFactionId = GameplayContainer->GetCurrentFactionId();
     const int32 NewSelectedPieceId = GameplayContainer->GetSelectedPieceId();
@@ -1851,7 +1806,7 @@ bool APlanetTessellatedMesh::HandleHISMClickHit(const FHitResult& Hit)
 
 void APlanetTessellatedMesh::ClearHISMHover()
 {
-    UpdateHISMHover_(INDEX_NONE);
+UpdateHISMHoverCell_(INDEX_NONE);
 }
 
 void APlanetTessellatedMesh::ClearAllHISMHighlights()
@@ -1863,7 +1818,8 @@ void APlanetTessellatedMesh::ClearAllHISMHighlights()
         HISMPendingHoverCellId = INDEX_NONE;
         HISMHoverFadeTimer = 0.0f;
         LastHISMPickedCellId = INDEX_NONE;
-        WriteHISMHighlightForCell_(OldHover);
+        WriteHISMHighlightForCell_(OldHover, false);
+        RefreshG4CapturePreviewCellsForActionTarget_(OldHover, true);
     }
 }
 
@@ -1985,37 +1941,37 @@ void APlanetTessellatedMesh::RebuildG1DebugPieces_()
             ++BaseCount;
         }
 
-        TArray<int32> InfantryCells;
+        TArray<int32> ArcherCells;
         TArray<int32> CavalryCells;
-        InfantryCells.Reserve(5);
+        ArcherCells.Reserve(5);
         CavalryCells.Reserve(5);
 
         for (int32 NeighborSlot = 0; NeighborSlot < 5; ++NeighborSlot)
         {
-            const int32 InfantryCellId = BaseCell.NeighborCellIds[NeighborSlot];
-            if (!IsValidCellId(InfantryCellId))
+            const int32 ArcherCellId = BaseCell.NeighborCellIds[NeighborSlot];
+            if (!IsValidCellId(ArcherCellId))
             {
                 UE_LOG(LogPlanetTess, Warning,
-                    TEXT("[Tess][G1] Invalid infantry neighbor. Faction=%d Base=%d Slot=%d Cell=%d"),
+                    TEXT("[Tess][G1] Invalid archer neighbor. Faction=%d Base=%d Slot=%d Cell=%d"),
                     FactionId,
                     BaseCellId,
                     NeighborSlot,
-                    InfantryCellId);
+                    ArcherCellId);
                 continue;
             }
 
-            InfantryCells.Add(InfantryCellId);
-            if (AddPiece(FactionId, InfantryCellId, ETerraG1DebugPieceType::Infantry))
+            ArcherCells.Add(ArcherCellId);
+            if (AddPiece(FactionId, ArcherCellId, ETerraG1DebugPieceType::Archer))
             {
-                ++InfantryCount;
+                ++ArcherCount;
             }
 
-            const FCell& InfantryCell = CellTopology->Cells[InfantryCellId];
+            const FCell& ArcherCell = CellTopology->Cells[ArcherCellId];
             int32 BackToBaseIndex = INDEX_NONE;
             int32 NeighborCount = 0;
             for (int32 I = 0; I < 6; ++I)
             {
-                const int32 NeighborCellId = InfantryCell.NeighborCellIds[I];
+                const int32 NeighborCellId = ArcherCell.NeighborCellIds[I];
                 if (IsValidCellId(NeighborCellId))
                 {
                     ++NeighborCount;
@@ -2029,17 +1985,17 @@ void APlanetTessellatedMesh::RebuildG1DebugPieces_()
             if (NeighborCount != 6 || BackToBaseIndex == INDEX_NONE)
             {
                 UE_LOG(LogPlanetTess, Warning,
-                    TEXT("[Tess][G1] Cannot resolve cavalry opposite cell. Faction=%d Base=%d Infantry=%d NeighborCount=%d BackIndex=%d"),
+                    TEXT("[Tess][G1] Cannot resolve cavalry opposite cell. Faction=%d Base=%d Archer=%d NeighborCount=%d BackIndex=%d"),
                     FactionId,
                     BaseCellId,
-                    InfantryCellId,
+                    ArcherCellId,
                     NeighborCount,
                     BackToBaseIndex);
                 CavalryCells.Add(INDEX_NONE);
                 continue;
             }
 
-            const int32 CavalryCellId = InfantryCell.NeighborCellIds[(BackToBaseIndex + 3) % 6];
+            const int32 CavalryCellId = ArcherCell.NeighborCellIds[(BackToBaseIndex + 3) % 6];
             CavalryCells.Add(CavalryCellId);
             if (AddPiece(FactionId, CavalryCellId, ETerraG1DebugPieceType::Cavalry))
             {
@@ -2060,7 +2016,7 @@ void APlanetTessellatedMesh::RebuildG1DebugPieces_()
             const FCell& CavalryB = CellTopology->Cells[CavalryBId];
             const FVector MidDir = (CavalryA.UnitCenter + CavalryB.UnitCenter).GetSafeNormal();
 
-            int32 BestArcherCellId = INDEX_NONE;
+            int32 BestInfantryCellId = INDEX_NONE;
             float BestScore = -FLT_MAX;
 
             for (int32 SlotA = 0; SlotA < 6; ++SlotA)
@@ -2068,7 +2024,7 @@ void APlanetTessellatedMesh::RebuildG1DebugPieces_()
                 const int32 CandidateCellId = CavalryA.NeighborCellIds[SlotA];
                 if (!IsValidCellId(CandidateCellId)
                     || CandidateCellId == BaseCellId
-                    || InfantryCells.Contains(CandidateCellId)
+                    || ArcherCells.Contains(CandidateCellId)
                     || CavalryCells.Contains(CandidateCellId)
                     || OccupiedCells.Contains(CandidateCellId))
                 {
@@ -2094,14 +2050,14 @@ void APlanetTessellatedMesh::RebuildG1DebugPieces_()
                 if (Score > BestScore)
                 {
                     BestScore = Score;
-                    BestArcherCellId = CandidateCellId;
+                    BestInfantryCellId = CandidateCellId;
                 }
             }
 
-            if (BestArcherCellId == INDEX_NONE)
+            if (BestInfantryCellId == INDEX_NONE)
             {
                 UE_LOG(LogPlanetTess, Warning,
-                    TEXT("[Tess][G1] Cannot resolve archer between cavalry cells. Faction=%d Base=%d CavalryA=%d CavalryB=%d"),
+                    TEXT("[Tess][G1] Cannot resolve infantry between cavalry cells. Faction=%d Base=%d CavalryA=%d CavalryB=%d"),
                     FactionId,
                     BaseCellId,
                     CavalryAId,
@@ -2109,9 +2065,9 @@ void APlanetTessellatedMesh::RebuildG1DebugPieces_()
                 continue;
             }
 
-            if (AddPiece(FactionId, BestArcherCellId, ETerraG1DebugPieceType::Archer))
+            if (AddPiece(FactionId, BestInfantryCellId, ETerraG1DebugPieceType::Infantry))
             {
-                ++ArcherCount;
+                ++InfantryCount;
             }
         }
     }
@@ -2275,4 +2231,79 @@ void APlanetTessellatedMesh::SetHighlightLUT(UTexture2D* InLUT)
     {
         TerrainMID->SetTextureParameterValue(TEXT("CellHighlightLUT"), InLUT);
     }
+}
+
+void APlanetTessellatedMesh::RefreshG4CapturePreviewCellsForActionTarget_(int32 ActionTargetCellId, bool bMarkLastRenderStateDirty)
+{
+    if (!GameplayContainer.IsValid() || ActionTargetCellId == INDEX_NONE)
+    {
+        return;
+    }
+
+    TArray<int32> CaptureCellIds;
+    if (!GameplayContainer->CollectCapturePreviewCellIdsForActionTarget(ActionTargetCellId, CaptureCellIds))
+    {
+        return;
+    }
+
+    for (int32 I = 0; I < CaptureCellIds.Num(); ++I)
+    {
+        WriteHISMHighlightForCell_(CaptureCellIds[I], bMarkLastRenderStateDirty && I == CaptureCellIds.Num() - 1);
+    }
+}
+
+void APlanetTessellatedMesh::UpdateHISMHoverCell_(int32 NewCellId)
+{
+    if (!bEnableHISMInstanceHighlight)
+    {
+        return;
+    }
+
+    if (NewCellId != INDEX_NONE && !CellIdToHISMInstance.IsValidIndex(NewCellId))
+    {
+        return;
+    }
+
+    if (NewCellId == INDEX_NONE)
+    {
+        LastHISMPickedCellId = INDEX_NONE;
+        if (HISMCurrentHoverCellId == INDEX_NONE)
+        {
+            return;
+        }
+        if (HISMPendingHoverCellId != INDEX_NONE)
+        {
+            HISMPendingHoverCellId = INDEX_NONE;
+            HISMHoverFadeTimer = HISMHoverFadeDuration;
+        }
+        return;
+    }
+
+    LastHISMPickedCellId = NewCellId;
+
+    if (HISMCurrentHoverCellId == INDEX_NONE)
+    {
+        HISMCurrentHoverCellId = NewCellId;
+        HISMPendingHoverCellId = NewCellId;
+        HISMHoverFadeTimer = 0.0f;
+        WriteHISMHighlightForCell_(NewCellId, false);
+        RefreshG4CapturePreviewCellsForActionTarget_(NewCellId, true);
+        return;
+    }
+
+    if (NewCellId == HISMCurrentHoverCellId)
+    {
+        HISMPendingHoverCellId = NewCellId;
+        HISMHoverFadeTimer = 0.0f;
+        return;
+    }
+
+    const int32 OldHover = HISMCurrentHoverCellId;
+    HISMCurrentHoverCellId = NewCellId;
+    HISMPendingHoverCellId = NewCellId;
+    HISMHoverFadeTimer = 0.0f;
+    WriteHISMHighlightForCell_(OldHover, false);
+    RefreshG4CapturePreviewCellsForActionTarget_(OldHover, false);
+    WriteHISMHighlightForCell_(NewCellId, false);
+    RefreshG4CapturePreviewCellsForActionTarget_(NewCellId, true);
 }

@@ -20,6 +20,8 @@ public:
     int32 GetCurrentFactionBaseCellId() const;
     bool IsCurrentFactionPieceCell(int32 CellId) const;
     bool IsCurrentActionTargetCell(int32 CellId) const;
+    bool IsCapturePreviewCellForActionTarget(int32 CaptureCellId, int32 ActionTargetCellId) const;
+    bool CollectCapturePreviewCellIdsForActionTarget(int32 ActionTargetCellId, TArray<int32>& OutCellIds) const;
     bool CollectFactionPieceCellIds(int32 FactionId, TArray<int32>& OutCellIds) const;
     bool CollectCurrentFactionPieceCellIds(TArray<int32>& OutCellIds) const;
     bool TryGetPieceCellId(int32 PieceId, int32& OutCellId) const;
@@ -47,6 +49,12 @@ private:
     bool StepForwardBranches_(int32 PrevCellId, int32 CurCellId, TArray<int32>& OutNextCellIds) const;
     void CollectOrdinaryMoveTargets_(const FTerraGameplayPieceState& Piece, TSet<int32>& OutTargetCellIds) const;
     void CollectJumpTargets_(const FTerraGameplayPieceState& Piece, TSet<int32>& OutTargetCellIds) const;
+    void CollectCaptureCellsAfterHypotheticalMove_(const FTerraGameplayPieceState& Piece, int32 TargetCellId, TSet<int32>& OutCaptureCellIds) const;
+    void RebuildActionTargetCapturePreviews_(TArray<int32>& OutDirtyCellIds);
+    bool HasCapturePreviewForActionTarget_(int32 ActionTargetCellId) const;
+    void LockPendingCapturesForActionTarget_(int32 ActionTargetCellId, TArray<int32>& OutDirtyCellIds);
+    void RebuildPendingCapturesForSelectedPieceCell_(TArray<int32>& OutDirtyCellIds);
+    void ResolvePendingCaptures_(TArray<int32>& OutDirtyCellIds);
 
     bool TrySelectPieceAtCell_(int32 CellId, TArray<int32>& OutDirtyCellIds);
     bool TryMoveSelectedPieceToOrdinaryTarget_(int32 TargetCellId, TArray<int32>& OutDirtyCellIds);
@@ -69,6 +77,9 @@ private:
     TMap<int32, FTerraGameplayCellHighlight> GameplayHighlights;
     TSet<int32> OrdinaryMoveTargetCellIds;
     TSet<int32> JumpTargetCellIds;
+    TMap<int32, TSet<int32>> ActionTargetCellIdToCaptureCellIds;
+    TSet<int32> PendingCapturePieceIds;
+    TSet<int32> PendingCaptureCellIds;
 
     bool bDebugKeepSameFactionOnEndTurn = false;
 

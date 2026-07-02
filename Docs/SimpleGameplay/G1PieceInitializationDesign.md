@@ -31,9 +31,9 @@ G1 的目标是在现有球面 Cell 拓扑上生成 12 个阵营的初始棋子�
 | 类型 | 颜色 | 含义 |
 | --- | --- | --- |
 | 大本营 / 军旗 | 红色 | 五边形基地 Cell |
-| 步兵 | 黄色 | 基地周围第一圈 Cell |
-| 骑兵 | 蓝色 | 每个步兵背向基地方向的第二圈 Cell |
-| 弓兵 | 绿色 | 相邻两个骑兵之间的第二圈 Cell |
+| 步兵 | 黄色 | 相邻两个骑兵之间的第二圈 Cell |
+| 骑兵 | 蓝色 | 每个弓兵背向基地方向的第二圈 Cell |
+| 弓兵 | 绿色 | 基地周围第一圈 Cell |
 
 调试球位置：
 
@@ -55,7 +55,7 @@ WorldPosition = ActorTransform.TransformPosition(Cell.UnitCenter * (GlobeRadiusC
 - 每个五边形对应一个 `FactionId`。
 - 在五边形 Cell 放置红色大本营。
 
-### 3.2 步兵
+### 3.2 弓兵
 
 读取基地 Cell 的 5 个有效邻居：
 
@@ -63,26 +63,26 @@ WorldPosition = ActorTransform.TransformPosition(Cell.UnitCenter * (GlobeRadiusC
 Base.NeighborCellIds[0..4]
 ```
 
-每个有效邻居上放置一个黄色步兵。
+每个有效邻居上放置一个绿色弓兵。
 
 ### 3.3 骑兵
 
-对每个步兵 Cell，找到“与大本营相反”的格子：
+对每个弓兵 Cell，找到“与大本营相反”的格子：
 
-1. 在步兵 Cell 的邻居环里找到基地 Cell 的索引 `BaseNeighborIndex`。
-2. 步兵通常是六边形，因此反方向邻居为：
+1. 在弓兵 Cell 的邻居环里找到基地 Cell 的索引 `BaseNeighborIndex`。
+2. 弓兵所在的内圈 Cell 通常是六边形，因此反方向邻居为：
 
 ```text
-CavalryCell = Infantry.NeighborCellIds[(BaseNeighborIndex + 3) % 6]
+CavalryCell = Archer.NeighborCellIds[(BaseNeighborIndex + 3) % 6]
 ```
 
 3. 在该 Cell 放置蓝色骑兵。
 
 如果异常遇到非六边形 Cell，则跳过该方向并输出日志；G1 不引入复杂五边形穿越规则。
 
-### 3.4 弓兵
+### 3.4 步兵
 
-弓兵位于相邻两个骑兵之间。
+步兵位于相邻两个骑兵之间，即原弓兵外圈位置。
 
 对环形顺序中的每对相邻骑兵：
 
@@ -94,7 +94,7 @@ Cavalry[(i + 1) % 5]
 寻找它们共同相邻的 Cell，并过滤掉：
 
 - 基地 Cell。
-- 本阵营已使用的步兵 Cell。
+- 本阵营已使用的弓兵 Cell。
 - 本阵营已使用的骑兵 Cell。
 - 无效 Cell。
 
@@ -104,7 +104,37 @@ Cavalry[(i + 1) % 5]
 Score = dot(Cell.UnitCenter, normalize(CavalryA.UnitCenter + CavalryB.UnitCenter))
 ```
 
-得分最高者作为绿色弓兵 Cell。
+得分最高者作为黄色步兵 Cell。
+
+### 3.5 初始化序号机制
+
+运行时初始化棋子时，先计算本阵营的全部开局 Cell，再按固定兵种顺序写入 `Pieces` 数组，而不是在位置计算过程中交替追加棋子。
+
+目的：遍历一个玩家所有棋子时保持恒定的棋子顺序，便于 UI、调试、存档、网络同步或后续 AI 逻辑稳定引用同一类棋子。
+
+在一个阵营完整生成 16 个棋子的正常情况下，该阵营内相对序号固定为：
+
+```text
+Flag = 0
+Archer = 1,2,3,4,5
+Cavalry = 6,7,8,9,10
+Infantry = 11,12,13,14,15
+```
+
+若使用全局 `PieceId` 表示，则该阵营第一个棋子的基准为：
+
+```text
+FactionPieceBaseId = FactionId * 16
+```
+
+对应：
+
+```text
+Flag      = FactionPieceBaseId + 0
+Archer    = FactionPieceBaseId + 1..5
+Cavalry   = FactionPieceBaseId + 6..10
+Infantry  = FactionPieceBaseId + 11..15
+```
 
 ---
 
@@ -195,7 +225,7 @@ Tick 开关条件扩展为：
 
 - 找不到 12 个五边形：输出 Warning，但仍按实际找到数量生成。
 - 某方向无法找到骑兵反向 Cell：跳过该骑兵并输出 Warning。
-- 某对骑兵无法找到共同弓兵 Cell：跳过该弓兵并输出 Warning。
+- 某对骑兵无法找到共同步兵 Cell：跳过该步兵并输出 Warning。
 - 如果不同阵营尝试占用同一个 Cell：跳过后来的棋子并输出 Warning。
 
 ---
@@ -227,9 +257,9 @@ G1DebugPieceHeightOffsetCM = 260
 
 - Output Log 出现 G1 重建日志。
 - 球面上每个五边形基地出现红色调试球。
-- 每个红色基地周围第一圈出现 5 个黄色步兵。
-- 每个黄色步兵外侧出现 1 个蓝色骑兵。
-- 相邻蓝色骑兵之间出现 1 个绿色弓兵。
+- 每个红色基地周围第一圈出现 5 个绿色弓兵。
+- 每个绿色弓兵外侧出现 1 个蓝色骑兵。
+- 相邻蓝色骑兵之间出现 1 个黄色步兵。
 - 默认 12 个阵营合计约 192 个调试球。
 - 关闭 `bEnableG1DebugPieces` 后调试球不再绘制。
 

@@ -7,6 +7,7 @@ namespace
     constexpr FLinearColor GSelectedPieceCellColor(1.0f, 1.0f, 0.0f, 1.0f);
     constexpr FLinearColor GMovedPieceCanEndTurnColor(0.0f, 0.35f, 1.0f, 1.0f);
     constexpr FLinearColor GActionTargetCellColor(0.35f, 0.80f, 1.0f, 1.0f);
+    constexpr FLinearColor GCapturePreviewCellColor(0.65f, 0.02f, 0.02f, 1.0f);
 }
 
 void FTerraGameplayContainer::Initialize(const TArray<FTerraGameplayCellState>& InCells)
@@ -100,6 +101,31 @@ bool FTerraGameplayContainer::IsCurrentActionTargetCell(int32 CellId) const
     return OrdinaryMoveTargetCellIds.Contains(CellId) || JumpTargetCellIds.Contains(CellId);
 }
 
+bool FTerraGameplayContainer::IsCapturePreviewCellForActionTarget(int32 CaptureCellId, int32 ActionTargetCellId) const
+{
+    const TSet<int32>* CaptureCellIds = ActionTargetCellIdToCaptureCellIds.Find(ActionTargetCellId);
+    return CaptureCellIds && CaptureCellIds->Contains(CaptureCellId);
+}
+
+bool FTerraGameplayContainer::CollectCapturePreviewCellIdsForActionTarget(int32 ActionTargetCellId, TArray<int32>& OutCellIds) const
+{
+    OutCellIds.Reset();
+    const TSet<int32>* CaptureCellIds = ActionTargetCellIdToCaptureCellIds.Find(ActionTargetCellId);
+    if (!CaptureCellIds)
+    {
+        return false;
+    }
+
+    for (const int32 CaptureCellId : *CaptureCellIds)
+    {
+        if (IsValidCellId_(CaptureCellId))
+        {
+            OutCellIds.AddUnique(CaptureCellId);
+        }
+    }
+    return OutCellIds.Num() > 0;
+}
+
 bool FTerraGameplayContainer::CollectFactionPieceCellIds(int32 FactionId, TArray<int32>& OutCellIds) const
 {
     OutCellIds.Reset();
@@ -143,6 +169,9 @@ void FTerraGameplayContainer::ResetRuntimeState_()
     GameplayHighlights.Reset();
     OrdinaryMoveTargetCellIds.Reset();
     JumpTargetCellIds.Reset();
+    ActionTargetCellIdToCaptureCellIds.Reset();
+    PendingCapturePieceIds.Reset();
+    PendingCaptureCellIds.Reset();
     CellToPieceId.Init(INDEX_NONE, Cells.Num());
 
     CurrentFactionId = INDEX_NONE;
@@ -187,34 +216,30 @@ void FTerraGameplayContainer::BuildInitialPieces_()
         Faction.BaseCellId = BaseCellId;
         Faction.bAlive = true;
 
-        int32 FlagPieceId = INDEX_NONE;
-        AddPieceIfFree_(FactionIndex, BaseCellId, ETerraGameplayPieceType::Flag, FlagPieceId);
-        Faction.FlagPieceId = FlagPieceId;
-
         const FTerraGameplayCellState& BaseCell = Cells[BaseCellId];
-        TArray<int32> InfantryCells;
+        TArray<int32> ArcherCells;
         TArray<int32> CavalryCells;
-        InfantryCells.Reserve(5);
+        TArray<int32> InfantryCells;
+        ArcherCells.Reserve(5);
         CavalryCells.Reserve(5);
+        InfantryCells.Reserve(5);
 
         for (int32 NeighborSlot = 0; NeighborSlot < 5; ++NeighborSlot)
         {
-            const int32 InfantryCellId = BaseCell.NeighborCellIds[NeighborSlot];
-            if (!IsValidCellId_(InfantryCellId))
+            const int32 ArcherCellId = BaseCell.NeighborCellIds[NeighborSlot];
+            if (!IsValidCellId_(ArcherCellId))
             {
                 continue;
             }
 
-            int32 InfantryPieceId = INDEX_NONE;
-            AddPieceIfFree_(FactionIndex, InfantryCellId, ETerraGameplayPieceType::Infantry, InfantryPieceId);
-            InfantryCells.Add(InfantryCellId);
+            ArcherCells.Add(ArcherCellId);
 
-            const FTerraGameplayCellState& InfantryCell = Cells[InfantryCellId];
+            const FTerraGameplayCellState& ArcherCell = Cells[ArcherCellId];
             int32 BackToBaseIndex = INDEX_NONE;
             int32 NeighborCount = 0;
             for (int32 I = 0; I < 6; ++I)
             {
-                const int32 NeighborCellId = InfantryCell.NeighborCellIds[I];
+                const int32 NeighborCellId = ArcherCell.NeighborCellIds[I];
                 if (IsValidCellId_(NeighborCellId))
                 {
                     ++NeighborCount;
@@ -231,11 +256,8 @@ void FTerraGameplayContainer::BuildInitialPieces_()
                 continue;
             }
 
-            const int32 CavalryCellId = InfantryCell.NeighborCellIds[(BackToBaseIndex + 3) % 6];
+            const int32 CavalryCellId = ArcherCell.NeighborCellIds[(BackToBaseIndex + 3) % 6];
             CavalryCells.Add(CavalryCellId);
-
-            int32 CavalryPieceId = INDEX_NONE;
-            AddPieceIfFree_(FactionIndex, CavalryCellId, ETerraGameplayPieceType::Cavalry, CavalryPieceId);
         }
 
         for (int32 I = 0; I < CavalryCells.Num(); ++I)
@@ -250,14 +272,15 @@ void FTerraGameplayContainer::BuildInitialPieces_()
             const FTerraGameplayCellState& CavalryA = Cells[CavalryAId];
             const FTerraGameplayCellState& CavalryB = Cells[CavalryBId];
 
-            int32 ArcherCellId = INDEX_NONE;
+            int32 InfantryCellId = INDEX_NONE;
             for (int32 SlotA = 0; SlotA < 6; ++SlotA)
             {
                 const int32 CandidateCellId = CavalryA.NeighborCellIds[SlotA];
                 if (!IsValidCellId_(CandidateCellId)
                     || CandidateCellId == BaseCellId
-                    || InfantryCells.Contains(CandidateCellId)
+                    || ArcherCells.Contains(CandidateCellId)
                     || CavalryCells.Contains(CandidateCellId)
+                    || InfantryCells.Contains(CandidateCellId)
                     || !IsCellEmpty_(CandidateCellId))
                 {
                     continue;
@@ -267,19 +290,43 @@ void FTerraGameplayContainer::BuildInitialPieces_()
                 {
                     if (CavalryB.NeighborCellIds[SlotB] == CandidateCellId)
                     {
-                        ArcherCellId = CandidateCellId;
+                        InfantryCellId = CandidateCellId;
                         break;
                     }
                 }
 
-                if (ArcherCellId != INDEX_NONE)
+                if (InfantryCellId != INDEX_NONE)
                 {
                     break;
                 }
             }
 
+            if (InfantryCellId != INDEX_NONE)
+            {
+                InfantryCells.Add(InfantryCellId);
+            }
+        }
+
+        int32 FlagPieceId = INDEX_NONE;
+        AddPieceIfFree_(FactionIndex, BaseCellId, ETerraGameplayPieceType::Flag, FlagPieceId);
+        Faction.FlagPieceId = FlagPieceId;
+
+        for (const int32 ArcherCellId : ArcherCells)
+        {
             int32 ArcherPieceId = INDEX_NONE;
             AddPieceIfFree_(FactionIndex, ArcherCellId, ETerraGameplayPieceType::Archer, ArcherPieceId);
+        }
+
+        for (const int32 CavalryCellId : CavalryCells)
+        {
+            int32 CavalryPieceId = INDEX_NONE;
+            AddPieceIfFree_(FactionIndex, CavalryCellId, ETerraGameplayPieceType::Cavalry, CavalryPieceId);
+        }
+
+        for (const int32 InfantryCellId : InfantryCells)
+        {
+            int32 InfantryPieceId = INDEX_NONE;
+            AddPieceIfFree_(FactionIndex, InfantryCellId, ETerraGameplayPieceType::Infantry, InfantryPieceId);
         }
     }
 }
@@ -535,6 +582,277 @@ void FTerraGameplayContainer::CollectJumpTargets_(const FTerraGameplayPieceState
     }
 }
 
+void FTerraGameplayContainer::CollectCaptureCellsAfterHypotheticalMove_(const FTerraGameplayPieceState& Piece, int32 TargetCellId, TSet<int32>& OutCaptureCellIds) const
+{
+    OutCaptureCellIds.Reset();
+    if (!IsPieceSelectable_(Piece) || !IsValidCellId_(TargetCellId))
+    {
+        return;
+    }
+
+    auto GetHypotheticalPieceAtCell = [this, &Piece, TargetCellId](int32 CellId) -> const FTerraGameplayPieceState*
+    {
+        if (!IsValidCellId_(CellId))
+        {
+            return nullptr;
+        }
+        if (CellId == TargetCellId)
+        {
+            return &Piece;
+        }
+        if (CellId == Piece.CellId)
+        {
+            return nullptr;
+        }
+        return GetPiece_(GetPieceIdAtCell_(CellId));
+    };
+
+    auto IsHypotheticalFriendlyAtCell = [this, &GetHypotheticalPieceAtCell](int32 CellId) -> bool
+    {
+        const FTerraGameplayPieceState* CandidatePiece = GetHypotheticalPieceAtCell(CellId);
+        return CandidatePiece && CandidatePiece->bAlive && CandidatePiece->OwnerFactionId == CurrentFactionId;
+    };
+
+    auto TryAddHypotheticalEnemyAtCell = [this, &GetHypotheticalPieceAtCell, &OutCaptureCellIds](int32 CellId)
+    {
+        const FTerraGameplayPieceState* CandidatePiece = GetHypotheticalPieceAtCell(CellId);
+        if (CandidatePiece && CandidatePiece->bAlive && CandidatePiece->OwnerFactionId != CurrentFactionId)
+        {
+            OutCaptureCellIds.Add(CellId);
+        }
+    };
+
+    auto ScanArcherRemoteCapture = [this, &GetHypotheticalPieceAtCell, &OutCaptureCellIds](int32 ArcherCellId, int32 FrontCellId)
+    {
+        const FTerraGameplayPieceState* ArcherPiece = GetHypotheticalPieceAtCell(ArcherCellId);
+        const FTerraGameplayPieceState* FrontPiece = GetHypotheticalPieceAtCell(FrontCellId);
+        if (!ArcherPiece || !ArcherPiece->bAlive
+            || ArcherPiece->OwnerFactionId != CurrentFactionId
+            || ArcherPiece->PieceType != ETerraGameplayPieceType::Archer
+            || !FrontPiece || !FrontPiece->bAlive
+            || FrontPiece->OwnerFactionId != CurrentFactionId)
+        {
+            return;
+        }
+
+        const int32 MaxDistanceFromArcher = Cells[ArcherCellId].TerrainType == ETerraGameplayTerrainType::Mountain ? 4 : 3;
+
+        struct FRemoteCaptureScanCursor
+        {
+            int32 PrevCellId = INDEX_NONE;
+            int32 CurCellId = INDEX_NONE;
+            int32 DistanceFromArcher = 0;
+        };
+
+        TArray<int32> InitialCandidates;
+        if (!StepForwardBranches_(ArcherCellId, FrontCellId, InitialCandidates))
+        {
+            return;
+        }
+
+        TArray<FRemoteCaptureScanCursor> Cursors;
+        for (const int32 CandidateCellId : InitialCandidates)
+        {
+            Cursors.Add({FrontCellId, CandidateCellId, 2});
+        }
+
+        while (Cursors.Num() > 0)
+        {
+            const FRemoteCaptureScanCursor Cursor = Cursors.Pop(EAllowShrinking::No);
+            if (!IsValidCellId_(Cursor.CurCellId) || Cursor.DistanceFromArcher > MaxDistanceFromArcher)
+            {
+                continue;
+            }
+
+            bool bContinueThisBranch = false;
+            const FTerraGameplayPieceState* CandidatePiece = GetHypotheticalPieceAtCell(Cursor.CurCellId);
+            if (!CandidatePiece || !CandidatePiece->bAlive)
+            {
+                bContinueThisBranch = true;
+            }
+            else if (CandidatePiece->OwnerFactionId == CurrentFactionId)
+            {
+                bContinueThisBranch = false;
+            }
+            else if (Cursor.DistanceFromArcher <= 2)
+            {
+                bContinueThisBranch = false;
+            }
+            else if (Cells[Cursor.CurCellId].TerrainType == ETerraGameplayTerrainType::Forest)
+            {
+                bContinueThisBranch = true;
+            }
+            else
+            {
+                OutCaptureCellIds.Add(Cursor.CurCellId);
+                bContinueThisBranch = false;
+            }
+
+            if (!bContinueThisBranch || Cursor.DistanceFromArcher >= MaxDistanceFromArcher)
+            {
+                continue;
+            }
+
+            TArray<int32> NextCandidates;
+            if (StepForwardBranches_(Cursor.PrevCellId, Cursor.CurCellId, NextCandidates))
+            {
+                for (const int32 NextCellId : NextCandidates)
+                {
+                    Cursors.Add({Cursor.CurCellId, NextCellId, Cursor.DistanceFromArcher + 1});
+                }
+            }
+        }
+    };
+
+    for (int32 NeighborSlot = 0; NeighborSlot < 6; ++NeighborSlot)
+    {
+        const int32 FirstCellId = Cells[TargetCellId].NeighborCellIds[NeighborSlot];
+        if (!IsHypotheticalFriendlyAtCell(FirstCellId))
+        {
+            continue;
+        }
+
+        TArray<int32> EnemyCandidates;
+        if (StepForwardBranches_(TargetCellId, FirstCellId, EnemyCandidates))
+        {
+            for (const int32 EnemyCellId : EnemyCandidates)
+            {
+                TryAddHypotheticalEnemyAtCell(EnemyCellId);
+            }
+        }
+
+        TArray<int32> EnemyCandidatesWithActionPieceAsFront;
+        if (StepForwardBranches_(FirstCellId, TargetCellId, EnemyCandidatesWithActionPieceAsFront))
+        {
+            for (const int32 EnemyCellId : EnemyCandidatesWithActionPieceAsFront)
+            {
+                TryAddHypotheticalEnemyAtCell(EnemyCellId);
+            }
+        }
+
+        ScanArcherRemoteCapture(TargetCellId, FirstCellId);
+        ScanArcherRemoteCapture(FirstCellId, TargetCellId);
+    }
+}
+
+void FTerraGameplayContainer::RebuildActionTargetCapturePreviews_(TArray<int32>& OutDirtyCellIds)
+{
+    ActionTargetCellIdToCaptureCellIds.Reset();
+
+    const FTerraGameplayPieceState* Piece = GetPiece_(SelectedPieceId);
+    if (!Piece || !Piece->bAlive)
+    {
+        return;
+    }
+
+    TSet<int32> AllActionTargetCellIds;
+    for (const int32 TargetCellId : OrdinaryMoveTargetCellIds)
+    {
+        AllActionTargetCellIds.Add(TargetCellId);
+    }
+    for (const int32 TargetCellId : JumpTargetCellIds)
+    {
+        AllActionTargetCellIds.Add(TargetCellId);
+    }
+
+    for (const int32 TargetCellId : AllActionTargetCellIds)
+    {
+        TSet<int32> CaptureCellIds;
+        CollectCaptureCellsAfterHypotheticalMove_(*Piece, TargetCellId, CaptureCellIds);
+        if (CaptureCellIds.Num() == 0)
+        {
+            continue;
+        }
+
+        TSet<int32>& StoredCaptureCellIds = ActionTargetCellIdToCaptureCellIds.FindOrAdd(TargetCellId);
+        for (const int32 CaptureCellId : CaptureCellIds)
+        {
+            StoredCaptureCellIds.Add(CaptureCellId);
+            SetSingleHighlight_(CaptureCellId, GCapturePreviewCellColor, 1.0f, OutDirtyCellIds);
+        }
+    }
+}
+
+bool FTerraGameplayContainer::HasCapturePreviewForActionTarget_(int32 ActionTargetCellId) const
+{
+    const TSet<int32>* CaptureCellIds = ActionTargetCellIdToCaptureCellIds.Find(ActionTargetCellId);
+    return CaptureCellIds && CaptureCellIds->Num() > 0;
+}
+
+void FTerraGameplayContainer::LockPendingCapturesForActionTarget_(int32 ActionTargetCellId, TArray<int32>& OutDirtyCellIds)
+{
+    PendingCapturePieceIds.Reset();
+    PendingCaptureCellIds.Reset();
+
+    const TSet<int32>* CaptureCellIds = ActionTargetCellIdToCaptureCellIds.Find(ActionTargetCellId);
+    if (!CaptureCellIds)
+    {
+        return;
+    }
+
+    for (const int32 CaptureCellId : *CaptureCellIds)
+    {
+        const int32 CapturePieceId = GetPieceIdAtCell_(CaptureCellId);
+        const FTerraGameplayPieceState* CapturePiece = GetPiece_(CapturePieceId);
+        if (CapturePiece && CapturePiece->bAlive && CapturePiece->OwnerFactionId != CurrentFactionId)
+        {
+            PendingCapturePieceIds.Add(CapturePieceId);
+            PendingCaptureCellIds.Add(CaptureCellId);
+            SetSingleHighlight_(CaptureCellId, GCapturePreviewCellColor, 1.0f, OutDirtyCellIds);
+        }
+    }
+}
+
+void FTerraGameplayContainer::RebuildPendingCapturesForSelectedPieceCell_(TArray<int32>& OutDirtyCellIds)
+{
+    PendingCapturePieceIds.Reset();
+    PendingCaptureCellIds.Reset();
+
+    const FTerraGameplayPieceState* Piece = GetPiece_(SelectedPieceId);
+    if (!Piece || !Piece->bAlive || !IsValidCellId_(Piece->CellId))
+    {
+        return;
+    }
+
+    TSet<int32> CaptureCellIds;
+    CollectCaptureCellsAfterHypotheticalMove_(*Piece, Piece->CellId, CaptureCellIds);
+    for (const int32 CaptureCellId : CaptureCellIds)
+    {
+        const int32 CapturePieceId = GetPieceIdAtCell_(CaptureCellId);
+        const FTerraGameplayPieceState* CapturePiece = GetPiece_(CapturePieceId);
+        if (CapturePiece && CapturePiece->bAlive && CapturePiece->OwnerFactionId != CurrentFactionId)
+        {
+            PendingCapturePieceIds.Add(CapturePieceId);
+            PendingCaptureCellIds.Add(CaptureCellId);
+            SetSingleHighlight_(CaptureCellId, GCapturePreviewCellColor, 1.0f, OutDirtyCellIds);
+        }
+    }
+}
+
+void FTerraGameplayContainer::ResolvePendingCaptures_(TArray<int32>& OutDirtyCellIds)
+{
+    for (const int32 CapturePieceId : PendingCapturePieceIds)
+    {
+        FTerraGameplayPieceState* CapturePiece = GetMutablePiece_(CapturePieceId);
+        if (!CapturePiece || !CapturePiece->bAlive)
+        {
+            continue;
+        }
+
+        const int32 CaptureCellId = CapturePiece->CellId;
+        if (IsValidCellId_(CaptureCellId) && GetPieceIdAtCell_(CaptureCellId) == CapturePieceId)
+        {
+            CellToPieceId[CaptureCellId] = INDEX_NONE;
+        }
+        CapturePiece->CellId = INDEX_NONE;
+        CapturePiece->bAlive = false;
+        AddDirtyCell_(CaptureCellId, OutDirtyCellIds);
+    }
+
+    PendingCapturePieceIds.Reset();
+    PendingCaptureCellIds.Reset();
+}
+
 void FTerraGameplayContainer::RefreshSelectedPieceHighlights_(bool bIncludeOrdinaryMoves, TArray<int32>& OutDirtyCellIds)
 {
     const FTerraGameplayPieceState* Piece = GetPiece_(SelectedPieceId);
@@ -560,6 +878,8 @@ void FTerraGameplayContainer::RefreshSelectedPieceHighlights_(bool bIncludeOrdin
     {
         SetSingleHighlight_(TargetCellId, GActionTargetCellColor, 1.0f, OutDirtyCellIds);
     }
+
+    RebuildActionTargetCapturePreviews_(OutDirtyCellIds);
 }
 
 bool FTerraGameplayContainer::TrySelectPieceAtCell_(int32 CellId, TArray<int32>& OutDirtyCellIds)
@@ -573,6 +893,9 @@ bool FTerraGameplayContainer::TrySelectPieceAtCell_(int32 CellId, TArray<int32>&
 
     ClearGameplayHighlights_(OutDirtyCellIds);
 
+    PendingCapturePieceIds.Reset();
+    PendingCaptureCellIds.Reset();
+    ActionTargetCellIdToCaptureCellIds.Reset();
     SelectedPieceId = PieceId;
     SelectedPieceStartCellId = Piece->CellId;
     LastJumpStartCellId = INDEX_NONE;
@@ -599,6 +922,7 @@ bool FTerraGameplayContainer::TryMoveSelectedPieceToOrdinaryTarget_(int32 Target
     }
 
     const int32 FromCellId = Piece->CellId;
+    const bool bHasPendingCaptures = HasCapturePreviewForActionTarget_(TargetCellId);
 
     ClearGameplayHighlights_(OutDirtyCellIds);
     AddDirtyCell_(FromCellId, OutDirtyCellIds);
@@ -610,14 +934,20 @@ bool FTerraGameplayContainer::TryMoveSelectedPieceToOrdinaryTarget_(int32 Target
     LastJumpStartCellId = INDEX_NONE;
 
     InteractionPhase = ETerraGameplayInteractionPhase::PieceMovedCanEndTurn;
+    if (bHasPendingCaptures)
+    {
+        LockPendingCapturesForActionTarget_(TargetCellId, OutDirtyCellIds);
+    }
+    ActionTargetCellIdToCaptureCellIds.Reset();
     SetSingleHighlight_(TargetCellId, GMovedPieceCanEndTurnColor, 1.0f, OutDirtyCellIds);
 
     UE_LOG(LogTerraGameplay, Log,
-        TEXT("[Gameplay][G3] OrdinaryMove Piece=%d Faction=%d From=%d To=%d. Click same cell to end turn."),
+        TEXT("[Gameplay][G4] OrdinaryMove Piece=%d Faction=%d From=%d To=%d PendingCaptures=%d. Click same cell to end turn."),
         Piece->PieceId,
         CurrentFactionId,
         FromCellId,
-        TargetCellId);
+        TargetCellId,
+        PendingCapturePieceIds.Num());
     return true;
 }
 
@@ -642,13 +972,15 @@ bool FTerraGameplayContainer::TryJumpSelectedPieceTo_(int32 TargetCellId, TArray
 
     InteractionPhase = ETerraGameplayInteractionPhase::PieceJumpingCanContinue;
     RefreshSelectedPieceHighlights_(false, OutDirtyCellIds);
+    RebuildPendingCapturesForSelectedPieceCell_(OutDirtyCellIds);
 
     UE_LOG(LogTerraGameplay, Log,
-        TEXT("[Gameplay][G3] Jump Piece=%d Faction=%d From=%d To=%d. ContinueJumpTargets=%d"),
+        TEXT("[Gameplay][G4] Jump Piece=%d Faction=%d From=%d To=%d CurrentNodeCaptures=%d ContinueJumpTargets=%d"),
         Piece->PieceId,
         CurrentFactionId,
         FromCellId,
         TargetCellId,
+        PendingCapturePieceIds.Num(),
         JumpTargetCellIds.Num());
     return true;
 }
@@ -662,20 +994,29 @@ bool FTerraGameplayContainer::TryEndTurnOnSelectedCell_(int32 CellId, TArray<int
     }
 
     ClearGameplayHighlights_(OutDirtyCellIds);
+    if (InteractionPhase == ETerraGameplayInteractionPhase::PieceJumpingCanContinue)
+    {
+        RebuildPendingCapturesForSelectedPieceCell_(OutDirtyCellIds);
+    }
+    const int32 CaptureCount = PendingCapturePieceIds.Num();
+    ResolvePendingCaptures_(OutDirtyCellIds);
+    ClearGameplayHighlights_(OutDirtyCellIds);
     AddDirtyCell_(CellId, OutDirtyCellIds);
 
     const int32 EndedFactionId = CurrentFactionId;
     SelectedPieceId = INDEX_NONE;
     SelectedPieceStartCellId = INDEX_NONE;
     LastJumpStartCellId = INDEX_NONE;
+    ActionTargetCellIdToCaptureCellIds.Reset();
     InteractionPhase = ETerraGameplayInteractionPhase::Idle;
     AdvanceTurn_();
 
     UE_LOG(LogTerraGameplay, Log,
-        TEXT("[Gameplay][G3] EndTurn. EndedFaction=%d NewFaction=%d TurnIndex=%d KeepSameFaction=%d"),
+        TEXT("[Gameplay][G4] EndTurn. EndedFaction=%d NewFaction=%d TurnIndex=%d Captures=%d KeepSameFaction=%d"),
         EndedFactionId,
         CurrentFactionId,
         TurnIndex,
+        CaptureCount,
         bDebugKeepSameFactionOnEndTurn ? 1 : 0);
     return true;
 }

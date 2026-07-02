@@ -409,6 +409,10 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G3")
     FLinearColor G3ActionTargetHoverColor = FLinearColor(0.08f, 0.45f, 1.0f, 1.0f);
 
+    /** hover 到某个可吃子落点时，该落点对应可吃目标使用的加深红色。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G4")
+    FLinearColor G4CaptureTargetHoverColor = FLinearColor(1.0f, 0.0f, 0.0f, 1.0f);
+
     //----------------------------------------------------------
     // 生命周期
     //----------------------------------------------------------
@@ -531,11 +535,9 @@ private:
 
     /** SimpleGameplay：把单个 Cell 当前 Gameplay/hover 逻辑合成为最终 RGB + Intensity 自定义数据。 */
     void WriteHISMHighlightForCell_(int32 CellId, bool bMarkRenderStateDirty = true);
+    void RefreshG4CapturePreviewCellsForActionTarget_(int32 ActionTargetCellId, bool bMarkLastRenderStateDirty = true);
+    void UpdateHISMHoverCell_(int32 NewCellId);
 
-    /** SimpleGameplay：设置当前 hover Cell，使用旧高亮组件同语义防抖状态机。 */
-    void UpdateHISMHover_(int32 NewCellId);
-
-    /** SimpleGameplay G2：重建 Gameplay 总容器，复制 Cell 拓扑和 WorldGen 地形状态。 */
     void RebuildGameplay_();
 
     /** SimpleGameplay G2：刷新 Gameplay 容器报告的脏 Cell 高亮。 */
