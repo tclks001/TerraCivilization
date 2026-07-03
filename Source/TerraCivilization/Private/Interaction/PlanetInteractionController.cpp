@@ -79,6 +79,11 @@ void APlanetInteractionController::PlayerTick(float DeltaTime)
     if (Tess)
     {
         UpdateG8ManualCameraControl_(DeltaTime, Tess);
+
+        if (WasInputKeyJustPressed(EKeys::RightMouseButton))
+        {
+            Tess->HandleHISMUndo();
+        }
     }
 
     const bool bUseHISMHighlightPath = Tess && Tess->bEnableHISMInstanceHighlight;

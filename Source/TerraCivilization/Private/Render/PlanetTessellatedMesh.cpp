@@ -1870,6 +1870,33 @@ bool APlanetTessellatedMesh::HandleHISMClickHit(const FHitResult& Hit)
     return true;
 }
 
+bool APlanetTessellatedMesh::HandleHISMUndo()
+{
+    if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
+    {
+        return false;
+    }
+
+    TArray<int32> DirtyCellIds;
+    const bool bUndone = GameplayContainer->UndoCurrentInteraction(DirtyCellIds);
+    if (!bUndone)
+    {
+        return false;
+    }
+
+    RefreshGameplayHighlights_(DirtyCellIds);
+    RefreshCurrentFactionPieceHighlights_();
+    RefreshG4CapturePreviewCellsForActionTarget_(HISMCurrentHoverCellId);
+    RebuildG1DebugPieces_();
+
+    UE_LOG(LogPlanetTess, Log,
+        TEXT("[Tess][G9] HISM Undo -> CurrentFaction=%d Turn=%d Phase=%d"),
+        GameplayContainer->GetCurrentFactionId(),
+        GameplayContainer->GetTurnIndex(),
+        static_cast<int32>(GameplayContainer->GetInteractionPhase()));
+    return true;
+}
+
 void APlanetTessellatedMesh::ClearHISMHover()
 {
 UpdateHISMHoverCell_(INDEX_NONE);

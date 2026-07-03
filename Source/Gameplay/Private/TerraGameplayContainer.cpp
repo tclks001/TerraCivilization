@@ -170,6 +170,69 @@ bool FTerraGameplayContainer::TryGetPieceCellId(int32 PieceId, int32& OutCellId)
     return true;
 }
 
+bool FTerraGameplayContainer::UndoCurrentInteraction(TArray<int32>& OutDirtyCellIds)
+{
+    OutDirtyCellIds.Reset();
+
+    if (InteractionUndoSnapshots.Num() <= 0 || InteractionPhase == ETerraGameplayInteractionPhase::Idle)
+    {
+        return false;
+    }
+
+    const FInteractionUndoSnapshot UndoSnapshot = InteractionUndoSnapshots.Pop(EAllowShrinking::No);
+
+    TSet<int32> DirtyCellSet;
+    for (const FTerraGameplayPieceState& Piece : Pieces)
+    {
+        if (Piece.bAlive && IsValidCellId_(Piece.CellId))
+        {
+            DirtyCellSet.Add(Piece.CellId);
+        }
+    }
+    for (const FTerraGameplayPieceState& Piece : UndoSnapshot.Pieces)
+    {
+        if (Piece.bAlive && IsValidCellId_(Piece.CellId))
+        {
+            DirtyCellSet.Add(Piece.CellId);
+        }
+    }
+    for (const TPair<int32, FTerraGameplayCellHighlight>& Pair : GameplayHighlights)
+    {
+        DirtyCellSet.Add(Pair.Key);
+    }
+    for (const TPair<int32, FTerraGameplayCellHighlight>& Pair : UndoSnapshot.GameplayHighlights)
+    {
+        DirtyCellSet.Add(Pair.Key);
+    }
+
+    Pieces = UndoSnapshot.Pieces;
+    CellToPieceId = UndoSnapshot.CellToPieceId;
+    GameplayHighlights = UndoSnapshot.GameplayHighlights;
+    OrdinaryMoveTargetCellIds = UndoSnapshot.OrdinaryMoveTargetCellIds;
+    JumpTargetCellIds = UndoSnapshot.JumpTargetCellIds;
+    ActionTargetCellIdToCaptureCellIds = UndoSnapshot.ActionTargetCellIdToCaptureCellIds;
+    PendingCaptureEntriesByPieceId = UndoSnapshot.PendingCaptureEntriesByPieceId;
+    PendingCapturePieceIds = UndoSnapshot.PendingCapturePieceIds;
+    PendingCaptureCellIds = UndoSnapshot.PendingCaptureCellIds;
+    CurrentActionPathCellIds = UndoSnapshot.CurrentActionPathCellIds;
+    SelectedPieceId = UndoSnapshot.SelectedPieceId;
+    SelectedPieceStartCellId = UndoSnapshot.SelectedPieceStartCellId;
+    LastJumpStartCellId = UndoSnapshot.LastJumpStartCellId;
+    InteractionPhase = UndoSnapshot.InteractionPhase;
+
+    for (const int32 DirtyCellId : DirtyCellSet)
+    {
+        AddDirtyCell_(DirtyCellId, OutDirtyCellIds);
+    }
+
+    UE_LOG(LogTerraGameplay, Log,
+        TEXT("[Gameplay][G9] UndoCurrentInteraction Restored. CurrentFaction=%d TurnIndex=%d RemainingUndoDepth=%d"),
+        CurrentFactionId,
+        TurnIndex,
+        InteractionUndoSnapshots.Num());
+    return true;
+}
+
 void FTerraGameplayContainer::ResetRuntimeState_()
 {
     Pieces.Reset();
@@ -178,11 +241,13 @@ void FTerraGameplayContainer::ResetRuntimeState_()
     OrdinaryMoveTargetCellIds.Reset();
     JumpTargetCellIds.Reset();
     ActionTargetCellIdToCaptureCellIds.Reset();
+    PendingCaptureEntriesByPieceId.Reset();
     PendingCapturePieceIds.Reset();
     PendingCaptureCellIds.Reset();
     CellToPieceId.Init(INDEX_NONE, Cells.Num());
     CurrentActionPathCellIds.Reset();
     ActionLogFilePath.Reset();
+    ClearUndoSnapshots_();
 
     CurrentFactionId = INDEX_NONE;
     TurnIndex = 0;
@@ -202,6 +267,30 @@ void FTerraGameplayContainer::InitializeActionLogFilePath_()
 
     const FString Timestamp = FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S"));
     ActionLogFilePath = FPaths::Combine(LogDirectory, FString::Printf(TEXT("TerraGameplayActionLog_%s.jsonl"), *Timestamp));
+}
+
+void FTerraGameplayContainer::PushUndoSnapshot_()
+{
+    FInteractionUndoSnapshot& UndoSnapshot = InteractionUndoSnapshots.AddDefaulted_GetRef();
+    UndoSnapshot.Pieces = Pieces;
+    UndoSnapshot.CellToPieceId = CellToPieceId;
+    UndoSnapshot.GameplayHighlights = GameplayHighlights;
+    UndoSnapshot.OrdinaryMoveTargetCellIds = OrdinaryMoveTargetCellIds;
+    UndoSnapshot.JumpTargetCellIds = JumpTargetCellIds;
+    UndoSnapshot.ActionTargetCellIdToCaptureCellIds = ActionTargetCellIdToCaptureCellIds;
+    UndoSnapshot.PendingCaptureEntriesByPieceId = PendingCaptureEntriesByPieceId;
+    UndoSnapshot.PendingCapturePieceIds = PendingCapturePieceIds;
+    UndoSnapshot.PendingCaptureCellIds = PendingCaptureCellIds;
+    UndoSnapshot.CurrentActionPathCellIds = CurrentActionPathCellIds;
+    UndoSnapshot.SelectedPieceId = SelectedPieceId;
+    UndoSnapshot.SelectedPieceStartCellId = SelectedPieceStartCellId;
+    UndoSnapshot.LastJumpStartCellId = LastJumpStartCellId;
+    UndoSnapshot.InteractionPhase = InteractionPhase;
+}
+
+void FTerraGameplayContainer::ClearUndoSnapshots_()
+{
+    InteractionUndoSnapshots.Reset();
 }
 
 void FTerraGameplayContainer::BuildInitialPieces_()
@@ -603,9 +692,9 @@ void FTerraGameplayContainer::CollectJumpTargets_(const FTerraGameplayPieceState
     }
 }
 
-void FTerraGameplayContainer::CollectCaptureCellsAfterHypotheticalMove_(const FTerraGameplayPieceState& Piece, int32 TargetCellId, TSet<int32>& OutCaptureCellIds) const
+void FTerraGameplayContainer::CollectCaptureEntriesAfterHypotheticalMove_(const FTerraGameplayPieceState& Piece, int32 TargetCellId, TMap<int32, FTerraGameplayCaptureEntry>& OutCaptureEntriesByCellId) const
 {
-    OutCaptureCellIds.Reset();
+    OutCaptureEntriesByCellId.Reset();
     if (!IsPieceSelectable_(Piece) || !IsValidCellId_(TargetCellId))
     {
         return;
@@ -634,16 +723,21 @@ void FTerraGameplayContainer::CollectCaptureCellsAfterHypotheticalMove_(const FT
         return CandidatePiece && CandidatePiece->bAlive && CandidatePiece->OwnerFactionId == CurrentFactionId;
     };
 
-    auto TryAddHypotheticalEnemyAtCell = [this, &GetHypotheticalPieceAtCell, &OutCaptureCellIds](int32 CellId)
+    auto TryAddHypotheticalEnemyAtCell = [this, &GetHypotheticalPieceAtCell, &OutCaptureEntriesByCellId](int32 CellId, int32 AttackerPieceId, int32 VanguardPieceId)
     {
         const FTerraGameplayPieceState* CandidatePiece = GetHypotheticalPieceAtCell(CellId);
-        if (CandidatePiece && CandidatePiece->bAlive && CandidatePiece->OwnerFactionId != CurrentFactionId)
+        if (CandidatePiece && CandidatePiece->bAlive && CandidatePiece->OwnerFactionId != CurrentFactionId && !OutCaptureEntriesByCellId.Contains(CellId))
         {
-            OutCaptureCellIds.Add(CellId);
+            FTerraGameplayCaptureEntry CaptureEntry;
+            CaptureEntry.CapturedPieceId = CandidatePiece->PieceId;
+            CaptureEntry.CapturedCellId = CellId;
+            CaptureEntry.AttackerPieceId = AttackerPieceId;
+            CaptureEntry.VanguardPieceId = VanguardPieceId;
+            OutCaptureEntriesByCellId.Add(CellId, CaptureEntry);
         }
     };
 
-    auto ScanArcherRemoteCapture = [this, &GetHypotheticalPieceAtCell, &OutCaptureCellIds](int32 ArcherCellId, int32 FrontCellId)
+    auto ScanArcherRemoteCapture = [this, &GetHypotheticalPieceAtCell, &TryAddHypotheticalEnemyAtCell](int32 ArcherCellId, int32 FrontCellId)
     {
         const FTerraGameplayPieceState* ArcherPiece = GetHypotheticalPieceAtCell(ArcherCellId);
         const FTerraGameplayPieceState* FrontPiece = GetHypotheticalPieceAtCell(FrontCellId);
@@ -705,7 +799,7 @@ void FTerraGameplayContainer::CollectCaptureCellsAfterHypotheticalMove_(const FT
             }
             else
             {
-                OutCaptureCellIds.Add(Cursor.CurCellId);
+                TryAddHypotheticalEnemyAtCell(Cursor.CurCellId, ArcherPiece->PieceId, FrontPiece->PieceId);
                 bContinueThisBranch = false;
             }
 
@@ -733,12 +827,18 @@ void FTerraGameplayContainer::CollectCaptureCellsAfterHypotheticalMove_(const FT
             continue;
         }
 
+        const FTerraGameplayPieceState* FirstPiece = GetHypotheticalPieceAtCell(FirstCellId);
+        if (!FirstPiece)
+        {
+            continue;
+        }
+
         TArray<int32> EnemyCandidates;
         if (StepForwardBranches_(TargetCellId, FirstCellId, EnemyCandidates))
         {
             for (const int32 EnemyCellId : EnemyCandidates)
             {
-                TryAddHypotheticalEnemyAtCell(EnemyCellId);
+                TryAddHypotheticalEnemyAtCell(EnemyCellId, Piece.PieceId, FirstPiece->PieceId);
             }
         }
 
@@ -747,12 +847,24 @@ void FTerraGameplayContainer::CollectCaptureCellsAfterHypotheticalMove_(const FT
         {
             for (const int32 EnemyCellId : EnemyCandidatesWithActionPieceAsFront)
             {
-                TryAddHypotheticalEnemyAtCell(EnemyCellId);
+                TryAddHypotheticalEnemyAtCell(EnemyCellId, FirstPiece->PieceId, Piece.PieceId);
             }
         }
 
         ScanArcherRemoteCapture(TargetCellId, FirstCellId);
         ScanArcherRemoteCapture(FirstCellId, TargetCellId);
+    }
+}
+
+void FTerraGameplayContainer::CollectCaptureCellsAfterHypotheticalMove_(const FTerraGameplayPieceState& Piece, int32 TargetCellId, TSet<int32>& OutCaptureCellIds) const
+{
+    OutCaptureCellIds.Reset();
+
+    TMap<int32, FTerraGameplayCaptureEntry> CaptureEntriesByCellId;
+    CollectCaptureEntriesAfterHypotheticalMove_(Piece, TargetCellId, CaptureEntriesByCellId);
+    for (const TPair<int32, FTerraGameplayCaptureEntry>& Pair : CaptureEntriesByCellId)
+    {
+        OutCaptureCellIds.Add(Pair.Key);
     }
 }
 
@@ -802,30 +914,34 @@ bool FTerraGameplayContainer::HasCapturePreviewForActionTarget_(int32 ActionTarg
 
 void FTerraGameplayContainer::LockPendingCapturesForActionTarget_(int32 ActionTargetCellId, TArray<int32>& OutDirtyCellIds)
 {
+    PendingCaptureEntriesByPieceId.Reset();
     PendingCapturePieceIds.Reset();
     PendingCaptureCellIds.Reset();
 
-    const TSet<int32>* CaptureCellIds = ActionTargetCellIdToCaptureCellIds.Find(ActionTargetCellId);
-    if (!CaptureCellIds)
+    const FTerraGameplayPieceState* Piece = GetPiece_(SelectedPieceId);
+    if (!Piece || !Piece->bAlive)
     {
         return;
     }
 
-    for (const int32 CaptureCellId : *CaptureCellIds)
+    TMap<int32, FTerraGameplayCaptureEntry> CaptureEntriesByCellId;
+    CollectCaptureEntriesAfterHypotheticalMove_(*Piece, ActionTargetCellId, CaptureEntriesByCellId);
+    for (const TPair<int32, FTerraGameplayCaptureEntry>& Pair : CaptureEntriesByCellId)
     {
-        const int32 CapturePieceId = GetPieceIdAtCell_(CaptureCellId);
-        const FTerraGameplayPieceState* CapturePiece = GetPiece_(CapturePieceId);
-        if (CapturePiece && CapturePiece->bAlive && CapturePiece->OwnerFactionId != CurrentFactionId)
+        const FTerraGameplayCaptureEntry& CaptureEntry = Pair.Value;
+        if (CaptureEntry.CapturedPieceId != INDEX_NONE && CaptureEntry.CapturedCellId != INDEX_NONE)
         {
-            PendingCapturePieceIds.Add(CapturePieceId);
-            PendingCaptureCellIds.Add(CaptureCellId);
-            SetSingleHighlight_(CaptureCellId, GCapturePreviewCellColor, 1.0f, OutDirtyCellIds);
+            PendingCaptureEntriesByPieceId.Add(CaptureEntry.CapturedPieceId, CaptureEntry);
+            PendingCapturePieceIds.Add(CaptureEntry.CapturedPieceId);
+            PendingCaptureCellIds.Add(CaptureEntry.CapturedCellId);
+            SetSingleHighlight_(CaptureEntry.CapturedCellId, GCapturePreviewCellColor, 1.0f, OutDirtyCellIds);
         }
     }
 }
 
 void FTerraGameplayContainer::RebuildPendingCapturesForSelectedPieceCell_(TArray<int32>& OutDirtyCellIds)
 {
+    PendingCaptureEntriesByPieceId.Reset();
     PendingCapturePieceIds.Reset();
     PendingCaptureCellIds.Reset();
 
@@ -835,17 +951,17 @@ void FTerraGameplayContainer::RebuildPendingCapturesForSelectedPieceCell_(TArray
         return;
     }
 
-    TSet<int32> CaptureCellIds;
-    CollectCaptureCellsAfterHypotheticalMove_(*Piece, Piece->CellId, CaptureCellIds);
-    for (const int32 CaptureCellId : CaptureCellIds)
+    TMap<int32, FTerraGameplayCaptureEntry> CaptureEntriesByCellId;
+    CollectCaptureEntriesAfterHypotheticalMove_(*Piece, Piece->CellId, CaptureEntriesByCellId);
+    for (const TPair<int32, FTerraGameplayCaptureEntry>& Pair : CaptureEntriesByCellId)
     {
-        const int32 CapturePieceId = GetPieceIdAtCell_(CaptureCellId);
-        const FTerraGameplayPieceState* CapturePiece = GetPiece_(CapturePieceId);
-        if (CapturePiece && CapturePiece->bAlive && CapturePiece->OwnerFactionId != CurrentFactionId)
+        const FTerraGameplayCaptureEntry& CaptureEntry = Pair.Value;
+        if (CaptureEntry.CapturedPieceId != INDEX_NONE && CaptureEntry.CapturedCellId != INDEX_NONE)
         {
-            PendingCapturePieceIds.Add(CapturePieceId);
-            PendingCaptureCellIds.Add(CaptureCellId);
-            SetSingleHighlight_(CaptureCellId, GCapturePreviewCellColor, 1.0f, OutDirtyCellIds);
+            PendingCaptureEntriesByPieceId.Add(CaptureEntry.CapturedPieceId, CaptureEntry);
+            PendingCapturePieceIds.Add(CaptureEntry.CapturedPieceId);
+            PendingCaptureCellIds.Add(CaptureEntry.CapturedCellId);
+            SetSingleHighlight_(CaptureEntry.CapturedCellId, GCapturePreviewCellColor, 1.0f, OutDirtyCellIds);
         }
     }
 }
@@ -877,6 +993,7 @@ void FTerraGameplayContainer::ResolvePendingCaptures_(TArray<int32>& OutDirtyCel
         AddDirtyCell_(CaptureCellId, OutDirtyCellIds);
     }
 
+    PendingCaptureEntriesByPieceId.Reset();
     PendingCapturePieceIds.Reset();
     PendingCaptureCellIds.Reset();
 
@@ -971,7 +1088,18 @@ void FTerraGameplayContainer::FinalizeTurnAfterResolution_()
     AdvanceTurn_();
 }
 
-FString FTerraGameplayContainer::BuildActionLogJson_(int32 ActionTurnIndex, int32 PlayerId, int32 PieceId, const TArray<int32>& PathCellIds, const TArray<int32>& CapturedPieceIds) const
+TArray<FTerraGameplayCaptureEntry> FTerraGameplayContainer::GetSortedPendingCaptureEntries_() const
+{
+    TArray<FTerraGameplayCaptureEntry> CaptureEntries;
+    PendingCaptureEntriesByPieceId.GenerateValueArray(CaptureEntries);
+    CaptureEntries.Sort([](const FTerraGameplayCaptureEntry& Left, const FTerraGameplayCaptureEntry& Right)
+    {
+        return Left.CapturedPieceId < Right.CapturedPieceId;
+    });
+    return CaptureEntries;
+}
+
+FString FTerraGameplayContainer::BuildActionLogJson_(int32 ActionTurnIndex, int32 PlayerId, int32 PieceId, const TArray<int32>& PathCellIds, const TArray<FTerraGameplayCaptureEntry>& CaptureEntries) const
 {
     TSharedRef<FJsonObject> RootObject = MakeShared<FJsonObject>();
     RootObject->SetNumberField(TEXT("turnIndex"), ActionTurnIndex);
@@ -987,12 +1115,20 @@ FString FTerraGameplayContainer::BuildActionLogJson_(int32 ActionTurnIndex, int3
     RootObject->SetArrayField(TEXT("pathCellIds"), PathCellJsonValues);
 
     TArray<TSharedPtr<FJsonValue>> CapturedPieceJsonValues;
-    CapturedPieceJsonValues.Reserve(CapturedPieceIds.Num());
-    for (const int32 CapturedPieceId : CapturedPieceIds)
+    TArray<TSharedPtr<FJsonValue>> AttackerPieceJsonValues;
+    TArray<TSharedPtr<FJsonValue>> VanguardPieceJsonValues;
+    CapturedPieceJsonValues.Reserve(CaptureEntries.Num());
+    AttackerPieceJsonValues.Reserve(CaptureEntries.Num());
+    VanguardPieceJsonValues.Reserve(CaptureEntries.Num());
+    for (const FTerraGameplayCaptureEntry& CaptureEntry : CaptureEntries)
     {
-        CapturedPieceJsonValues.Add(MakeShared<FJsonValueNumber>(CapturedPieceId));
+        CapturedPieceJsonValues.Add(MakeShared<FJsonValueNumber>(CaptureEntry.CapturedPieceId));
+        AttackerPieceJsonValues.Add(MakeShared<FJsonValueNumber>(CaptureEntry.AttackerPieceId));
+        VanguardPieceJsonValues.Add(MakeShared<FJsonValueNumber>(CaptureEntry.VanguardPieceId));
     }
     RootObject->SetArrayField(TEXT("capturedPieceIds"), CapturedPieceJsonValues);
+    RootObject->SetArrayField(TEXT("attackerPieceIds"), AttackerPieceJsonValues);
+    RootObject->SetArrayField(TEXT("vanguardPieceIds"), VanguardPieceJsonValues);
 
     FString OutputJson;
     TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
@@ -1010,9 +1146,9 @@ void FTerraGameplayContainer::AppendActionLogToFile_(const FString& ActionLogJso
     }
 }
 
-void FTerraGameplayContainer::EmitActionLog_(int32 ActionTurnIndex, int32 PlayerId, int32 PieceId, const TArray<int32>& PathCellIds, const TArray<int32>& CapturedPieceIds) const
+void FTerraGameplayContainer::EmitActionLog_(int32 ActionTurnIndex, int32 PlayerId, int32 PieceId, const TArray<int32>& PathCellIds, const TArray<FTerraGameplayCaptureEntry>& CaptureEntries) const
 {
-    const FString ActionLogJson = BuildActionLogJson_(ActionTurnIndex, PlayerId, PieceId, PathCellIds, CapturedPieceIds);
+    const FString ActionLogJson = BuildActionLogJson_(ActionTurnIndex, PlayerId, PieceId, PathCellIds, CaptureEntries);
     AppendActionLogToFile_(ActionLogJson);
 
     UE_LOG(LogTerraGameplay, Log, TEXT("[Gameplay][G7] %s"), *ActionLogJson);
@@ -1056,8 +1192,14 @@ bool FTerraGameplayContainer::TrySelectPieceAtCell_(int32 CellId, TArray<int32>&
         return false;
     }
 
+    if (InteractionPhase == ETerraGameplayInteractionPhase::Idle)
+    {
+        PushUndoSnapshot_();
+    }
+
     ClearGameplayHighlights_(OutDirtyCellIds);
 
+    PendingCaptureEntriesByPieceId.Reset();
     PendingCapturePieceIds.Reset();
     PendingCaptureCellIds.Reset();
     ActionTargetCellIdToCaptureCellIds.Reset();
@@ -1087,6 +1229,8 @@ bool FTerraGameplayContainer::TryMoveSelectedPieceToOrdinaryTarget_(int32 Target
     {
         return false;
     }
+
+    PushUndoSnapshot_();
 
     const int32 FromCellId = Piece->CellId;
     const bool bHasPendingCaptures = HasCapturePreviewForActionTarget_(TargetCellId);
@@ -1127,6 +1271,8 @@ bool FTerraGameplayContainer::TryJumpSelectedPieceTo_(int32 TargetCellId, TArray
         return false;
     }
 
+    PushUndoSnapshot_();
+
     const int32 FromCellId = Piece->CellId;
 
     ClearGameplayHighlights_(OutDirtyCellIds);
@@ -1166,19 +1312,17 @@ bool FTerraGameplayContainer::TryEndTurnOnSelectedCell_(int32 CellId, TArray<int
     const int32 ActionTurnIndex = TurnIndex;
     const int32 ActionPieceId = Piece->PieceId;
     const TArray<int32> ActionPathCellIds = CurrentActionPathCellIds;
-    TArray<int32> CapturedPieceIds = PendingCapturePieceIds.Array();
-    CapturedPieceIds.Sort();
+    TArray<FTerraGameplayCaptureEntry> CaptureEntries = GetSortedPendingCaptureEntries_();
 
     ClearGameplayHighlights_(OutDirtyCellIds);
     if (InteractionPhase == ETerraGameplayInteractionPhase::PieceJumpingCanContinue)
     {
         RebuildPendingCapturesForSelectedPieceCell_(OutDirtyCellIds);
-        CapturedPieceIds = PendingCapturePieceIds.Array();
-        CapturedPieceIds.Sort();
+        CaptureEntries = GetSortedPendingCaptureEntries_();
     }
     const int32 CaptureCount = PendingCapturePieceIds.Num();
     ResolvePendingCaptures_(OutDirtyCellIds);
-    EmitActionLog_(ActionTurnIndex, EndedFactionId, ActionPieceId, ActionPathCellIds, CapturedPieceIds);
+    EmitActionLog_(ActionTurnIndex, EndedFactionId, ActionPieceId, ActionPathCellIds, CaptureEntries);
     ClearGameplayHighlights_(OutDirtyCellIds);
     AddDirtyCell_(CellId, OutDirtyCellIds);
 
@@ -1188,6 +1332,7 @@ bool FTerraGameplayContainer::TryEndTurnOnSelectedCell_(int32 CellId, TArray<int
     CurrentActionPathCellIds.Reset();
     ActionTargetCellIdToCaptureCellIds.Reset();
     InteractionPhase = ETerraGameplayInteractionPhase::Idle;
+    ClearUndoSnapshots_();
     FinalizeTurnAfterResolution_();
 
     UE_LOG(LogTerraGameplay, Log,

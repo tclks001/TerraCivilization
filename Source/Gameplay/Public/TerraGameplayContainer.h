@@ -6,6 +6,24 @@
 class GAMEPLAY_API FTerraGameplayContainer
 {
 public:
+    struct FInteractionUndoSnapshot
+    {
+        TArray<FTerraGameplayPieceState> Pieces;
+        TArray<int32> CellToPieceId;
+        TMap<int32, FTerraGameplayCellHighlight> GameplayHighlights;
+        TSet<int32> OrdinaryMoveTargetCellIds;
+        TSet<int32> JumpTargetCellIds;
+        TMap<int32, TSet<int32>> ActionTargetCellIdToCaptureCellIds;
+        TMap<int32, FTerraGameplayCaptureEntry> PendingCaptureEntriesByPieceId;
+        TSet<int32> PendingCapturePieceIds;
+        TSet<int32> PendingCaptureCellIds;
+        TArray<int32> CurrentActionPathCellIds;
+        int32 SelectedPieceId = INDEX_NONE;
+        int32 SelectedPieceStartCellId = INDEX_NONE;
+        int32 LastJumpStartCellId = INDEX_NONE;
+        ETerraGameplayInteractionPhase InteractionPhase = ETerraGameplayInteractionPhase::Idle;
+    };
+
     void Initialize(const TArray<FTerraGameplayCellState>& InCells);
 
     bool IsInitialized() const { return bInitialized; }
@@ -17,6 +35,7 @@ public:
     int32 GetWinningFactionId() const { return WinningFactionId; }
 
     bool HandleCellClick(int32 CellId, TArray<int32>& OutDirtyCellIds);
+    bool UndoCurrentInteraction(TArray<int32>& OutDirtyCellIds);
     void SetDebugKeepSameFactionOnEndTurn(bool bInKeepSameFaction) { bDebugKeepSameFactionOnEndTurn = bInKeepSameFaction; }
     bool GetHighlightForCell(int32 CellId, FTerraGameplayCellHighlight& OutHighlight) const;
     int32 GetCurrentFactionBaseCellId() const;
@@ -51,6 +70,7 @@ private:
     bool StepForwardBranches_(int32 PrevCellId, int32 CurCellId, TArray<int32>& OutNextCellIds) const;
     void CollectOrdinaryMoveTargets_(const FTerraGameplayPieceState& Piece, TSet<int32>& OutTargetCellIds) const;
     void CollectJumpTargets_(const FTerraGameplayPieceState& Piece, TSet<int32>& OutTargetCellIds) const;
+    void CollectCaptureEntriesAfterHypotheticalMove_(const FTerraGameplayPieceState& Piece, int32 TargetCellId, TMap<int32, FTerraGameplayCaptureEntry>& OutCaptureEntriesByCellId) const;
     void CollectCaptureCellsAfterHypotheticalMove_(const FTerraGameplayPieceState& Piece, int32 TargetCellId, TSet<int32>& OutCaptureCellIds) const;
     void RebuildActionTargetCapturePreviews_(TArray<int32>& OutDirtyCellIds);
     bool HasCapturePreviewForActionTarget_(int32 ActionTargetCellId) const;
@@ -61,9 +81,12 @@ private:
     void EvaluateWinStateAfterCaptures_();
     void FinalizeTurnAfterResolution_();
     void InitializeActionLogFilePath_();
-    FString BuildActionLogJson_(int32 ActionTurnIndex, int32 PlayerId, int32 PieceId, const TArray<int32>& PathCellIds, const TArray<int32>& CapturedPieceIds) const;
+    void PushUndoSnapshot_();
+    void ClearUndoSnapshots_();
+    TArray<FTerraGameplayCaptureEntry> GetSortedPendingCaptureEntries_() const;
+    FString BuildActionLogJson_(int32 ActionTurnIndex, int32 PlayerId, int32 PieceId, const TArray<int32>& PathCellIds, const TArray<FTerraGameplayCaptureEntry>& CaptureEntries) const;
     void AppendActionLogToFile_(const FString& ActionLogJson) const;
-    void EmitActionLog_(int32 ActionTurnIndex, int32 PlayerId, int32 PieceId, const TArray<int32>& PathCellIds, const TArray<int32>& CapturedPieceIds) const;
+    void EmitActionLog_(int32 ActionTurnIndex, int32 PlayerId, int32 PieceId, const TArray<int32>& PathCellIds, const TArray<FTerraGameplayCaptureEntry>& CaptureEntries) const;
 
     bool TrySelectPieceAtCell_(int32 CellId, TArray<int32>& OutDirtyCellIds);
     bool TryMoveSelectedPieceToOrdinaryTarget_(int32 TargetCellId, TArray<int32>& OutDirtyCellIds);
@@ -87,12 +110,12 @@ private:
     TSet<int32> OrdinaryMoveTargetCellIds;
     TSet<int32> JumpTargetCellIds;
     TMap<int32, TSet<int32>> ActionTargetCellIdToCaptureCellIds;
+    TMap<int32, FTerraGameplayCaptureEntry> PendingCaptureEntriesByPieceId;
     TSet<int32> PendingCapturePieceIds;
     TSet<int32> PendingCaptureCellIds;
 
     bool bDebugKeepSameFactionOnEndTurn = false;
     bool bMatchEnded = false;
-
     int32 CurrentFactionId = INDEX_NONE;
     int32 TurnIndex = 0;
     int32 WinningFactionId = INDEX_NONE;
@@ -101,6 +124,7 @@ private:
     int32 LastJumpStartCellId = INDEX_NONE;
     FString ActionLogFilePath;
     TArray<int32> CurrentActionPathCellIds;
+    TArray<FInteractionUndoSnapshot> InteractionUndoSnapshots;
     ETerraGameplayInteractionPhase InteractionPhase = ETerraGameplayInteractionPhase::Idle;
 };
 

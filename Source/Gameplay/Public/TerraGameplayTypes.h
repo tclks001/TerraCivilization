@@ -105,3 +105,21 @@ struct GAMEPLAY_API FTerraGameplayCellHighlight
     }
 };
 
+USTRUCT(BlueprintType)
+struct GAMEPLAY_API FTerraGameplayCaptureEntry
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    int32 CapturedPieceId = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    int32 CapturedCellId = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    int32 AttackerPieceId = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    int32 VanguardPieceId = INDEX_NONE;
+};
+

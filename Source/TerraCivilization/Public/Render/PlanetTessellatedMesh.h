@@ -472,6 +472,9 @@ public:
     /** 输入层 click 命中 HISM 时调用；成功处理返回 true。 */
     bool HandleHISMClickHit(const FHitResult& Hit);
 
+    /** 输入层右键撤销当前未提交行动时调用；成功处理返回 true。 */
+    bool HandleHISMUndo();
+
     /** 鼠标离开 HISM 瓦片时调用，只清 hover，不清 select。 */
     void ClearHISMHover();
 

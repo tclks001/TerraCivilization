@@ -20,6 +20,8 @@
    - `pieceId`
    - `pathCellIds`
    - `capturedPieceIds`
+   - `attackerPieceIds`
+   - `vanguardPieceIds`
 
 3. **完整记录行动路径**
    - `pathCellIds[0]` 是行动起点。
@@ -63,7 +65,9 @@ G7 中“一次行动”定义为：
   "playerId": 3,
   "pieceId": 41,
   "pathCellIds": [128, 137, 145],
-  "capturedPieceIds": [77, 92]
+  "capturedPieceIds": [77, 92],
+  "attackerPieceIds": [41, 12],
+  "vanguardPieceIds": [12, 41]
 }
 ```
 
@@ -76,6 +80,15 @@ G7 中“一次行动”定义为：
 | `pieceId` | 执行动作的棋子 ID |
 | `pathCellIds` | 本次行动完整路径；首项为起点，末项为终点，中间为所有经过落点 |
 | `capturedPieceIds` | 本次行动最终结算吃掉的棋子 ID 列表；无吃子时为空数组 |
+| `attackerPieceIds` | 与 `capturedPieceIds` 等长；每一项是对应吃子阵型里的主攻棋子 ID |
+| `vanguardPieceIds` | 与 `capturedPieceIds` 等长；每一项是对应吃子阵型里的先锋棋子 ID |
+
+数组对齐规则：
+
+- `capturedPieceIds[i]` 被 `attackerPieceIds[i]` 与 `vanguardPieceIds[i]` 共同吃掉。
+- 基础二吃一 `A A B` 中，距离 `B` 两格的 `A` 是主攻，距离 `B` 一格的 `A` 是先锋。
+- 弓兵远程 `A' A - B` / `A' A - - B` 中，弓兵 `A'` 是主攻，前方本方棋子 `A` 是先锋。
+- 若一个敌方棋子被多个合法阵型同时命中，日志只记录其中一个稳定归因；吃子目标仍只结算一次。
 
 ---
 
@@ -90,6 +103,7 @@ G7 中“一次行动”定义为：
    - SelectedPieceId
    - CurrentActionPathCellIds
    - PendingCapturePieceIds
+   - PendingCaptureEntriesByPieceId
 2. 结算吃子
 3. 输出一条 JSON 日志
 4. 再执行回合推进 / 终局收尾
@@ -99,6 +113,7 @@ G7 中“一次行动”定义为：
 
 - 记录到的是“真实结束路径”。
 - `capturedPieceIds` 与实际结算使用的是同一份待吃集合。
+- `attackerPieceIds` / `vanguardPieceIds` 与结算前锁定的吃子归因一致。
 - 日志所属 `turnIndex` 不会被 `AdvanceTurn_()` 提前加 1。
 
 ---
@@ -127,9 +142,10 @@ G7 继续保持 `FTerraGameplayContainer` 内聚实现，只新增最小状态�
 | 名称 | 职责 |
 | --- | --- |
 | `CurrentActionPathCellIds` | 暂存当前行动的完整路径 |
+| `PendingCaptureEntriesByPieceId` | 暂存当前节点待结算吃子的目标、主攻、先锋归因 |
 | `ActionLogFilePath` | 暂存当前对局的日志文件绝对路径 |
 | `InitializeActionLogFilePath_` | 在本局初始化时生成一次时间戳日志文件名 |
-| `BuildActionLogJson_` | 把一次行动的最小字段序列化为 JSON 字符串 |
+| `BuildActionLogJson_` | 把一次行动的路径、吃子目标与吃子归因序列化为 JSON 字符串 |
 | `AppendActionLogToFile_` | 把 JSON 字符串按一行追加到当前对局日志文件 |
 | `EmitActionLog_` | 同时做文件输出与 `UE_LOG` 输出 |
 
@@ -198,7 +214,8 @@ CurrentActionPathCellIds 追加本次跳跃落点
 ### 8.3 吃子
 
 - 若本次行动吃掉多个棋子，`capturedPieceIds` 按数组输出全部 ID。
-- 若没有吃子，输出空数组 `[]`。
+- `attackerPieceIds` 与 `vanguardPieceIds` 和 `capturedPieceIds` 等长，索引一一对应。
+- 若没有吃子，三个数组都输出空数组 `[]`。
 
 ### 8.4 分局日志文件
 
