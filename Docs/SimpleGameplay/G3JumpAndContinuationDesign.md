@@ -109,7 +109,7 @@ G3 后同一个 Cell 可能有以下高亮来源：
 
 - 步兵 / 弓兵可进入平原、森林、山脉。
 - 骑兵不可进入山脉。
-- 军旗不可移动。
+- 主将不可移动。
 
 ### 4.2 标准跳跃
 
@@ -254,3 +254,5 @@ GameplayContainer->SetDebugKeepSameFactionOnEndTurn(bG3DebugKeepSameFactionOnEnd
 
 - 开启 `bG3DebugKeepSameFactionOnEndTurn` 后，结束回合时 `TurnIndex` 增加，但 `CurrentFactionId` 不变。
 - 关闭该选项后，结束回合恢复到下一个存活阵营。
+
+

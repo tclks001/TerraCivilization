@@ -10,7 +10,8 @@ public class Gameplay : ModuleRules
         {
             "Core",
             "CoreUObject",
-            "Engine"
+            "Engine",
+            "Json"
         });
 
         PrivateDependencyModuleNames.AddRange(new string[] { });

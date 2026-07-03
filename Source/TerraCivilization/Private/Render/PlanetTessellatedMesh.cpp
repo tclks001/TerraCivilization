@@ -35,6 +35,7 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Kismet/GameplayStatics.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogPlanetTess, Log, All);
@@ -1664,6 +1665,71 @@ void APlanetTessellatedMesh::FocusCameraOnCurrentFactionBase_()
     FocusCameraOnCell_(GameplayContainer->GetCurrentFactionBaseCellId(), true);
 }
 
+FVector APlanetTessellatedMesh::GetPlanetCenterWorld_() const
+{
+    return GetActorTransform().TransformPosition(FVector::ZeroVector);
+}
+
+bool APlanetTessellatedMesh::SyncOrbitCameraStateFromWorldPosition(const FVector& CameraWorldPosition, float& InOutLongitudeDeg, float& InOutLatitudeDeg, float& InOutHeightOffsetCM) const
+{
+    const FVector PlanetCenterWorld = GetPlanetCenterWorld_();
+    FVector LocalOffset = GetActorTransform().InverseTransformPosition(CameraWorldPosition);
+    const float DistanceFromCenter = LocalOffset.Length();
+    if (DistanceFromCenter <= KINDA_SMALL_NUMBER)
+    {
+        return false;
+    }
+
+    const FVector UnitDir = LocalOffset / DistanceFromCenter;
+    const float LatitudeRad = FMath::Asin(FMath::Clamp(static_cast<float>(UnitDir.Z), -1.0f, 1.0f));
+    const float LongitudeRad = FMath::Atan2(static_cast<float>(UnitDir.Y), static_cast<float>(UnitDir.X));
+
+    InOutLatitudeDeg = FMath::RadiansToDegrees(LatitudeRad);
+    InOutLongitudeDeg = FMath::RadiansToDegrees(LongitudeRad);
+    InOutHeightOffsetCM = DistanceFromCenter - GlobeRadiusCM;
+    return !PlanetCenterWorld.ContainsNaN();
+}
+
+bool APlanetTessellatedMesh::ApplyOrbitCameraState(float LongitudeDeg, float LatitudeDeg, float HeightOffsetCM)
+{
+    UWorld* World = GetWorld();
+    if (!World || !World->IsGameWorld() || !bEnableG8ManualCameraControl)
+    {
+        return false;
+    }
+
+    APlayerController* PlayerController = UGameplayStatics::GetPlayerController(World, 0);
+    if (!PlayerController)
+    {
+        return false;
+    }
+
+    const float LongitudeRad = FMath::DegreesToRadians(LongitudeDeg);
+    const float LatitudeRad = FMath::DegreesToRadians(LatitudeDeg);
+    const float Radius = GlobeRadiusCM + HeightOffsetCM;
+
+    const FVector LocalUnitDir(
+        FMath::Cos(LatitudeRad) * FMath::Cos(LongitudeRad),
+        FMath::Cos(LatitudeRad) * FMath::Sin(LongitudeRad),
+        FMath::Sin(LatitudeRad));
+    const FVector CameraWorldPosition = GetActorTransform().TransformPosition(LocalUnitDir * Radius);
+    const FVector PlanetCenterWorld = GetPlanetCenterWorld_();
+    const FVector LookDirection = PlanetCenterWorld - CameraWorldPosition;
+    if (LookDirection.IsNearlyZero())
+    {
+        return false;
+    }
+
+    const FRotator LookRotation = LookDirection.Rotation();
+    if (AActor* ViewTarget = PlayerController->GetViewTarget())
+    {
+        ViewTarget->SetActorLocation(CameraWorldPosition);
+        ViewTarget->SetActorRotation(LookRotation);
+    }
+    PlayerController->SetControlRotation(LookRotation);
+    return true;
+}
+
 bool APlanetTessellatedMesh::TryResolveHISMHitToCellId(const FHitResult& Hit, int32& OutCellId) const
 {
     OutCellId = INDEX_NONE;
@@ -1847,7 +1913,7 @@ void APlanetTessellatedMesh::RebuildG1DebugPieces_()
 
             switch (Piece.PieceType)
             {
-            case ETerraGameplayPieceType::Flag:
+            case ETerraGameplayPieceType::Commander:
                 DebugPiece.PieceType = ETerraG1DebugPieceType::Base;
                 break;
             case ETerraGameplayPieceType::Cavalry:
@@ -2307,3 +2373,4 @@ void APlanetTessellatedMesh::UpdateHISMHoverCell_(int32 NewCellId)
     WriteHISMHighlightForCell_(NewCellId, false);
     RefreshG4CapturePreviewCellsForActionTarget_(NewCellId, true);
 }
+

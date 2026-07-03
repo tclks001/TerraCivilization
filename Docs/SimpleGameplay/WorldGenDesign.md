@@ -182,7 +182,7 @@ BaseCellIds = all cells where bIsPentagon == true
 每个基地的半径 2 范围就是开局 16 子区域：
 
 ```text
-半径 0：军旗
+半径 0：主将
 半径 1：5 个步兵
 半径 2：5 个骑兵 + 5 个弓兵
 ```
@@ -624,3 +624,5 @@ ETerraSimpleTerrainType GetSimpleTerrainType(int32 CellId) const;
 - 资源分布。
 - 基地周围特殊 Trait。
 - 山脉或森林的阵营平衡优化。
+
+

@@ -21,7 +21,7 @@ G2 只实现最小闭环：
    - Gameplay 高亮输出。
 3. 初始化时沿用 G1 布阵：
    - 12 个五边形作为 12 个阵营基地。
-   - 每阵营 1 军旗、5 步兵、5 骑兵、5 弓兵。
+   - 每阵营 1 主将、5 步兵、5 骑兵、5 弓兵。
 4. 左键点击：
    - 点击当前阵营的可移动棋子：选中它，并把棋子脚下 Cell 高亮为黄色。
    - 已选中棋子时，点击相邻空 Cell：普通移动 1 格，并把新脚下 Cell 高亮为蓝色。
@@ -135,7 +135,7 @@ struct FTerraGameplayCellState
 ```cpp
 enum class ETerraGameplayPieceType : uint8
 {
-    Flag,
+    Commander,
     Infantry,
     Cavalry,
     Archer,
@@ -163,7 +163,7 @@ struct FTerraGameplayFactionState
 {
     int32 FactionId = INDEX_NONE;
     int32 BaseCellId = INDEX_NONE;
-    int32 FlagPieceId = INDEX_NONE;
+    int32 CommanderPieceId = INDEX_NONE;
     bool bAlive = true;
 };
 ```
@@ -185,9 +185,9 @@ TArray<int32> CellToPieceId;
 
 G2 继续沿用 G1 的具体摆放规则，保证视觉验收结果连续：
 
-- 五边形：军旗。
+- 五边形：主将。
 - 五边形周围一圈：步兵。
-- 每个步兵背向军旗的格子：骑兵。
+- 每个步兵背向主将的格子：骑兵。
 - 相邻骑兵之间：弓兵。
 
 初始化输出：
@@ -261,10 +261,10 @@ enum class ETerraGameplayInteractionPhase : uint8
 目标 Cell 与起点相邻
 目标 Cell 为空
 棋子 bCanMove = true
-棋子不是军旗
+棋子不是主将
 ```
 
-G2 暂不实现骑兵山脉限制，因此所有非军旗棋子都可普通移动到相邻空 Cell。
+G2 暂不实现骑兵山脉限制，因此所有非主将棋子都可普通移动到相邻空 Cell。
 
 ### 7.3 PieceMovedCanEndTurn
 
@@ -396,7 +396,7 @@ Output Log 应出现类似：
 
 ### 11.3 选择验收
 
-- PIE 中左键点击当前阵营的非军旗棋子。
+- PIE 中左键点击当前阵营的非主将棋子。
 - 该棋子脚下 Cell 变黄。
 - 点击非本方棋子或空 Cell 不会选中。
 
@@ -424,4 +424,6 @@ G3 起可以在同一个容器中继续扩展：
 - 连跳中的可停下蓝色高亮。
 - 可移动目标绿色高亮。
 - 二吃一与弓兵远程攻击红色高亮。
-- 军旗失败与胜负结算。
+- 主将失败与胜负结算。
+
+

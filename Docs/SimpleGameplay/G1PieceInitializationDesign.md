@@ -15,7 +15,7 @@ G1 的目标是在现有球面 Cell 拓扑上生成 12 个阵营的初始棋子�
 - 找到全部 12 个五边形 Cell。
 - 每个五边形 Cell 作为一个阵营的大本营。
 - 每个阵营显示 16 个调试棋子：
-  - 1 个大本营 / 军旗。
+  - 1 个大本营 / 主将。
   - 5 个步兵。
   - 5 个骑兵。
   - 5 个弓兵。
@@ -30,7 +30,7 @@ G1 的目标是在现有球面 Cell 拓扑上生成 12 个阵营的初始棋子�
 
 | 类型 | 颜色 | 含义 |
 | --- | --- | --- |
-| 大本营 / 军旗 | 红色 | 五边形基地 Cell |
+| 大本营 / 主将 | 红色 | 五边形基地 Cell |
 | 步兵 | 黄色 | 相邻两个骑兵之间的第二圈 Cell |
 | 骑兵 | 蓝色 | 每个弓兵背向基地方向的第二圈 Cell |
 | 弓兵 | 绿色 | 基地周围第一圈 Cell |
@@ -115,7 +115,7 @@ Score = dot(Cell.UnitCenter, normalize(CavalryA.UnitCenter + CavalryB.UnitCenter
 在一个阵营完整生成 16 个棋子的正常情况下，该阵营内相对序号固定为：
 
 ```text
-Flag = 0
+Commander = 0
 Archer = 1,2,3,4,5
 Cavalry = 6,7,8,9,10
 Infantry = 11,12,13,14,15
@@ -130,7 +130,7 @@ FactionPieceBaseId = FactionId * 16
 对应：
 
 ```text
-Flag      = FactionPieceBaseId + 0
+Commander = FactionPieceBaseId + 0
 Archer    = FactionPieceBaseId + 1..5
 Cavalry   = FactionPieceBaseId + 6..10
 Infantry  = FactionPieceBaseId + 11..15
@@ -276,3 +276,5 @@ G1 不实现以下内容：
 - 普通移动、跳跃、连跳。
 - 二吃一、弓兵远程吃子。
 - 回合推进与胜负判定。
+
+

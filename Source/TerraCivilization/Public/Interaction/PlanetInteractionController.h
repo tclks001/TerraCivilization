@@ -7,6 +7,7 @@
 #include "PlanetInteractionController.generated.h"
 
 class APlanetBinder;
+class APlanetTessellatedMesh;
 
 /**
  * APlanetInteractionController
@@ -37,10 +38,28 @@ public:
     TEnumAsByte<ECollisionChannel> HoverTraceChannel = ECC_Visibility;
 
 private:
+    /** G8：是否已经从当前视角同步过手动轨道相机状态。 */
+    bool bG8OrbitCameraInitialized = false;
+
+    /** G8：当前手动轨道相机经度（度）。 */
+    float G8CameraLongitudeDeg = 0.0f;
+
+    /** G8：当前手动轨道相机纬度（度）。 */
+    float G8CameraLatitudeDeg = 0.0f;
+
+    /** G8：当前手动轨道相机离球面高度（cm）。 */
+    float G8CameraHeightOffsetCM = 8000.0f;
+
     /** 在关卡里自动查找的 Binder 缓存。 */
     UPROPERTY(Transient)
     TObjectPtr<APlanetBinder> CachedBinder;
 
     /** 上一帧是否处于 hover 状态，用于 enter/leave 边沿判定。 */
     bool bWasHovering = false;
+
+    /** G8：从当前摄像机位置同步一次轨道相机状态。 */
+    bool InitializeG8OrbitCameraState_(APlanetTessellatedMesh* Tess);
+
+    /** G8：手动球面轨道相机控制。 */
+    void UpdateG8ManualCameraControl_(float DeltaTime, APlanetTessellatedMesh* Tess);
 };

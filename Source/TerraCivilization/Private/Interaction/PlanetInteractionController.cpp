@@ -7,6 +7,8 @@
 
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/DefaultPawn.h"
+#include "Camera/PlayerCameraManager.h"
 #include "InputCoreTypes.h"
 #include "Kismet/GameplayStatics.h"
 
@@ -23,6 +25,11 @@ APlanetInteractionController::APlanetInteractionController()
 void APlanetInteractionController::BeginPlay()
 {
     Super::BeginPlay();
+
+    // G8：关闭引擎默认 Pawn 移动输入。
+    // 否则在纬度已被 clamp 到极区后，继续按 W/S 时虽然 G8 轨道参数不再变化，
+    // 但默认 Pawn 仍会沿前向移动，表现成“高度被偷偷改了”。
+    SetIgnoreMoveInput(true);
 
     // 关卡里只期望存在唯一一个 PlanetBinder。这里做缓存查找，
     // 失败时打日志并保持 CachedBinder 为 null（PlayerTick 会安全跳过）。
@@ -69,6 +76,11 @@ void APlanetInteractionController::PlayerTick(float DeltaTime)
     const bool bHitHost = bHit && Hit.GetActor() == HostActor;
 
     APlanetTessellatedMesh* Tess = CachedBinder->GetTessellatedMesh();
+    if (Tess)
+    {
+        UpdateG8ManualCameraControl_(DeltaTime, Tess);
+    }
+
     const bool bUseHISMHighlightPath = Tess && Tess->bEnableHISMInstanceHighlight;
     const bool bHISMHoverHandled = bHit && Tess && Tess->HandleHISMHoverHit(Hit);
 
@@ -105,4 +117,115 @@ void APlanetInteractionController::PlayerTick(float DeltaTime)
         CachedBinder->OnLeavePlanet();
         bWasHovering = false;
     }
+}
+
+bool APlanetInteractionController::InitializeG8OrbitCameraState_(APlanetTessellatedMesh* Tess)
+{
+    if (!Tess || !Tess->bEnableG8ManualCameraControl)
+    {
+        return false;
+    }
+
+    FVector CameraWorldPosition = FVector::ZeroVector;
+    if (AActor* ViewTarget = GetViewTarget())
+    {
+        CameraWorldPosition = ViewTarget->GetActorLocation();
+    }
+    else if (PlayerCameraManager)
+    {
+        CameraWorldPosition = PlayerCameraManager->GetCameraLocation();
+    }
+    else
+    {
+        return false;
+    }
+
+    if (!Tess->SyncOrbitCameraStateFromWorldPosition(CameraWorldPosition, G8CameraLongitudeDeg, G8CameraLatitudeDeg, G8CameraHeightOffsetCM))
+    {
+        return false;
+    }
+
+    bG8OrbitCameraInitialized = true;
+    return true;
+}
+
+void APlanetInteractionController::UpdateG8ManualCameraControl_(float DeltaTime, APlanetTessellatedMesh* Tess)
+{
+    if (!Tess || !Tess->bEnableG8ManualCameraControl)
+    {
+        return;
+    }
+
+    if (!bG8OrbitCameraInitialized && !InitializeG8OrbitCameraState_(Tess))
+    {
+        return;
+    }
+
+    FVector CameraWorldPosition = FVector::ZeroVector;
+    if (AActor* ViewTarget = GetViewTarget())
+    {
+        CameraWorldPosition = ViewTarget->GetActorLocation();
+    }
+    else if (PlayerCameraManager)
+    {
+        CameraWorldPosition = PlayerCameraManager->GetCameraLocation();
+    }
+
+    float SyncedLongitudeDeg = G8CameraLongitudeDeg;
+    float SyncedLatitudeDeg = G8CameraLatitudeDeg;
+    float SyncedHeightOffsetCM = G8CameraHeightOffsetCM;
+    if (Tess->SyncOrbitCameraStateFromWorldPosition(CameraWorldPosition, SyncedLongitudeDeg, SyncedLatitudeDeg, SyncedHeightOffsetCM))
+    {
+        G8CameraLongitudeDeg = SyncedLongitudeDeg;
+        G8CameraLatitudeDeg = SyncedLatitudeDeg;
+        G8CameraHeightOffsetCM = SyncedHeightOffsetCM;
+    }
+
+    const float OrbitDeltaDeg = Tess->G8CameraOrbitDegreesPerSecond * DeltaTime;
+    bool bCameraChanged = false;
+
+    if (IsInputKeyDown(EKeys::W))
+    {
+        G8CameraLatitudeDeg += OrbitDeltaDeg;
+        bCameraChanged = true;
+    }
+    if (IsInputKeyDown(EKeys::S))
+    {
+        G8CameraLatitudeDeg -= OrbitDeltaDeg;
+        bCameraChanged = true;
+    }
+    if (IsInputKeyDown(EKeys::A))
+    {
+        G8CameraLongitudeDeg += OrbitDeltaDeg;
+        bCameraChanged = true;
+    }
+    if (IsInputKeyDown(EKeys::D))
+    {
+        G8CameraLongitudeDeg -= OrbitDeltaDeg;
+        bCameraChanged = true;
+    }
+    if (WasInputKeyJustPressed(EKeys::MouseScrollUp))
+    {
+        G8CameraHeightOffsetCM -= Tess->G8CameraZoomStepCM;
+        bCameraChanged = true;
+    }
+    if (WasInputKeyJustPressed(EKeys::MouseScrollDown))
+    {
+        G8CameraHeightOffsetCM += Tess->G8CameraZoomStepCM;
+        bCameraChanged = true;
+    }
+
+    if (!bCameraChanged)
+    {
+        return;
+    }
+
+    G8CameraLatitudeDeg = FMath::Clamp(G8CameraLatitudeDeg, -89.0f, 89.0f);
+    G8CameraHeightOffsetCM = FMath::Clamp(
+        G8CameraHeightOffsetCM,
+        Tess->G8CameraMinHeightOffsetCM,
+        FMath::Max(Tess->G8CameraMinHeightOffsetCM, Tess->G8CameraMaxHeightOffsetCM));
+    G8CameraLongitudeDeg = FRotator::NormalizeAxis(G8CameraLongitudeDeg);
+
+    Tess->ApplyOrbitCameraState(G8CameraLongitudeDeg, G8CameraLatitudeDeg, G8CameraHeightOffsetCM);
 }

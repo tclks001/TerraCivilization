@@ -1,4 +1,11 @@
 #include "TerraGameplayContainer.h"
+#include "Dom/JsonObject.h"
+#include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Misc/DateTime.h"
+#include "Policies/CondensedJsonPrintPolicy.h"
+#include "Serialization/JsonSerializer.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogTerraGameplay, Log, All);
 
@@ -14,6 +21,7 @@ void FTerraGameplayContainer::Initialize(const TArray<FTerraGameplayCellState>& 
 {
     Cells = InCells;
     ResetRuntimeState_();
+    InitializeActionLogFilePath_();
     BuildInitialPieces_();
 
     bInitialized = true;
@@ -173,6 +181,8 @@ void FTerraGameplayContainer::ResetRuntimeState_()
     PendingCapturePieceIds.Reset();
     PendingCaptureCellIds.Reset();
     CellToPieceId.Init(INDEX_NONE, Cells.Num());
+    CurrentActionPathCellIds.Reset();
+    ActionLogFilePath.Reset();
 
     CurrentFactionId = INDEX_NONE;
     TurnIndex = 0;
@@ -183,6 +193,15 @@ void FTerraGameplayContainer::ResetRuntimeState_()
     InteractionPhase = ETerraGameplayInteractionPhase::Idle;
     bMatchEnded = false;
     bInitialized = false;
+}
+
+void FTerraGameplayContainer::InitializeActionLogFilePath_()
+{
+    const FString LogDirectory = FPaths::ProjectLogDir();
+    IFileManager::Get().MakeDirectory(*LogDirectory, true);
+
+    const FString Timestamp = FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S"));
+    ActionLogFilePath = FPaths::Combine(LogDirectory, FString::Printf(TEXT("TerraGameplayActionLog_%s.jsonl"), *Timestamp));
 }
 
 void FTerraGameplayContainer::BuildInitialPieces_()
@@ -309,9 +328,9 @@ void FTerraGameplayContainer::BuildInitialPieces_()
             }
         }
 
-        int32 FlagPieceId = INDEX_NONE;
-        AddPieceIfFree_(FactionIndex, BaseCellId, ETerraGameplayPieceType::Flag, FlagPieceId);
-        Faction.FlagPieceId = FlagPieceId;
+        int32 CommanderPieceId = INDEX_NONE;
+        AddPieceIfFree_(FactionIndex, BaseCellId, ETerraGameplayPieceType::Commander, CommanderPieceId);
+        Faction.CommanderPieceId = CommanderPieceId;
 
         for (const int32 ArcherCellId : ArcherCells)
         {
@@ -347,7 +366,7 @@ bool FTerraGameplayContainer::AddPiece_(int32 FactionId, int32 CellId, ETerraGam
     Piece.CellId = CellId;
     Piece.PieceType = PieceType;
     Piece.bAlive = true;
-    Piece.bCanMove = PieceType != ETerraGameplayPieceType::Flag;
+    Piece.bCanMove = PieceType != ETerraGameplayPieceType::Commander;
 
     CellToPieceId[CellId] = Piece.PieceId;
     OutPieceId = Piece.PieceId;
@@ -425,7 +444,7 @@ bool FTerraGameplayContainer::IsPieceSelectable_(const FTerraGameplayPieceState&
 {
     return IsCurrentFactionPiece_(Piece)
         && Piece.bCanMove
-        && Piece.PieceType != ETerraGameplayPieceType::Flag;
+        && Piece.PieceType != ETerraGameplayPieceType::Commander;
 }
 
 bool FTerraGameplayContainer::CanEnterTerrain_(const FTerraGameplayPieceState& Piece, int32 TargetCellId) const
@@ -843,7 +862,7 @@ void FTerraGameplayContainer::ResolvePendingCaptures_(TArray<int32>& OutDirtyCel
             continue;
         }
 
-        if (CapturePiece->PieceType == ETerraGameplayPieceType::Flag)
+        if (CapturePiece->PieceType == ETerraGameplayPieceType::Commander)
         {
             DefeatedFactionIds.Add(CapturePiece->OwnerFactionId);
         }
@@ -952,6 +971,53 @@ void FTerraGameplayContainer::FinalizeTurnAfterResolution_()
     AdvanceTurn_();
 }
 
+FString FTerraGameplayContainer::BuildActionLogJson_(int32 ActionTurnIndex, int32 PlayerId, int32 PieceId, const TArray<int32>& PathCellIds, const TArray<int32>& CapturedPieceIds) const
+{
+    TSharedRef<FJsonObject> RootObject = MakeShared<FJsonObject>();
+    RootObject->SetNumberField(TEXT("turnIndex"), ActionTurnIndex);
+    RootObject->SetNumberField(TEXT("playerId"), PlayerId);
+    RootObject->SetNumberField(TEXT("pieceId"), PieceId);
+
+    TArray<TSharedPtr<FJsonValue>> PathCellJsonValues;
+    PathCellJsonValues.Reserve(PathCellIds.Num());
+    for (const int32 PathCellId : PathCellIds)
+    {
+        PathCellJsonValues.Add(MakeShared<FJsonValueNumber>(PathCellId));
+    }
+    RootObject->SetArrayField(TEXT("pathCellIds"), PathCellJsonValues);
+
+    TArray<TSharedPtr<FJsonValue>> CapturedPieceJsonValues;
+    CapturedPieceJsonValues.Reserve(CapturedPieceIds.Num());
+    for (const int32 CapturedPieceId : CapturedPieceIds)
+    {
+        CapturedPieceJsonValues.Add(MakeShared<FJsonValueNumber>(CapturedPieceId));
+    }
+    RootObject->SetArrayField(TEXT("capturedPieceIds"), CapturedPieceJsonValues);
+
+    FString OutputJson;
+    TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+        TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&OutputJson);
+    FJsonSerializer::Serialize(RootObject, Writer);
+    return OutputJson;
+}
+
+void FTerraGameplayContainer::AppendActionLogToFile_(const FString& ActionLogJson) const
+{
+    const FString FileLine = ActionLogJson + LINE_TERMINATOR;
+    if (!ActionLogFilePath.IsEmpty())
+    {
+        FFileHelper::SaveStringToFile(FileLine, *ActionLogFilePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM, &IFileManager::Get(), FILEWRITE_Append);
+    }
+}
+
+void FTerraGameplayContainer::EmitActionLog_(int32 ActionTurnIndex, int32 PlayerId, int32 PieceId, const TArray<int32>& PathCellIds, const TArray<int32>& CapturedPieceIds) const
+{
+    const FString ActionLogJson = BuildActionLogJson_(ActionTurnIndex, PlayerId, PieceId, PathCellIds, CapturedPieceIds);
+    AppendActionLogToFile_(ActionLogJson);
+
+    UE_LOG(LogTerraGameplay, Log, TEXT("[Gameplay][G7] %s"), *ActionLogJson);
+}
+
 void FTerraGameplayContainer::RefreshSelectedPieceHighlights_(bool bIncludeOrdinaryMoves, TArray<int32>& OutDirtyCellIds)
 {
     const FTerraGameplayPieceState* Piece = GetPiece_(SelectedPieceId);
@@ -997,6 +1063,8 @@ bool FTerraGameplayContainer::TrySelectPieceAtCell_(int32 CellId, TArray<int32>&
     ActionTargetCellIdToCaptureCellIds.Reset();
     SelectedPieceId = PieceId;
     SelectedPieceStartCellId = Piece->CellId;
+    CurrentActionPathCellIds.Reset();
+    CurrentActionPathCellIds.Add(Piece->CellId);
     LastJumpStartCellId = INDEX_NONE;
     InteractionPhase = ETerraGameplayInteractionPhase::PieceSelected;
     RefreshSelectedPieceHighlights_(true, OutDirtyCellIds);
@@ -1030,6 +1098,7 @@ bool FTerraGameplayContainer::TryMoveSelectedPieceToOrdinaryTarget_(int32 Target
     CellToPieceId[FromCellId] = INDEX_NONE;
     CellToPieceId[TargetCellId] = Piece->PieceId;
     Piece->CellId = TargetCellId;
+    CurrentActionPathCellIds.Add(TargetCellId);
     LastJumpStartCellId = INDEX_NONE;
 
     InteractionPhase = ETerraGameplayInteractionPhase::PieceMovedCanEndTurn;
@@ -1067,6 +1136,7 @@ bool FTerraGameplayContainer::TryJumpSelectedPieceTo_(int32 TargetCellId, TArray
     CellToPieceId[FromCellId] = INDEX_NONE;
     CellToPieceId[TargetCellId] = Piece->PieceId;
     Piece->CellId = TargetCellId;
+    CurrentActionPathCellIds.Add(TargetCellId);
     LastJumpStartCellId = FromCellId;
 
     InteractionPhase = ETerraGameplayInteractionPhase::PieceJumpingCanContinue;
@@ -1093,20 +1163,29 @@ bool FTerraGameplayContainer::TryEndTurnOnSelectedCell_(int32 CellId, TArray<int
     }
 
     const int32 EndedFactionId = CurrentFactionId;
+    const int32 ActionTurnIndex = TurnIndex;
+    const int32 ActionPieceId = Piece->PieceId;
+    const TArray<int32> ActionPathCellIds = CurrentActionPathCellIds;
+    TArray<int32> CapturedPieceIds = PendingCapturePieceIds.Array();
+    CapturedPieceIds.Sort();
 
     ClearGameplayHighlights_(OutDirtyCellIds);
     if (InteractionPhase == ETerraGameplayInteractionPhase::PieceJumpingCanContinue)
     {
         RebuildPendingCapturesForSelectedPieceCell_(OutDirtyCellIds);
+        CapturedPieceIds = PendingCapturePieceIds.Array();
+        CapturedPieceIds.Sort();
     }
     const int32 CaptureCount = PendingCapturePieceIds.Num();
     ResolvePendingCaptures_(OutDirtyCellIds);
+    EmitActionLog_(ActionTurnIndex, EndedFactionId, ActionPieceId, ActionPathCellIds, CapturedPieceIds);
     ClearGameplayHighlights_(OutDirtyCellIds);
     AddDirtyCell_(CellId, OutDirtyCellIds);
 
     SelectedPieceId = INDEX_NONE;
     SelectedPieceStartCellId = INDEX_NONE;
     LastJumpStartCellId = INDEX_NONE;
+    CurrentActionPathCellIds.Reset();
     ActionTargetCellIdToCaptureCellIds.Reset();
     InteractionPhase = ETerraGameplayInteractionPhase::Idle;
     FinalizeTurnAfterResolution_();

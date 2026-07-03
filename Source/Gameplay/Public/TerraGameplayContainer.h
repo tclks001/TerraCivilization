@@ -60,6 +60,10 @@ private:
     void EliminateFaction_(int32 FactionId, TArray<int32>& OutDirtyCellIds);
     void EvaluateWinStateAfterCaptures_();
     void FinalizeTurnAfterResolution_();
+    void InitializeActionLogFilePath_();
+    FString BuildActionLogJson_(int32 ActionTurnIndex, int32 PlayerId, int32 PieceId, const TArray<int32>& PathCellIds, const TArray<int32>& CapturedPieceIds) const;
+    void AppendActionLogToFile_(const FString& ActionLogJson) const;
+    void EmitActionLog_(int32 ActionTurnIndex, int32 PlayerId, int32 PieceId, const TArray<int32>& PathCellIds, const TArray<int32>& CapturedPieceIds) const;
 
     bool TrySelectPieceAtCell_(int32 CellId, TArray<int32>& OutDirtyCellIds);
     bool TryMoveSelectedPieceToOrdinaryTarget_(int32 TargetCellId, TArray<int32>& OutDirtyCellIds);
@@ -95,6 +99,8 @@ private:
     int32 SelectedPieceId = INDEX_NONE;
     int32 SelectedPieceStartCellId = INDEX_NONE;
     int32 LastJumpStartCellId = INDEX_NONE;
+    FString ActionLogFilePath;
+    TArray<int32> CurrentActionPathCellIds;
     ETerraGameplayInteractionPhase InteractionPhase = ETerraGameplayInteractionPhase::Idle;
 };
 

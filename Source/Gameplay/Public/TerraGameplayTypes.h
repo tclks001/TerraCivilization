@@ -14,7 +14,7 @@ enum class ETerraGameplayTerrainType : uint8
 UENUM(BlueprintType)
 enum class ETerraGameplayPieceType : uint8
 {
-    Flag UMETA(DisplayName = "Flag"),
+    Commander UMETA(DisplayName = "Commander"),
     Infantry UMETA(DisplayName = "Infantry"),
     Cavalry UMETA(DisplayName = "Cavalry"),
     Archer UMETA(DisplayName = "Archer"),
@@ -82,7 +82,7 @@ struct GAMEPLAY_API FTerraGameplayFactionState
     int32 BaseCellId = INDEX_NONE;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
-    int32 FlagPieceId = INDEX_NONE;
+    int32 CommanderPieceId = INDEX_NONE;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
     bool bAlive = true;
@@ -104,3 +104,4 @@ struct GAMEPLAY_API FTerraGameplayCellHighlight
         return Intensity > KINDA_SMALL_NUMBER;
     }
 };
+

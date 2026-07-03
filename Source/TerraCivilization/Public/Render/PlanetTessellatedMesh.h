@@ -414,6 +414,30 @@ public:
     FLinearColor G4CaptureTargetHoverColor = FLinearColor(1.0f, 0.0f, 0.0f, 1.0f);
 
     //----------------------------------------------------------
+    // SimpleGameplay G8：手动视角轨道控制
+    //----------------------------------------------------------
+
+    /** true：允许 PlayerController 通过 WSAD + 滚轮驱动球面轨道相机。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8")
+    bool bEnableG8ManualCameraControl = true;
+
+    /** G8：每秒经纬度变化速度（度 / 秒）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "1.0", ClampMax = "360.0"))
+    float G8CameraOrbitDegreesPerSecond = 45.0f;
+
+    /** G8：每次滚轮缩放的高度步长（cm）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "10.0", ClampMax = "100000.0"))
+    float G8CameraZoomStepCM = 800.0f;
+
+    /** G8：相机允许的最小离地高度（cm）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "0.0", ClampMax = "100000.0"))
+    float G8CameraMinHeightOffsetCM = 2500.0f;
+
+    /** G8：相机允许的最大离地高度（cm）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "0.0", ClampMax = "200000.0"))
+    float G8CameraMaxHeightOffsetCM = 30000.0f;
+
+    //----------------------------------------------------------
     // 生命周期
     //----------------------------------------------------------
     virtual void OnConstruction(const FTransform& Transform) override;
@@ -557,6 +581,19 @@ private:
 
     /** SimpleGameplay G2.5：回合开始时视角切到当前阵营大本营正上方。 */
     void FocusCameraOnCurrentFactionBase_();
+
+public:
+    /** G8：取球心世界坐标。 */
+    FVector GetPlanetCenterWorld_() const;
+
+    /** G8：取球半径（cm）。 */
+    float GetPlanetRadiusCM_() const { return GlobeRadiusCM; }
+
+    /** G8：把某个世界位置同步成球面轨道参数。 */
+    bool SyncOrbitCameraStateFromWorldPosition(const FVector& CameraWorldPosition, float& InOutLongitudeDeg, float& InOutLatitudeDeg, float& InOutHeightOffsetCM) const;
+
+    /** G8：按球面轨道参数把视角应用到当前 PlayerController / ViewTarget。 */
+    bool ApplyOrbitCameraState(float LongitudeDeg, float LatitudeDeg, float HeightOffsetCM);
 
     /** SimpleGameplay G1/G2：按当前 Gameplay 棋子状态重建调试棋子缓存。 */
     void RebuildG1DebugPieces_();
