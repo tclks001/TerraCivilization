@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Engine/EngineTypes.h"
 #include "GameFramework/Actor.h"
+#include "TerraPiecePresentationTypes.h"
 #include "Templates/UniquePtr.h"
 #include "WorldGenSettings.h"   // T4：UPROPERTY 直接持有 FWorldGenSettings → 完整类型可见
 #include "PlanetTessellatedMesh.generated.h"
@@ -20,6 +21,8 @@ class FWorldGenerator;   // T4：TUniquePtr<FWorldGenerator>，避免在头文�
 class FTerraGameplayContainer;
 class UHierarchicalInstancedStaticMeshComponent;
 class UStaticMesh;
+class USkeletalMesh;
+class UTerraPiecePresentationManager;
 struct FHitResult;
 
 struct FTerraHISMCellInstanceRef
@@ -378,6 +381,50 @@ public:
     float G1DebugPieceHeightOffsetCM = 260.0f;
 
     //----------------------------------------------------------
+    // SimpleGameplay P1：真实棋子模型表现
+    //----------------------------------------------------------
+
+    /** true：PIE / 游戏运行时启用真实棋子 Actor 表现。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    bool bEnableP1PiecePresentation = true;
+
+    /** true：P1 真实棋子启用时隐藏 G1 调试球，避免模型与球重叠。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    bool bHideG1DebugPiecesWhenP1IsActive = true;
+
+    /** P1 棋子模型相对球面的外抬高度（cm）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "10000.0"))
+    float P1PieceRadiusOffsetCM = 260.0f;
+
+    /** P1 所有人物模型统一缩放。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
+    float P1PieceUniformScale = 1.0f;
+
+    /** P1 模型组件相对棋子 Actor 根节点的位置修正。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FVector P1MeshRelativeLocation = FVector::ZeroVector;
+
+    /** P1 模型组件相对棋子 Actor 根节点的旋转修正。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FRotator P1MeshRelativeRotation = FRotator::ZeroRotator;
+
+    /** 主将模型。推荐挂 Content/Animations/Adventurers/Characters/Mage1。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<USkeletalMesh> P1CommanderMesh;
+
+    /** 步兵模型。推荐挂 Content/Animations/Adventurers/Characters/Knight1。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<USkeletalMesh> P1InfantryMesh;
+
+    /** 骑兵占位人物模型。P1 暂不挂马，推荐先挂 Knight1。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<USkeletalMesh> P1CavalryMesh;
+
+    /** 弓兵模型。推荐挂 Content/Animations/Adventurers/Characters/Ranger1。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<USkeletalMesh> P1ArcherMesh;
+
+    //----------------------------------------------------------
     // SimpleGameplay G2.5：视角与当前阵营提示
     //----------------------------------------------------------
 
@@ -585,6 +632,18 @@ private:
     /** SimpleGameplay G2.5：回合开始时视角切到当前阵营大本营正上方。 */
     void FocusCameraOnCurrentFactionBase_();
 
+    /** SimpleGameplay P1：根据当前 Gameplay 快照增量同步真实棋子 Actor。 */
+    void SyncP1PiecePresentation_();
+
+    /** SimpleGameplay P1：清空真实棋子 Actor 表现。 */
+    void ClearP1PiecePresentation_();
+
+    /** SimpleGameplay P1：把 CellId 转为棋子 Actor 的球面世界 Transform。 */
+    bool BuildP1PieceWorldTransform_(int32 CellId, FTransform& OutWorldTransform) const;
+
+    /** SimpleGameplay P1：从 Details 面板资产槽生成表现配置。 */
+    FTerraPieceVisualConfig BuildP1PieceVisualConfig_() const;
+
 public:
     /** G8：取球心世界坐标。 */
     FVector GetPlanetCenterWorld_() const;
@@ -692,6 +751,10 @@ public:
     /** SimpleGameplay：山脉瓦片 HISM 组件。 */
     UPROPERTY(VisibleAnywhere, Category = "PlanetTopology|Tess|HISM Tiles")
     TObjectPtr<UHierarchicalInstancedStaticMeshComponent> MountainTileHISMComp;
+
+    /** SimpleGameplay P1：真实棋子模型表现管理器。 */
+    UPROPERTY(VisibleAnywhere, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UTerraPiecePresentationManager> PiecePresentationManager;
 
     /** HISM 反查：Plain 组件 InstanceIndex -> CellId。运行期缓存，不暴露给 Details 面板。 */
     TArray<int32> PlainInstanceToCellId;

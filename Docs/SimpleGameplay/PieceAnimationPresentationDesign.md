@@ -866,17 +866,22 @@ Content/PiecePresentation/
 
 ### P1：棋子真实模型替换 G1 调试球
 
+详细阶段设计见：[P1PieceAnimationPresentationDesign.md](P1PieceAnimationPresentationDesign.md)。
+
 目标：
 
 - 用真实棋子 actor 替换当前 `DrawDebugSphere`
 - 先不要求完整动画
 - 只要能正确站在各 Cell 上、朝向球面外法线即可
+- 采用增量同步框架维护 `PieceId -> ATerraPieceActor`
+- 在 `APlanetTessellatedMesh` 上暴露主将 / 步兵 / 骑兵 / 弓兵的 SkeletalMesh 资产槽
 
 验收：
 
 - 12 阵营棋子都能正确生成
 - 每个兵种能从外观上区分
 - 主将单独表现
+- 行动或 Undo 后复用既有 Actor 更新位置，不整盘销毁重建
 
 ### P2：基础 locomotion 与跳跃
 

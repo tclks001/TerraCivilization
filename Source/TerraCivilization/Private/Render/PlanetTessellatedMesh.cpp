@@ -5,6 +5,7 @@
 #include "Render/R8RecipeTable.h"
 
 #include "TerraGameplayContainer.h"
+#include "TerraPiecePresentationManager.h"
 
 #include "FSphereTopology.h"
 #include "FCell.h"
@@ -32,6 +33,7 @@
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -101,6 +103,8 @@ APlanetTessellatedMesh::APlanetTessellatedMesh()
     MountainTileHISMComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
     MountainTileHISMComp->SetCollisionObjectType(ECC_WorldStatic);
     MountainTileHISMComp->SetCollisionResponseToAllChannels(ECR_Block);
+
+    PiecePresentationManager = CreateDefaultSubobject<UTerraPiecePresentationManager>(TEXT("PiecePresentationManager"));
 
     PrepareHISMHighlightComponent_(PlainTileHISMComp);
     PrepareHISMHighlightComponent_(ForestTileHISMComp);
@@ -1466,6 +1470,7 @@ void APlanetTessellatedMesh::RebuildGameplay_()
     if (!CellTopology.IsValid() || !Generator.IsValid())
     {
         GameplayContainer.Reset();
+        ClearP1PiecePresentation_();
         G2_5LastHighlightedFactionId = INDEX_NONE;
         G2_5LastCameraFocusedTurnIndex = INDEX_NONE;
         return;
@@ -1480,6 +1485,7 @@ void APlanetTessellatedMesh::RebuildGameplay_()
             GeoCells.Num(),
             NumCells);
         GameplayContainer.Reset();
+        ClearP1PiecePresentation_();
         G2_5LastHighlightedFactionId = INDEX_NONE;
         G2_5LastCameraFocusedTurnIndex = INDEX_NONE;
         return;
@@ -1518,6 +1524,7 @@ void APlanetTessellatedMesh::RebuildGameplay_()
     G2_5LastHighlightedFactionId = GameplayContainer->GetCurrentFactionId();
     G2_5LastCameraFocusedTurnIndex = INDEX_NONE;
     RefreshCurrentFactionPieceHighlights_();
+    SyncP1PiecePresentation_();
 }
 
 void APlanetTessellatedMesh::RefreshGameplayHighlights_(const TArray<int32>& DirtyCellIds)
@@ -1663,6 +1670,119 @@ void APlanetTessellatedMesh::FocusCameraOnCurrentFactionBase_()
     }
 
     FocusCameraOnCell_(GameplayContainer->GetCurrentFactionBaseCellId(), true);
+}
+
+void APlanetTessellatedMesh::SyncP1PiecePresentation_()
+{
+    UWorld* World = GetWorld();
+    if (!World || !World->IsGameWorld() || !bEnableP1PiecePresentation)
+    {
+        ClearP1PiecePresentation_();
+        return;
+    }
+
+    if (!PiecePresentationManager || !GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
+    {
+        ClearP1PiecePresentation_();
+        return;
+    }
+
+    const FTerraPieceVisualConfig VisualConfig = BuildP1PieceVisualConfig_();
+
+    TArray<FTerraPiecePresentationSnapshot> Snapshots;
+    const TArray<FTerraGameplayPieceState>& Pieces = GameplayContainer->GetPieces();
+    Snapshots.Reserve(Pieces.Num());
+
+    int32 MissingMeshCount = 0;
+    for (const FTerraGameplayPieceState& Piece : Pieces)
+    {
+        if (!Piece.bAlive)
+        {
+            continue;
+        }
+
+        FTransform PieceWorldTransform = FTransform::Identity;
+        if (!BuildP1PieceWorldTransform_(Piece.CellId, PieceWorldTransform))
+        {
+            continue;
+        }
+
+        if (!VisualConfig.ResolveMesh(Piece.PieceType))
+        {
+            ++MissingMeshCount;
+        }
+
+        FTerraPiecePresentationSnapshot& Snapshot = Snapshots.AddDefaulted_GetRef();
+        Snapshot.PieceId = Piece.PieceId;
+        Snapshot.OwnerFactionId = Piece.OwnerFactionId;
+        Snapshot.CellId = Piece.CellId;
+        Snapshot.PieceType = Piece.PieceType;
+        Snapshot.WorldTransform = PieceWorldTransform;
+    }
+
+    if (MissingMeshCount > 0)
+    {
+        UE_LOG(LogPlanetTess, Warning,
+            TEXT("[Tess][P1] Piece presentation has %d alive pieces without resolved SkeletalMesh. Check P1 mesh slots on APlanetTessellatedMesh."),
+            MissingMeshCount);
+    }
+
+    PiecePresentationManager->SyncPieces(Snapshots, VisualConfig);
+}
+
+void APlanetTessellatedMesh::ClearP1PiecePresentation_()
+{
+    if (PiecePresentationManager)
+    {
+        PiecePresentationManager->ClearPieces();
+    }
+}
+
+bool APlanetTessellatedMesh::BuildP1PieceWorldTransform_(int32 CellId, FTransform& OutWorldTransform) const
+{
+    if (!CellTopology.IsValid() || !CellTopology->Cells.IsValidIndex(CellId))
+    {
+        return false;
+    }
+
+    const FTransform ActorTransform = GetActorTransform();
+    const FVector LocalUp = CellTopology->Cells[CellId].UnitCenter.GetSafeNormal();
+    if (LocalUp.IsNearlyZero())
+    {
+        return false;
+    }
+
+    FVector LocalForward = FVector::VectorPlaneProject(FVector::ForwardVector, LocalUp).GetSafeNormal();
+    if (LocalForward.IsNearlyZero())
+    {
+        LocalForward = FVector::VectorPlaneProject(FVector::RightVector, LocalUp).GetSafeNormal();
+    }
+    if (LocalForward.IsNearlyZero())
+    {
+        return false;
+    }
+
+    const FVector LocalPosition = LocalUp * (GlobeRadiusCM + FMath::Max(0.0f, P1PieceRadiusOffsetCM));
+    const FVector WorldPosition = ActorTransform.TransformPosition(LocalPosition);
+    const FVector WorldUp = ActorTransform.TransformVectorNoScale(LocalUp).GetSafeNormal();
+    const FVector WorldForward = ActorTransform.TransformVectorNoScale(LocalForward).GetSafeNormal();
+    const FQuat WorldRotation = FRotationMatrix::MakeFromXZ(WorldForward, WorldUp).ToQuat();
+
+    OutWorldTransform = FTransform(WorldRotation, WorldPosition, FVector::OneVector);
+    return true;
+}
+
+FTerraPieceVisualConfig APlanetTessellatedMesh::BuildP1PieceVisualConfig_() const
+{
+    FTerraPieceVisualConfig VisualConfig;
+    VisualConfig.CommanderMesh = P1CommanderMesh.Get() ? P1CommanderMesh.Get() : LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Animations/Adventurers/Characters/Mage1.Mage1"));
+    VisualConfig.InfantryMesh = P1InfantryMesh.Get() ? P1InfantryMesh.Get() : LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Animations/Adventurers/Characters/Knight1.Knight1"));
+    VisualConfig.CavalryMesh = P1CavalryMesh.Get() ? P1CavalryMesh.Get() : LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Animations/Adventurers/Characters/Knight1.Knight1"));
+    VisualConfig.ArcherMesh = P1ArcherMesh.Get() ? P1ArcherMesh.Get() : LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Animations/Adventurers/Characters/Ranger1.Ranger1"));
+    VisualConfig.UniformScale = FMath::Max(P1PieceUniformScale, 0.001f);
+    VisualConfig.MeshRelativeLocation = P1MeshRelativeLocation;
+    VisualConfig.MeshRelativeRotation = P1MeshRelativeRotation;
+    return VisualConfig;
 }
 
 FVector APlanetTessellatedMesh::GetPlanetCenterWorld_() const
@@ -1856,6 +1976,7 @@ bool APlanetTessellatedMesh::HandleHISMClickHit(const FHitResult& Hit)
     }
 
     RebuildG1DebugPieces_();
+    SyncP1PiecePresentation_();
 
     UE_LOG(LogPlanetTess, Log,
         TEXT("[Tess][G2] HISM Click -> Gameplay Cell=%d Instance=%d Component=%s Handled=%d CurrentFaction=%d Turn=%d Phase=%d"),
@@ -1888,6 +2009,7 @@ bool APlanetTessellatedMesh::HandleHISMUndo()
     RefreshCurrentFactionPieceHighlights_();
     RefreshG4CapturePreviewCellsForActionTarget_(HISMCurrentHoverCellId);
     RebuildG1DebugPieces_();
+    SyncP1PiecePresentation_();
 
     UE_LOG(LogPlanetTess, Log,
         TEXT("[Tess][G9] HISM Undo -> CurrentFaction=%d Turn=%d Phase=%d"),
@@ -2177,12 +2299,17 @@ void APlanetTessellatedMesh::RebuildG1DebugPieces_()
 
 void APlanetTessellatedMesh::DrawG1DebugPieces_() const
 {
+    UWorld* World = GetWorld();
+    if (bHideG1DebugPiecesWhenP1IsActive && bEnableP1PiecePresentation && World && World->IsGameWorld())
+    {
+        return;
+    }
+
     if (!bEnableG1DebugPieces || G1DebugPieces.Num() == 0 || !CellTopology.IsValid())
     {
         return;
     }
 
-    UWorld* World = GetWorld();
     if (!World)
     {
         return;
