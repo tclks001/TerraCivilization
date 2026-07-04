@@ -405,7 +405,7 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
     FVector P1MeshRelativeLocation = FVector::ZeroVector;
 
-    /** P1 模型组件相对棋子 Actor 根节点的导入朝向修正。默认 Yaw=90，用于修正当前人物模型“逻辑朝前实际朝右”的资源坐标差异。 */
+    /** P1 模型组件相对棋子 Actor 根节点的导入朝向修正。默认 Yaw=90，用于修正当前人物模型"逻辑朝前实际朝右"的资源坐标差异。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
     FRotator P1MeshRelativeRotation = FRotator(0.0f, 90.0f, 0.0f);
 
@@ -536,6 +536,26 @@ public:
     /** G8：相机允许的最大离地高度（cm）。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "0.0", ClampMax = "200000.0"))
     float G8CameraMaxHeightOffsetCM = 30000.0f;
+
+    /** C3.7：自动倾角插值的最小距离（cm）。低于此距离时倾角固定为 C3AutoTiltAtMinDistanceDeg。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "0.0", ClampMax = "200000.0"))
+    float C3AutoTiltMinDistanceCM = 2500.0f;
+
+    /** C3.7：自动倾角插值的最大距离（cm）。高于此距离时倾角固定为 C3AutoTiltAtMaxDistanceDeg。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "0.0", ClampMax = "200000.0"))
+    float C3AutoTiltMaxDistanceCM = 30000.0f;
+
+    /** C3.7：最小距离时的视线倾角（度）。玩家拉到最近时接近平视地表。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "5.0", ClampMax = "85.0"))
+    float C3AutoTiltAtMinDistanceDeg = 10.0f;
+
+    /** C3.7：最大距离时的视线倾角（度）。玩家拉到最远时接近垂直俯瞰。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "5.0", ClampMax = "85.0"))
+    float C3AutoTiltAtMaxDistanceDeg = 85.0f;
+
+    /** C3：聚焦相机手动模式的 fallback 初始距离（cm）。仅在首次进入手动模式且 Sync 尚未完成时使用。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "0.0", ClampMax = "200000.0"))
+    float C3InitialDistanceToFocusCM = 8000.0f;
 
     //----------------------------------------------------------
     // 生命周期
@@ -706,7 +726,7 @@ private:
     /** SimpleGameplay P2.5：从 Cell 外侧向球心方向射线命中 HISM，以命中点修正棋子高度。 */
     bool TryResolveP2_5PieceHeightFromHISM_(int32 CellId, const FVector& WorldUp, FVector& OutWorldPosition) const;
 
-    /** SimpleGameplay P1/P2：按“背向本阵营主将”规则计算初始棋子朝向。 */
+    /** SimpleGameplay P1/P2：按"背向本阵营主将"规则计算初始棋子朝向。 */
     bool BuildP1PieceWorldTransformForPiece_(const FTerraGameplayPieceState& Piece, const TArray<FTerraGameplayPieceState>& Pieces, FTransform& OutWorldTransform) const;
 
     /** SimpleGameplay P1：从 Details 面板资产槽生成表现配置。 */

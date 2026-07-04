@@ -607,6 +607,42 @@ Gameplay 规则
 - 松开 W/S/A/D 的瞬间与松开前的最后一帧姿态完全一致，且此后保持不动。
 - 与 C4 智能选中聚焦兼容：C3.5 的稳态锁只对 C3 手动状态生效，不影响未来自动镜头 Blend。
 
+### C3.6：Q/E 绕焦点法线旋转视角
+
+阶段稿：[C3_6QERollAroundFocusDesign.md](C3_6QERollAroundFocusDesign.md)。
+
+目标：
+
+- 按下 `Q/E` 让相机绕当前视野中心的球面外法线旋转，玩家从另一个方位看向同一视野中心。
+- 保持 `FocusUnitDir` / `TiltDeg` / `DistanceToFocusCM` 不变。
+- 转向后 WSAD 仍以新视角为参考系（`W` 是屏幕上方方向、`A/D` 是屏幕左右方向），无需玩家心算换算。
+- 语义上等价于只让 C3 内部真值里的 `YawAroundFocusDeg` 加减输入，不新增任何持久状态。
+
+验收：
+
+- 按住 `E`（或 `Q`）时视野中心地形在屏幕正中不动，相机绕焦点在同一水平圆上滑动。
+- 转到任意方位后按 `W`，焦点向新的屏幕上方推进；按 `A/D` 同理。
+- C3 §7、C3.5 §6 原有验收条款仍成立。
+
+### C3.7：自动倾角跟随距离插值
+
+阶段稿：[C3_7AutoTiltFromDistanceDesign.md](C3_7AutoTiltFromDistanceDesign.md)。
+
+目标：
+
+- 取消 C3 手动相机中独立维护的 `TiltDeg` 状态。
+- 改为每帧从 `DistanceToFocusCM` 线性插值派生倾角。
+- 玩家滚轮拉近 → 倾角自动降低（接近平视细节），拉远 → 倾角自动升高（接近俯瞰全局）。
+- 消除 C3 中"无输入即冻结 Tilt"的死参数问题。
+
+验收：
+
+- 拉到最近距离时倾角接近 `C3AutoTiltAtMinDistanceDeg`（默认 10°），构图接近平视。
+- 拉到最远距离时倾角接近 `C3AutoTiltAtMaxDistanceDeg`（默认 85°），构图接近俯瞰。
+- 滚轮缩放中间档位倾角线性变化，无跳变。
+- 缩放不影响 WSAD / Q/E 的原有行为。
+- C3 §7、C3.5 §6、C3.6 §6 原有验收条款仍成立。
+
 ### C4：智能选中聚焦
 
 目标：

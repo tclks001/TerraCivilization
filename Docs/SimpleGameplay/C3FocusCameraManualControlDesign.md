@@ -30,7 +30,7 @@ C3 手动相机内部真值：
 ```text
 FocusUnitDir       : FVector（球面视野中心方向的单位向量，本地坐标）
 DistanceToFocusCM  : float
-TiltDeg            : float
+TiltDeg            : float（由 C3.7 每帧从 DistanceToFocusCM 线性插值自动派生，不再是独立持久状态）
 YawAroundFocusDeg  : float
 ```
 
@@ -292,11 +292,14 @@ C3 在玩家第一次手动输入时，会按 §4.1 从当前相机反推：
 C3 暂不实现：
 
 - 屏幕方向平移（W/S/A/D 之外的键位）。
-- Q/E 绕焦点旋转。
 - 鼠标拖拽。
 - 自动镜头 Blend。
 - 玩家输入打断自动镜头。
 - Tab 棋子导航。
 - **无输入帧的相机稳态**：C3 手动模式下 Apply 只在 W/S/A/D/滚轮任一有输入时执行；无输入帧不主动摆相机。因此若 UE 默认 Pawn / PlayerController 在无输入帧仍在推 `ControlRotation` 或 Pawn 姿态，相机会缓慢漂移，直到玩家再次按下按键才被 Apply "拉回焦点"。**此问题独立留给 [C3_5IdleFrameCameraStabilityDesign.md](C3_5IdleFrameCameraStabilityDesign.md) 阶段解决**，不塞进 C3。
 
-**已从"暂不处理"移除**：极点穿越。C3 用 3D 单位向量作为焦点真值 + Yaw 平行运输后，极点穿越是自然行为，不再是需要单独处理的特殊情况。
+**已从"暂不处理"移除**：
+
+- 极点穿越。C3 用 3D 单位向量作为焦点真值 + Yaw 平行运输后，极点穿越是自然行为，不再是需要单独处理的特殊情况。
+- Q/E 绕焦点旋转。已由 [C3_6QERollAroundFocusDesign.md](C3_6QERollAroundFocusDesign.md) 阶段落地。
+- 独立 Tilt 自由度。已由 [C3_7AutoTiltFromDistanceDesign.md](C3_7AutoTiltFromDistanceDesign.md) 阶段替换为每帧从距离自动插值派生。

@@ -159,12 +159,13 @@ bool APlanetInteractionController::InitializeC3FocusCameraState_(APlanetTessella
         return false;
     }
 
+    float DummyTiltDeg;
     if (!Tess->SyncFocusCameraStateFromView(
         CameraWorldPosition,
         CameraWorldRotation,
         C3FocusUnitDir,
         C3DistanceToFocusCM,
-        C3TiltDeg,
+        DummyTiltDeg,
         C3YawAroundFocusDeg))
     {
         return false;
@@ -200,6 +201,19 @@ void APlanetInteractionController::UpdateC3FocusCameraControl_(float DeltaTime, 
     const float OrbitDeltaDeg = Tess->G8CameraOrbitDegreesPerSecond * DeltaTime;
     float FocusRightDeltaDeg = 0.0f;
     float FocusForwardDeltaDeg = 0.0f;
+
+    // C3.6：先处理 Q/E 绕焦点法线旋转 Yaw，再让 W/S/A/D 用更新后的 Yaw
+    // 派生本帧的切向前进方向。这样"边转视角边前进"是连续的球面运动，
+    // 不会出现 QE 结果延迟一帧才影响 WSAD 参考系的现象。
+    // 详见 Docs/SimpleGameplay/C3_6QERollAroundFocusDesign.md §3。
+    if (IsInputKeyDown(EKeys::E))
+    {
+        C3YawAroundFocusDeg += OrbitDeltaDeg;
+    }
+    if (IsInputKeyDown(EKeys::Q))
+    {
+        C3YawAroundFocusDeg -= OrbitDeltaDeg;
+    }
 
     if (IsInputKeyDown(EKeys::W))
     {
@@ -246,7 +260,16 @@ void APlanetInteractionController::UpdateC3FocusCameraControl_(float DeltaTime, 
         C3DistanceToFocusCM,
         Tess->G8CameraMinHeightOffsetCM,
         FMath::Max(Tess->G8CameraMinHeightOffsetCM, Tess->G8CameraMaxHeightOffsetCM));
-    C3TiltDeg = FMath::Clamp(C3TiltDeg, 5.0f, 85.0f);
+
+    // C3.7：倾角不再独立维护，改为每帧从距离线性插值自动派生。
+    // 详见 Docs/SimpleGameplay/C3_7AutoTiltFromDistanceDesign.md。
+    const float TiltT = (Tess->C3AutoTiltMaxDistanceCM > Tess->C3AutoTiltMinDistanceCM)
+        ? (C3DistanceToFocusCM - Tess->C3AutoTiltMinDistanceCM) / (Tess->C3AutoTiltMaxDistanceCM - Tess->C3AutoTiltMinDistanceCM)
+        : 0.0f;
+    const float C3TiltDeg = FMath::Lerp(
+        Tess->C3AutoTiltAtMinDistanceDeg,
+        Tess->C3AutoTiltAtMaxDistanceDeg,
+        FMath::Clamp(TiltT, 0.0f, 1.0f));
     C3YawAroundFocusDeg = FRotator::NormalizeAxis(C3YawAroundFocusDeg);
     C3FocusUnitDir = C3FocusUnitDir.GetSafeNormal();
 

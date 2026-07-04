@@ -57,9 +57,6 @@ private:
     /** C3：摄像机到球面视野中心的距离（cm）。 */
     float C3DistanceToFocusCM = 8000.0f;
 
-    /** C3：视线中心方向与视野中心地面切平面的夹角（度）。 */
-    float C3TiltDeg = 55.0f;
-
     /**
      * C3：绕视野中心外法线的观察方位（度）。
      * 与 ForwardTangent = cos(Yaw)·North + sin(Yaw)·East 保持同一约定。
