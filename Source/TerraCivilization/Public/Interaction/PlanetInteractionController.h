@@ -38,17 +38,34 @@ public:
     TEnumAsByte<ECollisionChannel> HoverTraceChannel = ECC_Visibility;
 
 private:
-    /** G8：是否已经从当前视角同步过手动轨道相机状态。 */
-    bool bG8OrbitCameraInitialized = false;
+    /** C3：是否已经从当前视角同步过焦点式手动相机状态。 */
+    bool bC3FocusCameraInitialized = false;
 
-    /** G8：当前手动轨道相机经度（度）。 */
-    float G8CameraLongitudeDeg = 0.0f;
+    /**
+     * C3：球面视野中心方向的本地单位向量。这是焦点位置的**真值**。
+     * 采用 3D 单位向量而非经纬度对，是为了让焦点可以平滑穿越南北极点，
+     * 详见 Docs/SimpleGameplay/C3FocusCameraManualControlDesign.md §2。
+     */
+    FVector C3FocusUnitDir = FVector::ForwardVector;
 
-    /** G8：当前手动轨道相机纬度（度）。 */
-    float G8CameraLatitudeDeg = 0.0f;
+    /** C3：球面视野中心经度（度）。仅供调试/显示，从 C3FocusUnitDir 派生。 */
+    float C3FocusLongitudeDeg = 0.0f;
 
-    /** G8：当前手动轨道相机离球面高度（cm）。 */
-    float G8CameraHeightOffsetCM = 8000.0f;
+    /** C3：球面视野中心纬度（度）。仅供调试/显示，从 C3FocusUnitDir 派生。 */
+    float C3FocusLatitudeDeg = 0.0f;
+
+    /** C3：摄像机到球面视野中心的距离（cm）。 */
+    float C3DistanceToFocusCM = 8000.0f;
+
+    /** C3：视线中心方向与视野中心地面切平面的夹角（度）。 */
+    float C3TiltDeg = 55.0f;
+
+    /**
+     * C3：绕视野中心外法线的观察方位（度）。
+     * 与 ForwardTangent = cos(Yaw)·North + sin(Yaw)·East 保持同一约定。
+     * 手动模式初始化后，此值只由 WSAD 输入的 Yaw 平行运输驱动，不再每帧从相机重解。
+     */
+    float C3YawAroundFocusDeg = 0.0f;
 
     /** 在关卡里自动查找的 Binder 缓存。 */
     UPROPERTY(Transient)
@@ -57,9 +74,9 @@ private:
     /** 上一帧是否处于 hover 状态，用于 enter/leave 边沿判定。 */
     bool bWasHovering = false;
 
-    /** G8：从当前摄像机位置同步一次轨道相机状态。 */
-    bool InitializeG8OrbitCameraState_(APlanetTessellatedMesh* Tess);
+    /** C3：从当前摄像机视图同步一次焦点式相机状态。 */
+    bool InitializeC3FocusCameraState_(APlanetTessellatedMesh* Tess);
 
-    /** G8：手动球面轨道相机控制。 */
-    void UpdateG8ManualCameraControl_(float DeltaTime, APlanetTessellatedMesh* Tess);
+    /** C3：焦点式手动球面相机控制。 */
+    void UpdateC3FocusCameraControl_(float DeltaTime, APlanetTessellatedMesh* Tess);
 };

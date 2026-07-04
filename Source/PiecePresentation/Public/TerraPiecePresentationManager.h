@@ -16,7 +16,10 @@ class PIECEPRESENTATION_API UTerraPiecePresentationManager : public UActorCompon
 public:
     UTerraPiecePresentationManager();
 
-    void SyncPieces(const TArray<FTerraPiecePresentationSnapshot>& Snapshots, const FTerraPieceVisualConfig& VisualConfig);
+    void SyncPieces(
+        const TArray<FTerraPiecePresentationSnapshot>& Snapshots,
+        const FTerraPieceVisualConfig& VisualConfig,
+        const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents = TArray<FTerraPiecePresentationMoveEvent>());
     void ClearPieces();
 
     int32 GetPresentedPieceCount() const { return PieceActors.Num(); }

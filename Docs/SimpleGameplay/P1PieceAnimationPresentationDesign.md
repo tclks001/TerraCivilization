@@ -105,7 +105,7 @@ PlanetTopology | Tess | SimpleGameplay P1 Piece Presentation
 | `Piece Radius Offset CM` | 棋子相对球面外抬高度 |
 | `Piece Uniform Scale` | 棋子统一缩放 |
 | `Mesh Relative Location` | 模型相对 Actor 根节点的位置修正 |
-| `Mesh Relative Rotation` | 模型导入朝向不一致时的旋转修正 |
+| `Mesh Relative Rotation` | 模型导入朝向不一致时的旋转修正；当前人物模型默认按 `Yaw=90` 修正 |
 | `bHideG1DebugPiecesWhenP1IsActive` | PIE 中启用 P1 后隐藏旧调试球，避免重叠 |
 
 ---
@@ -149,6 +149,8 @@ Archer Mesh    -> Ranger1
 ```text
 Mesh Relative Rotation
 ```
+
+当前 Adventurers 人物模型存在“逻辑朝前实际朝右”的参考系差异，代码默认把 `P1MeshRelativeRotation` 设为 `Yaw=90`。如果实测方向仍反，可以在 Details 面板中把该值改为 `Yaw=-90` 或其他角度；这只修正模型资源朝向，不改变棋子的逻辑移动方向。
 
 如果模型过大、过小或陷入地表，调整：
 

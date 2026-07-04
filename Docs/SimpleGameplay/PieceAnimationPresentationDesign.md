@@ -569,7 +569,7 @@ GetCellSurfaceWorldPosition_(CellId, RadiusOffsetCM, OutWorldPosition)
 每个棋子都需要：
 
 - `Up` 对齐球面外法线
-- `Forward` 对齐当前移动方向或朝向目标方向
+- `Forward` 按表现动作决定，不再每次快照同步都重置为 Cell 默认方向
 
 因此角色根节点推荐始终做两步：
 
@@ -577,6 +577,23 @@ GetCellSurfaceWorldPosition_(CellId, RadiusOffsetCM, OutWorldPosition)
 1. Up 对齐 Cell.UnitCenter
 2. 再绕 Up 轴旋转到面朝目标方向
 ```
+
+方向规则统一如下：
+
+1. 初始生成时，除主将外，所有模型都面朝“背向本阵营主将”的方向；主将方向任意，使用稳定默认方向即可。
+2. 行走、跳跃或攻击时，模型面向动作方向；当前 P2 的跳跃按移动方向处理。
+3. 受击时，模型面朝受击来源方向。
+4. 动作停止后，模型方向保持在动作结束时的方向；后续静态快照同步不改变方向。
+5. 只有发生新的移动、攻击、受击等动作时才更新方向。
+6. 模型转向使用 `slerp`，避免方向突变。
+
+资源导入朝向修正单独处理，不混入棋子逻辑方向：
+
+- `ATerraPieceActor` 的逻辑约定仍是本地 `+X = Forward`、本地 `+Z = Up`。
+- 当前 Adventurers 人物资源存在“逻辑朝前实际朝右”的模型参考系偏差。
+- 该偏差通过 `APlanetTessellatedMesh::P1MeshRelativeRotation` 修正，默认值为 `Yaw=90`。
+- 调试时只调整 `P1MeshRelativeRotation`，不要改移动、攻击、受击等逻辑朝向计算。
+- 若未来不同兵种或资源包朝向不一致，再把该字段升级为兵种级或资产级配置。
 
 ### 9.3 移动表现
 
@@ -719,7 +736,8 @@ Relocate(FromCell, ToCell, MoveType=Ordinary)
 
 - 播 walk / run
 - 沿球面短弧移动
-- 到达后回 idle
+- 移动中通过 `slerp` 转向行走方向
+- 到达后回 idle，并保持移动结束时的朝向
 
 ### 11.2 跳跃 / 连跳
 
@@ -735,6 +753,7 @@ Relocate(FromCell, ToCell, MoveType=Jump)
 - 空中移动
 - 落地 blend 到 idle 或继续下一跳
 - 若连跳继续，保持动作链不断开
+- 朝向规则与移动一致，面向本段跳跃方向，转向使用 `slerp`
 
 ### 11.3 近战吃子
 
@@ -885,17 +904,37 @@ Content/PiecePresentation/
 
 ### P2：基础 locomotion 与跳跃
 
+详细阶段设计见：[P2PieceAnimationPresentationDesign.md](P2PieceAnimationPresentationDesign.md)。
+
 目标：
 
 - 普通移动播放 walk / run
 - 跳跃 / 连跳播放 jump
 - 棋子移动沿球面插值
+- 本阶段不做 HISM 射线脚底贴地，只验收移动、跳跃和连跳的视觉效果
 
 验收：
 
 - 普通移动不再瞬移
 - 跳跃有起落感
 - 连跳不断态
+
+### P2.5：HISM 碰撞高度修正
+
+详细阶段设计见：[P2_5PieceHISMHeightTraceDesign.md](P2_5PieceHISMHeightTraceDesign.md)。
+
+目标：
+
+- 从角色位置外侧沿球心方向做射线检测。
+- 只使用 HISM 碰撞命中点修正棋子 Actor Transform 的球面高度。
+- 不使用碰撞法线，棋子 Up 仍沿 Cell 球面外法线。
+- `Piece Radius Offset CM` 作为 HISM 命中高度之后的额外外抬微调。
+
+验收：
+
+- 棋子站位高度贴近 HISM 瓦片碰撞面。
+- 调整 `Piece Radius Offset CM` 可在碰撞高度基础上微调模型高度。
+- HISM 未命中或关闭时回退到 P1 固定半径站位。
 
 ### P3：受击、死亡与远程攻击
 

@@ -36,6 +36,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Animation/AnimationAsset.h"
 #include "GameFramework/PlayerController.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Kismet/GameplayStatics.h"
@@ -1669,10 +1670,185 @@ void APlanetTessellatedMesh::FocusCameraOnCurrentFactionBase_()
         return;
     }
 
+    if (bEnableC2TurnStartWarZoneCamera && FocusCameraOnCurrentFactionWarZone_())
+    {
+        return;
+    }
+
     FocusCameraOnCell_(GameplayContainer->GetCurrentFactionBaseCellId(), true);
 }
 
-void APlanetTessellatedMesh::SyncP1PiecePresentation_()
+bool APlanetTessellatedMesh::TryBuildCurrentFactionWarZoneDirection_(FVector& OutLocalWarZoneDir) const
+{
+    if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized() || !CellTopology.IsValid())
+    {
+        return false;
+    }
+
+    const int32 CurrentFactionId = GameplayContainer->GetCurrentFactionId();
+    FVector LocalDirSum = FVector::ZeroVector;
+    int32 AlivePieceCount = 0;
+
+    for (const FTerraGameplayPieceState& Piece : GameplayContainer->GetPieces())
+    {
+        if (!Piece.bAlive
+            || Piece.OwnerFactionId != CurrentFactionId
+            || !CellTopology->Cells.IsValidIndex(Piece.CellId))
+        {
+            continue;
+        }
+
+        LocalDirSum += CellTopology->Cells[Piece.CellId].UnitCenter.GetSafeNormal();
+        ++AlivePieceCount;
+    }
+
+    if (AlivePieceCount <= 0 || LocalDirSum.IsNearlyZero())
+    {
+        return false;
+    }
+
+    OutLocalWarZoneDir = LocalDirSum.GetSafeNormal();
+    return !OutLocalWarZoneDir.IsNearlyZero();
+}
+
+bool APlanetTessellatedMesh::TryBuildCurrentFactionCommanderDirection_(FVector& OutLocalCommanderDir) const
+{
+    if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized() || !CellTopology.IsValid())
+    {
+        return false;
+    }
+
+    const int32 CurrentFactionId = GameplayContainer->GetCurrentFactionId();
+    for (const FTerraGameplayPieceState& Piece : GameplayContainer->GetPieces())
+    {
+        if (Piece.bAlive
+            && Piece.OwnerFactionId == CurrentFactionId
+            && Piece.PieceType == ETerraGameplayPieceType::Commander
+            && CellTopology->Cells.IsValidIndex(Piece.CellId))
+        {
+            OutLocalCommanderDir = CellTopology->Cells[Piece.CellId].UnitCenter.GetSafeNormal();
+            return !OutLocalCommanderDir.IsNearlyZero();
+        }
+    }
+
+    const int32 BaseCellId = GameplayContainer->GetCurrentFactionBaseCellId();
+    if (CellTopology->Cells.IsValidIndex(BaseCellId))
+    {
+        OutLocalCommanderDir = CellTopology->Cells[BaseCellId].UnitCenter.GetSafeNormal();
+        return !OutLocalCommanderDir.IsNearlyZero();
+    }
+
+    return false;
+}
+
+bool APlanetTessellatedMesh::FocusCameraOnCurrentFactionWarZone_()
+{
+    UWorld* World = GetWorld();
+    if (!World || !World->IsGameWorld())
+    {
+        return false;
+    }
+
+    APlayerController* PlayerController = UGameplayStatics::GetPlayerController(World, 0);
+    if (!PlayerController)
+    {
+        return false;
+    }
+
+    FVector LocalWarZoneDir = FVector::ZeroVector;
+    if (!TryBuildCurrentFactionWarZoneDirection_(LocalWarZoneDir))
+    {
+        return false;
+    }
+
+    FVector LocalCommanderDir = FVector::ZeroVector;
+    TryBuildCurrentFactionCommanderDirection_(LocalCommanderDir);
+
+    const FTransform ActorTransform = GetActorTransform();
+    const FVector TargetWorldPosition = ActorTransform.TransformPosition(LocalWarZoneDir * GlobeRadiusCM);
+    const FVector WorldUp = ActorTransform.TransformVectorNoScale(LocalWarZoneDir).GetSafeNormal();
+    if (WorldUp.IsNearlyZero())
+    {
+        return false;
+    }
+
+    FVector LocalForwardHint = FVector::VectorPlaneProject(LocalWarZoneDir - LocalCommanderDir, LocalWarZoneDir).GetSafeNormal();
+    if (LocalForwardHint.IsNearlyZero())
+    {
+        FVector CurrentCameraWorldPosition = FVector::ZeroVector;
+        if (AActor* ViewTarget = PlayerController->GetViewTarget())
+        {
+            CurrentCameraWorldPosition = ViewTarget->GetActorLocation();
+        }
+        else if (PlayerController->PlayerCameraManager)
+        {
+            CurrentCameraWorldPosition = PlayerController->PlayerCameraManager->GetCameraLocation();
+        }
+
+        if (!CurrentCameraWorldPosition.IsNearlyZero())
+        {
+            const FVector LocalCameraDir = ActorTransform.InverseTransformPosition(CurrentCameraWorldPosition).GetSafeNormal();
+            LocalForwardHint = FVector::VectorPlaneProject(LocalWarZoneDir - LocalCameraDir, LocalWarZoneDir).GetSafeNormal();
+        }
+    }
+
+    if (LocalForwardHint.IsNearlyZero())
+    {
+        LocalForwardHint = FVector::VectorPlaneProject(FVector::ForwardVector, LocalWarZoneDir).GetSafeNormal();
+    }
+    if (LocalForwardHint.IsNearlyZero())
+    {
+        LocalForwardHint = FVector::VectorPlaneProject(FVector::RightVector, LocalWarZoneDir).GetSafeNormal();
+    }
+    if (LocalForwardHint.IsNearlyZero())
+    {
+        return false;
+    }
+
+    const FVector WorldForwardHint = ActorTransform.TransformVectorNoScale(LocalForwardHint).GetSafeNormal();
+    if (WorldForwardHint.IsNearlyZero())
+    {
+        return false;
+    }
+
+    const float CameraDistance = FMath::Max(1000.0f, C2TurnStartCameraDistanceCM);
+    const float TiltRad = FMath::DegreesToRadians(FMath::Clamp(C2TurnStartCameraTiltDeg, 5.0f, 85.0f));
+    const float HorizontalDistance = CameraDistance * FMath::Cos(TiltRad);
+    const float VerticalDistance = CameraDistance * FMath::Sin(TiltRad);
+    const FVector CameraWorldPosition = TargetWorldPosition - WorldForwardHint * HorizontalDistance + WorldUp * VerticalDistance;
+
+    const FVector LookDirection = TargetWorldPosition - CameraWorldPosition;
+    if (LookDirection.IsNearlyZero())
+    {
+        return false;
+    }
+
+    const FVector CameraForward = LookDirection.GetSafeNormal();
+    const FRotator LookRotation = FRotationMatrix::MakeFromXZ(CameraForward, WorldUp).Rotator();
+    if (AActor* ViewTarget = PlayerController->GetViewTarget())
+    {
+        ViewTarget->SetActorLocation(CameraWorldPosition);
+        ViewTarget->SetActorRotation(LookRotation);
+    }
+    PlayerController->SetControlRotation(LookRotation);
+
+    UE_LOG(LogPlanetTess, Log,
+        TEXT("[Tess][C2] Focus war zone camera Faction=%d Turn=%d Camera=(%.1f, %.1f, %.1f) Target=(%.1f, %.1f, %.1f) Distance=%.1f Tilt=%.1f"),
+        GameplayContainer.IsValid() ? GameplayContainer->GetCurrentFactionId() : INDEX_NONE,
+        GameplayContainer.IsValid() ? GameplayContainer->GetTurnIndex() : INDEX_NONE,
+        CameraWorldPosition.X,
+        CameraWorldPosition.Y,
+        CameraWorldPosition.Z,
+        TargetWorldPosition.X,
+        TargetWorldPosition.Y,
+        TargetWorldPosition.Z,
+        CameraDistance,
+        C2TurnStartCameraTiltDeg);
+
+    return true;
+}
+
+void APlanetTessellatedMesh::SyncP1PiecePresentation_(const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents)
 {
     UWorld* World = GetWorld();
     if (!World || !World->IsGameWorld() || !bEnableP1PiecePresentation)
@@ -1702,7 +1878,7 @@ void APlanetTessellatedMesh::SyncP1PiecePresentation_()
         }
 
         FTransform PieceWorldTransform = FTransform::Identity;
-        if (!BuildP1PieceWorldTransform_(Piece.CellId, PieceWorldTransform))
+        if (!BuildP1PieceWorldTransformForPiece_(Piece, Pieces, PieceWorldTransform))
         {
             continue;
         }
@@ -1727,7 +1903,7 @@ void APlanetTessellatedMesh::SyncP1PiecePresentation_()
             MissingMeshCount);
     }
 
-    PiecePresentationManager->SyncPieces(Snapshots, VisualConfig);
+    PiecePresentationManager->SyncPieces(Snapshots, VisualConfig, MoveEvents);
 }
 
 void APlanetTessellatedMesh::ClearP1PiecePresentation_()
@@ -1762,13 +1938,266 @@ bool APlanetTessellatedMesh::BuildP1PieceWorldTransform_(int32 CellId, FTransfor
         return false;
     }
 
-    const FVector LocalPosition = LocalUp * (GlobeRadiusCM + FMath::Max(0.0f, P1PieceRadiusOffsetCM));
-    const FVector WorldPosition = ActorTransform.TransformPosition(LocalPosition);
     const FVector WorldUp = ActorTransform.TransformVectorNoScale(LocalUp).GetSafeNormal();
     const FVector WorldForward = ActorTransform.TransformVectorNoScale(LocalForward).GetSafeNormal();
+    if (WorldUp.IsNearlyZero() || WorldForward.IsNearlyZero())
+    {
+        return false;
+    }
+
+    FVector WorldPosition = FVector::ZeroVector;
+    if (!TryResolveP2_5PieceHeightFromHISM_(CellId, WorldUp, WorldPosition))
+    {
+        const FVector LocalPosition = LocalUp * (GlobeRadiusCM + FMath::Max(0.0f, P1PieceRadiusOffsetCM));
+        WorldPosition = ActorTransform.TransformPosition(LocalPosition);
+        if (bDebugP2_5HISMPieceHeightTrace)
+        {
+            const FVector PlanetCenterWorld = GetPlanetCenterWorld_();
+            UE_LOG(LogPlanetTess, Warning,
+                TEXT("[Tess][P2.5] Cell=%d FallbackFixedRadius WorldRadius=%.1f GlobeRadius=%.1f PieceOffset=%.1f"),
+                CellId,
+                FVector::Distance(WorldPosition, PlanetCenterWorld),
+                GlobeRadiusCM,
+                P1PieceRadiusOffsetCM);
+        }
+    }
+
     const FQuat WorldRotation = FRotationMatrix::MakeFromXZ(WorldForward, WorldUp).ToQuat();
 
     OutWorldTransform = FTransform(WorldRotation, WorldPosition, FVector::OneVector);
+    return true;
+}
+
+bool APlanetTessellatedMesh::TryResolveP2_5PieceHeightFromHISM_(int32 CellId, const FVector& WorldUp, FVector& OutWorldPosition) const
+{
+    UWorld* World = GetWorld();
+    auto LogReject = [this, CellId](const TCHAR* Reason)
+    {
+        if (bDebugP2_5HISMPieceHeightTrace)
+        {
+            UE_LOG(LogPlanetTess, Warning, TEXT("[Tess][P2.5] Cell=%d Reject Reason=%s"), CellId, Reason);
+        }
+    };
+
+    if (!World)
+    {
+        LogReject(TEXT("NoWorld"));
+        return false;
+    }
+    if (!bEnableP2_5HISMPieceHeightTrace)
+    {
+        LogReject(TEXT("FeatureDisabled"));
+        return false;
+    }
+    if (!bEnableHISMTileRendering)
+    {
+        LogReject(TEXT("HISMTileRenderingDisabled"));
+        return false;
+    }
+    if (!bEnableHISMTileCollision)
+    {
+        LogReject(TEXT("HISMTileCollisionDisabled"));
+        return false;
+    }
+    if (!CellTopology.IsValid())
+    {
+        LogReject(TEXT("NoCellTopology"));
+        return false;
+    }
+    if (!CellTopology->Cells.IsValidIndex(CellId))
+    {
+        LogReject(TEXT("InvalidCellId"));
+        return false;
+    }
+    if (WorldUp.IsNearlyZero())
+    {
+        LogReject(TEXT("ZeroWorldUp"));
+        return false;
+    }
+
+    if (!PlainTileHISMComp || !ForestTileHISMComp || !MountainTileHISMComp)
+    {
+        LogReject(TEXT("MissingHISMComponents"));
+        return false;
+    }
+
+    const FVector PlanetCenterWorld = GetPlanetCenterWorld_();
+    const FVector TraceDirection = WorldUp.GetSafeNormal();
+    const FVector TraceStart = PlanetCenterWorld + TraceDirection * (GlobeRadiusCM + FMath::Max(P2_5PieceHeightTraceStartOffsetCM, 0.0f));
+    const FVector TraceEnd = PlanetCenterWorld - TraceDirection * FMath::Max(P2_5PieceHeightTracePastCenterOffsetCM, 0.0f);
+
+    FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(TerraPieceHeightTrace), false);
+    QueryParams.bReturnFaceIndex = false;
+    QueryParams.bReturnPhysicalMaterial = false;
+
+    TArray<FHitResult> Hits;
+    if (!World->LineTraceMultiByChannel(Hits, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams))
+    {
+        if (bDebugP2_5HISMPieceHeightTrace)
+        {
+            UE_LOG(LogPlanetTess, Warning,
+                TEXT("[Tess][P2.5] Cell=%d NoTraceHit Start=(%.1f,%.1f,%.1f) End=(%.1f,%.1f,%.1f) StartRadius=%.1f EndRadius=%.1f"),
+                CellId,
+                TraceStart.X, TraceStart.Y, TraceStart.Z,
+                TraceEnd.X, TraceEnd.Y, TraceEnd.Z,
+                FVector::Distance(TraceStart, PlanetCenterWorld),
+                FVector::Distance(TraceEnd, PlanetCenterWorld));
+        }
+        return false;
+    }
+
+    const FHitResult* FirstHISMHit = nullptr;
+    const FHitResult* CurrentCellHit = nullptr;
+    int32 HISMHitCount = 0;
+
+    for (int32 HitIndex = 0; HitIndex < Hits.Num(); ++HitIndex)
+    {
+        const FHitResult& Hit = Hits[HitIndex];
+        UPrimitiveComponent* HitComp = Hit.GetComponent();
+        if (HitComp != PlainTileHISMComp
+            && HitComp != ForestTileHISMComp
+            && HitComp != MountainTileHISMComp)
+        {
+            if (bDebugP2_5HISMPieceHeightTrace)
+            {
+                UE_LOG(LogPlanetTess, Log,
+                    TEXT("[Tess][P2.5] Cell=%d Hit[%d/%d] NonHISM Component=%s Item=%d Distance=%.1f ImpactRadius=%.1f"),
+                    CellId,
+                    HitIndex,
+                    Hits.Num(),
+                    *GetNameSafe(HitComp),
+                    Hit.Item,
+                    Hit.Distance,
+                    FVector::Distance(Hit.ImpactPoint, PlanetCenterWorld));
+            }
+            continue;
+        }
+
+        ++HISMHitCount;
+        if (!FirstHISMHit)
+        {
+            FirstHISMHit = &Hit;
+        }
+
+        int32 HitCellId = INDEX_NONE;
+        const bool bResolvedCellId = TryResolveHISMHitToCellId(Hit, HitCellId);
+        if (bDebugP2_5HISMPieceHeightTrace)
+        {
+            UE_LOG(LogPlanetTess, Warning,
+                TEXT("[Tess][P2.5] Cell=%d Hit[%d/%d] HISM Component=%s Item=%d Resolved=%d HitCell=%d WantedCell=%d Distance=%.1f ImpactRadius=%.1f Impact=(%.1f,%.1f,%.1f)"),
+                CellId,
+                HitIndex,
+                Hits.Num(),
+                *GetNameSafe(HitComp),
+                Hit.Item,
+                bResolvedCellId ? 1 : 0,
+                HitCellId,
+                CellId,
+                Hit.Distance,
+                FVector::Distance(Hit.ImpactPoint, PlanetCenterWorld),
+                Hit.ImpactPoint.X,
+                Hit.ImpactPoint.Y,
+                Hit.ImpactPoint.Z);
+        }
+
+        if (bResolvedCellId && HitCellId == CellId)
+        {
+            CurrentCellHit = &Hit;
+            break;
+        }
+    }
+
+    const FHitResult* SelectedHit = CurrentCellHit ? CurrentCellHit : FirstHISMHit;
+    if (!SelectedHit)
+    {
+        if (bDebugP2_5HISMPieceHeightTrace)
+        {
+            UE_LOG(LogPlanetTess, Warning,
+                TEXT("[Tess][P2.5] Cell=%d NoHISMHit TotalHits=%d HISMHits=%d StartRadius=%.1f EndRadius=%.1f"),
+                CellId,
+                Hits.Num(),
+                HISMHitCount,
+                FVector::Distance(TraceStart, PlanetCenterWorld),
+                FVector::Distance(TraceEnd, PlanetCenterWorld));
+        }
+        return false;
+    }
+
+    OutWorldPosition = SelectedHit->ImpactPoint + TraceDirection * FMath::Max(P1PieceRadiusOffsetCM, 0.0f);
+    if (bDebugP2_5HISMPieceHeightTrace)
+    {
+        UE_LOG(LogPlanetTess, Warning,
+            TEXT("[Tess][P2.5] Cell=%d UseHit Mode=%s Component=%s Item=%d ImpactRadius=%.1f FinalRadius=%.1f PieceOffset=%.1f TotalHits=%d HISMHits=%d"),
+            CellId,
+            CurrentCellHit ? TEXT("CurrentCell") : TEXT("FirstHISMFallback"),
+            *GetNameSafe(SelectedHit->GetComponent()),
+            SelectedHit->Item,
+            FVector::Distance(SelectedHit->ImpactPoint, PlanetCenterWorld),
+            FVector::Distance(OutWorldPosition, PlanetCenterWorld),
+            P1PieceRadiusOffsetCM,
+            Hits.Num(),
+            HISMHitCount);
+    }
+    return true;
+}
+
+bool APlanetTessellatedMesh::BuildP1PieceWorldTransformForPiece_(
+    const FTerraGameplayPieceState& Piece,
+    const TArray<FTerraGameplayPieceState>& Pieces,
+    FTransform& OutWorldTransform) const
+{
+    if (!BuildP1PieceWorldTransform_(Piece.CellId, OutWorldTransform))
+    {
+        return false;
+    }
+
+    if (Piece.PieceType == ETerraGameplayPieceType::Commander
+        || Piece.OwnerFactionId == INDEX_NONE
+        || Piece.CellId == INDEX_NONE
+        || !CellTopology.IsValid()
+        || !CellTopology->Cells.IsValidIndex(Piece.CellId))
+    {
+        return true;
+    }
+
+    const FTerraGameplayPieceState* CommanderPiece = nullptr;
+    for (const FTerraGameplayPieceState& CandidatePiece : Pieces)
+    {
+        if (CandidatePiece.bAlive
+            && CandidatePiece.OwnerFactionId == Piece.OwnerFactionId
+            && CandidatePiece.PieceType == ETerraGameplayPieceType::Commander)
+        {
+            CommanderPiece = &CandidatePiece;
+            break;
+        }
+    }
+
+    if (!CommanderPiece
+        || CommanderPiece->CellId == INDEX_NONE
+        || CommanderPiece->CellId == Piece.CellId
+        || !CellTopology->Cells.IsValidIndex(CommanderPiece->CellId))
+    {
+        return true;
+    }
+
+    const FTransform ActorTransform = GetActorTransform();
+    const FVector LocalUp = CellTopology->Cells[Piece.CellId].UnitCenter.GetSafeNormal();
+    const FVector CommanderLocalDir = CellTopology->Cells[CommanderPiece->CellId].UnitCenter.GetSafeNormal();
+    const FVector PieceLocalDir = CellTopology->Cells[Piece.CellId].UnitCenter.GetSafeNormal();
+    FVector LocalForward = FVector::VectorPlaneProject(PieceLocalDir - CommanderLocalDir, LocalUp).GetSafeNormal();
+    if (LocalForward.IsNearlyZero())
+    {
+        return true;
+    }
+
+    const FVector WorldUp = ActorTransform.TransformVectorNoScale(LocalUp).GetSafeNormal();
+    const FVector WorldForward = ActorTransform.TransformVectorNoScale(LocalForward).GetSafeNormal();
+    if (WorldUp.IsNearlyZero() || WorldForward.IsNearlyZero())
+    {
+        return true;
+    }
+
+    OutWorldTransform.SetRotation(FRotationMatrix::MakeFromXZ(WorldForward, WorldUp).ToQuat());
     return true;
 }
 
@@ -1782,6 +2211,12 @@ FTerraPieceVisualConfig APlanetTessellatedMesh::BuildP1PieceVisualConfig_() cons
     VisualConfig.UniformScale = FMath::Max(P1PieceUniformScale, 0.001f);
     VisualConfig.MeshRelativeLocation = P1MeshRelativeLocation;
     VisualConfig.MeshRelativeRotation = P1MeshRelativeRotation;
+    VisualConfig.IdleAnimation = P2IdleAnimation.Get() ? P2IdleAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Adventurers/Animations/Rig_Medium_GeneralIdle_A.Rig_Medium_GeneralIdle_A"));
+    VisualConfig.MoveAnimation = P2MoveAnimation.Get() ? P2MoveAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Adventurers/Animations/Rig_Medium_MovementBasicWalking_A.Rig_Medium_MovementBasicWalking_A"));
+    VisualConfig.JumpAnimation = P2JumpAnimation.Get() ? P2JumpAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Adventurers/Animations/Rig_Medium_MovementBasicJump_Full_Short.Rig_Medium_MovementBasicJump_Full_Short"));
+    VisualConfig.MoveDurationSeconds = FMath::Max(P2MoveDurationSeconds, 0.001f);
+    VisualConfig.JumpDurationSeconds = FMath::Max(P2JumpDurationSeconds, 0.001f);
+    VisualConfig.JumpHeightCM = FMath::Max(P2JumpHeightCM, 0.0f);
     return VisualConfig;
 }
 
@@ -1847,6 +2282,323 @@ bool APlanetTessellatedMesh::ApplyOrbitCameraState(float LongitudeDeg, float Lat
         ViewTarget->SetActorRotation(LookRotation);
     }
     PlayerController->SetControlRotation(LookRotation);
+    return true;
+}
+
+bool APlanetTessellatedMesh::SyncFocusCameraStateFromView(
+    const FVector& CameraWorldPosition,
+    const FRotator& CameraWorldRotation,
+    FVector& OutFocusUnitDir,
+    float& OutDistanceToFocusCM,
+    float& OutTiltDeg,
+    float& OutYawAroundFocusDeg) const
+{
+    const FTransform ActorTransform = GetActorTransform();
+    const FVector LocalCameraPosition = ActorTransform.InverseTransformPosition(CameraWorldPosition);
+    const FVector LocalCameraForward = ActorTransform.InverseTransformVectorNoScale(CameraWorldRotation.Vector()).GetSafeNormal();
+    if (LocalCameraForward.IsNearlyZero())
+    {
+        return false;
+    }
+
+    const float Radius = FMath::Max(1.0f, GlobeRadiusCM);
+    const float B = FVector::DotProduct(LocalCameraPosition, LocalCameraForward);
+    const float C = FVector::DotProduct(LocalCameraPosition, LocalCameraPosition) - Radius * Radius;
+    const float Discriminant = B * B - C;
+
+    FVector LocalFocusPoint = FVector::ZeroVector;
+    if (Discriminant >= 0.0f)
+    {
+        const float SqrtDiscriminant = FMath::Sqrt(Discriminant);
+        const float T0 = -B - SqrtDiscriminant;
+        const float T1 = -B + SqrtDiscriminant;
+        const float T = T0 >= 0.0f ? T0 : T1;
+        if (T >= 0.0f)
+        {
+            LocalFocusPoint = LocalCameraPosition + LocalCameraForward * T;
+        }
+    }
+
+    if (LocalFocusPoint.IsNearlyZero())
+    {
+        const FVector LocalCameraDir = LocalCameraPosition.GetSafeNormal();
+        if (LocalCameraDir.IsNearlyZero())
+        {
+            return false;
+        }
+        LocalFocusPoint = LocalCameraDir * Radius;
+    }
+
+    const FVector LocalFocusDir = LocalFocusPoint.GetSafeNormal();
+    if (LocalFocusDir.IsNearlyZero())
+    {
+        return false;
+    }
+
+    const FVector FocusWorldPosition = ActorTransform.TransformPosition(LocalFocusDir * Radius);
+    const FVector WorldUp = ActorTransform.TransformVectorNoScale(LocalFocusDir).GetSafeNormal();
+    const FVector WorldForward = CameraWorldRotation.Vector().GetSafeNormal();
+    if (WorldUp.IsNearlyZero() || WorldForward.IsNearlyZero())
+    {
+        return false;
+    }
+
+    OutFocusUnitDir = LocalFocusDir;
+    OutDistanceToFocusCM = FMath::Max(1.0f, FVector::Distance(CameraWorldPosition, FocusWorldPosition));
+
+    const float DownDotNormal = FVector::DotProduct(-WorldForward, WorldUp);
+    OutTiltDeg = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(DownDotNormal, -1.0f, 1.0f)));
+    OutTiltDeg = FMath::Clamp(OutTiltDeg, 5.0f, 85.0f);
+
+    // 在焦点局部基 (East, North) 下反解 Yaw。
+    // 与 ApplyFocusCameraState / OffsetFocusCameraStateOnTangent 保持同一约定：
+    //     ForwardHint = cos(Yaw) * North + sin(Yaw) * East
+    const FVector LocalWorldUp = ActorTransform.InverseTransformVectorNoScale(WorldUp).GetSafeNormal();
+    FVector LocalEast = FVector::CrossProduct(FVector::UpVector, LocalWorldUp).GetSafeNormal();
+    if (LocalEast.IsNearlyZero())
+    {
+        LocalEast = FVector::CrossProduct(FVector::RightVector, LocalWorldUp).GetSafeNormal();
+    }
+    if (LocalEast.IsNearlyZero())
+    {
+        return false;
+    }
+    const FVector LocalNorth = FVector::CrossProduct(LocalWorldUp, LocalEast).GetSafeNormal();
+    if (LocalNorth.IsNearlyZero())
+    {
+        return false;
+    }
+
+    const FVector LocalCameraToFocus = (LocalFocusDir * Radius - LocalCameraPosition).GetSafeNormal();
+    const FVector LocalForwardTangent = FVector::VectorPlaneProject(LocalCameraToFocus, LocalFocusDir).GetSafeNormal();
+    if (!LocalForwardTangent.IsNearlyZero())
+    {
+        const float YawRad = FMath::Atan2(
+            static_cast<float>(FVector::DotProduct(LocalForwardTangent, LocalEast)),
+            static_cast<float>(FVector::DotProduct(LocalForwardTangent, LocalNorth)));
+        OutYawAroundFocusDeg = FRotator::NormalizeAxis(FMath::RadiansToDegrees(YawRad));
+    }
+    else
+    {
+        OutYawAroundFocusDeg = 0.0f;
+    }
+
+    return true;
+}
+
+bool APlanetTessellatedMesh::ApplyFocusCameraState(
+    const FVector& FocusUnitDir,
+    float DistanceToFocusCM,
+    float TiltDeg,
+    float YawAroundFocusDeg)
+{
+    UWorld* World = GetWorld();
+    if (!World || !World->IsGameWorld() || !bEnableG8ManualCameraControl)
+    {
+        return false;
+    }
+
+    APlayerController* PlayerController = UGameplayStatics::GetPlayerController(World, 0);
+    if (!PlayerController)
+    {
+        return false;
+    }
+
+    const FVector LocalFocusDir = FocusUnitDir.GetSafeNormal();
+    if (LocalFocusDir.IsNearlyZero())
+    {
+        return false;
+    }
+
+    // 极区退化补救：|FocusDir × WorldZ| 太小时，改用 WorldY 作辅助基。详见设计稿 §3。
+    FVector LocalEast = FVector::CrossProduct(FVector::UpVector, LocalFocusDir).GetSafeNormal();
+    if (LocalEast.IsNearlyZero())
+    {
+        LocalEast = FVector::CrossProduct(FVector::RightVector, LocalFocusDir).GetSafeNormal();
+    }
+    if (LocalEast.IsNearlyZero())
+    {
+        return false;
+    }
+
+    const FVector LocalNorth = FVector::CrossProduct(LocalFocusDir, LocalEast).GetSafeNormal();
+    if (LocalNorth.IsNearlyZero())
+    {
+        return false;
+    }
+
+    const float YawRad = FMath::DegreesToRadians(FRotator::NormalizeAxis(YawAroundFocusDeg));
+    const FVector LocalForwardHint = (LocalNorth * FMath::Cos(YawRad) + LocalEast * FMath::Sin(YawRad)).GetSafeNormal();
+    if (LocalForwardHint.IsNearlyZero())
+    {
+        return false;
+    }
+
+    const float Distance = FMath::Clamp(
+        DistanceToFocusCM,
+        G8CameraMinHeightOffsetCM,
+        FMath::Max(G8CameraMinHeightOffsetCM, G8CameraMaxHeightOffsetCM));
+    const float TiltRad = FMath::DegreesToRadians(FMath::Clamp(TiltDeg, 5.0f, 85.0f));
+    const float HorizontalDistance = Distance * FMath::Cos(TiltRad);
+    const float VerticalDistance = Distance * FMath::Sin(TiltRad);
+
+    const FTransform ActorTransform = GetActorTransform();
+    const FVector FocusWorldPosition = ActorTransform.TransformPosition(LocalFocusDir * GlobeRadiusCM);
+    const FVector WorldUp = ActorTransform.TransformVectorNoScale(LocalFocusDir).GetSafeNormal();
+    const FVector WorldForwardHint = ActorTransform.TransformVectorNoScale(LocalForwardHint).GetSafeNormal();
+    if (WorldUp.IsNearlyZero() || WorldForwardHint.IsNearlyZero())
+    {
+        return false;
+    }
+
+    const FVector CameraWorldPosition = FocusWorldPosition - WorldForwardHint * HorizontalDistance + WorldUp * VerticalDistance;
+    const FVector CameraForward = (FocusWorldPosition - CameraWorldPosition).GetSafeNormal();
+    if (CameraForward.IsNearlyZero())
+    {
+        return false;
+    }
+
+    const FRotator LookRotation = FRotationMatrix::MakeFromXZ(CameraForward, WorldUp).Rotator();
+    if (AActor* ViewTarget = PlayerController->GetViewTarget())
+    {
+        ViewTarget->SetActorLocation(CameraWorldPosition);
+        ViewTarget->SetActorRotation(LookRotation);
+    }
+    PlayerController->SetControlRotation(LookRotation);
+    return true;
+}
+
+bool APlanetTessellatedMesh::OffsetFocusCameraStateOnTangent(
+    float RightDeltaDeg,
+    float ForwardDeltaDeg,
+    FVector& InOutFocusUnitDir,
+    float& InOutYawAroundFocusDeg) const
+{
+    // 输入弧度增量。
+    const float RightDeltaRad = FMath::DegreesToRadians(RightDeltaDeg);
+    const float ForwardDeltaRad = FMath::DegreesToRadians(ForwardDeltaDeg);
+    const float DeltaAngleRadSq = RightDeltaRad * RightDeltaRad + ForwardDeltaRad * ForwardDeltaRad;
+    if (DeltaAngleRadSq <= KINDA_SMALL_NUMBER * KINDA_SMALL_NUMBER)
+    {
+        return true; // 本帧无输入，什么都不做。
+    }
+
+    const FVector FocusUnitDir = InOutFocusUnitDir.GetSafeNormal();
+    if (FocusUnitDir.IsNearlyZero())
+    {
+        return false;
+    }
+
+    // 构造当前焦点的局部切平面基 (East, North)。
+    // 极区退化补救：|FocusDir × WorldZ| 太小时改用 WorldY，见设计稿 §3。
+    FVector LocalEast = FVector::CrossProduct(FVector::UpVector, FocusUnitDir).GetSafeNormal();
+    if (LocalEast.IsNearlyZero())
+    {
+        LocalEast = FVector::CrossProduct(FVector::RightVector, FocusUnitDir).GetSafeNormal();
+    }
+    if (LocalEast.IsNearlyZero())
+    {
+        return false;
+    }
+    const FVector LocalNorth = FVector::CrossProduct(FocusUnitDir, LocalEast).GetSafeNormal();
+    if (LocalNorth.IsNearlyZero())
+    {
+        return false;
+    }
+
+    // 由当前 Yaw 组当前 ForwardTangent 与 RightTangent。
+    // 与 Apply/Sync 完全一致的约定：ForwardTangent = cos(Yaw)·North + sin(Yaw)·East。
+    const float YawRad = FMath::DegreesToRadians(FRotator::NormalizeAxis(InOutYawAroundFocusDeg));
+    const FVector LocalForwardTangent = (LocalNorth * FMath::Cos(YawRad) + LocalEast * FMath::Sin(YawRad)).GetSafeNormal();
+    if (LocalForwardTangent.IsNearlyZero())
+    {
+        return false;
+    }
+    // 屏幕右方向切向：Cross(FocusDir, ForwardTangent)。
+    //   在 Yaw=0 的赤道场景里手工推：Up=(1,0,0), North=(0,0,1), 得
+    //     LocalRightTangent = Cross((1,0,0),(0,0,1)) = (0,-1,0) = -East
+    //   同时 Apply 里 MakeFromXZ(CameraForward=+North, WorldUp=+Up) 摆出的相机
+    //   Actor Y（左手系里的 RightVector = 屏幕右方向）也是 -East。二者一致。
+    //   因此 "D 键 = +RightDeltaDeg = 焦点沿 +LocalRightTangent = -East 走 = 屏幕右滑"
+    //   等价于用户口中的 "D = 视角向右走"。
+    const FVector LocalRightTangent = FVector::CrossProduct(FocusUnitDir, LocalForwardTangent).GetSafeNormal();
+    if (LocalRightTangent.IsNearlyZero())
+    {
+        return false;
+    }
+
+    // 组本帧的瞬时移动切向 T 与旋转弧长 θ。
+    const FVector LocalTangentDelta = LocalRightTangent * RightDeltaRad + LocalForwardTangent * ForwardDeltaRad;
+    const float DeltaAngleRad = LocalTangentDelta.Length();
+    if (DeltaAngleRad <= KINDA_SMALL_NUMBER)
+    {
+        return true;
+    }
+    const FVector LocalMoveTangent = LocalTangentDelta / DeltaAngleRad;
+
+    // 沿测地线推进焦点。等价于绕轴 A = Cross(FocusDir, T) 旋转 θ 弧度。
+    // 因为 |FocusDir| = 1、|T| = 1、FocusDir ⊥ T，故 |A| = 1，可直接作为 Rodrigues 旋转轴。
+    const FVector RotationAxis = FVector::CrossProduct(FocusUnitDir, LocalMoveTangent).GetSafeNormal();
+    if (RotationAxis.IsNearlyZero())
+    {
+        return false;
+    }
+
+    const float CosTheta = FMath::Cos(DeltaAngleRad);
+    const float SinTheta = FMath::Sin(DeltaAngleRad);
+
+    auto Rodrigues = [&](const FVector& V) -> FVector
+    {
+        // R(k, θ)·v = v·cosθ + (k×v)·sinθ + k·(k·v)·(1 - cosθ)
+        const FVector KCrossV = FVector::CrossProduct(RotationAxis, V);
+        const float KDotV = FVector::DotProduct(RotationAxis, V);
+        return V * CosTheta + KCrossV * SinTheta + RotationAxis * (KDotV * (1.0f - CosTheta));
+    };
+
+    const FVector NewFocusUnitDir = Rodrigues(FocusUnitDir).GetSafeNormal();
+    if (NewFocusUnitDir.IsNearlyZero())
+    {
+        return false;
+    }
+
+    // 把 ForwardTangent 沿同一根旋转轴平行运输到新焦点。
+    const FVector NewForwardTangent = Rodrigues(LocalForwardTangent).GetSafeNormal();
+    if (NewForwardTangent.IsNearlyZero())
+    {
+        InOutFocusUnitDir = NewFocusUnitDir;
+        return true; // 焦点更新成功，Yaw 保持原值。
+    }
+
+    // 在新焦点的局部基下反解新 Yaw。
+    FVector NewLocalEast = FVector::CrossProduct(FVector::UpVector, NewFocusUnitDir).GetSafeNormal();
+    if (NewLocalEast.IsNearlyZero())
+    {
+        NewLocalEast = FVector::CrossProduct(FVector::RightVector, NewFocusUnitDir).GetSafeNormal();
+    }
+    if (NewLocalEast.IsNearlyZero())
+    {
+        InOutFocusUnitDir = NewFocusUnitDir;
+        return true;
+    }
+    const FVector NewLocalNorth = FVector::CrossProduct(NewFocusUnitDir, NewLocalEast).GetSafeNormal();
+    if (NewLocalNorth.IsNearlyZero())
+    {
+        InOutFocusUnitDir = NewFocusUnitDir;
+        return true;
+    }
+
+    // NewForwardTangent 理论上已在新切平面内（因为整个 Rodrigues 保持标架正交），
+    // 但受浮点误差影响，先投影到新切平面再反解 atan2 更稳定。
+    const FVector ProjectedForward = FVector::VectorPlaneProject(NewForwardTangent, NewFocusUnitDir).GetSafeNormal();
+    if (!ProjectedForward.IsNearlyZero())
+    {
+        const float NewYawRad = FMath::Atan2(
+            static_cast<float>(FVector::DotProduct(ProjectedForward, NewLocalEast)),
+            static_cast<float>(FVector::DotProduct(ProjectedForward, NewLocalNorth)));
+        InOutYawAroundFocusDeg = FRotator::NormalizeAxis(FMath::RadiansToDegrees(NewYawRad));
+    }
+
+    InOutFocusUnitDir = NewFocusUnitDir;
     return true;
 }
 
@@ -1940,6 +2692,11 @@ bool APlanetTessellatedMesh::HandleHISMClickHit(const FHitResult& Hit)
     const int32 PrevFactionId = GameplayContainer->GetCurrentFactionId();
     const int32 PrevSelectedPieceId = GameplayContainer->GetSelectedPieceId();
     const ETerraGameplayInteractionPhase PrevPhase = GameplayContainer->GetInteractionPhase();
+    int32 PrevSelectedPieceCellId = INDEX_NONE;
+    if (PrevSelectedPieceId != INDEX_NONE)
+    {
+        GameplayContainer->TryGetPieceCellId(PrevSelectedPieceId, PrevSelectedPieceCellId);
+    }
 
     TArray<int32> DirtyCellIds;
     const bool bGameplayHandled = GameplayContainer->HandleCellClick(CellId, DirtyCellIds);
@@ -1949,6 +2706,47 @@ bool APlanetTessellatedMesh::HandleHISMClickHit(const FHitResult& Hit)
     const int32 NewFactionId = GameplayContainer->GetCurrentFactionId();
     const int32 NewSelectedPieceId = GameplayContainer->GetSelectedPieceId();
     const ETerraGameplayInteractionPhase NewPhase = GameplayContainer->GetInteractionPhase();
+    int32 NewSelectedPieceCellId = INDEX_NONE;
+    if (NewSelectedPieceId != INDEX_NONE)
+    {
+        GameplayContainer->TryGetPieceCellId(NewSelectedPieceId, NewSelectedPieceCellId);
+    }
+
+    TArray<FTerraPiecePresentationMoveEvent> P2MoveEvents;
+    if (bGameplayHandled
+        && PrevSelectedPieceId != INDEX_NONE
+        && PrevSelectedPieceId == NewSelectedPieceId
+        && PrevSelectedPieceCellId != INDEX_NONE
+        && NewSelectedPieceCellId != INDEX_NONE
+        && PrevSelectedPieceCellId != NewSelectedPieceCellId)
+    {
+        ETerraPiecePresentationMoveType MoveType = ETerraPiecePresentationMoveType::None;
+        if (NewPhase == ETerraGameplayInteractionPhase::PieceJumpingCanContinue)
+        {
+            MoveType = ETerraPiecePresentationMoveType::Jump;
+        }
+        else if (NewPhase == ETerraGameplayInteractionPhase::PieceMovedCanEndTurn)
+        {
+            MoveType = ETerraPiecePresentationMoveType::Move;
+        }
+
+        if (MoveType != ETerraPiecePresentationMoveType::None)
+        {
+            FTransform FromWorldTransform = FTransform::Identity;
+            FTransform ToWorldTransform = FTransform::Identity;
+            if (BuildP1PieceWorldTransform_(PrevSelectedPieceCellId, FromWorldTransform)
+                && BuildP1PieceWorldTransform_(NewSelectedPieceCellId, ToWorldTransform))
+            {
+                FTerraPiecePresentationMoveEvent& MoveEvent = P2MoveEvents.AddDefaulted_GetRef();
+                MoveEvent.PieceId = NewSelectedPieceId;
+                MoveEvent.FromCellId = PrevSelectedPieceCellId;
+                MoveEvent.ToCellId = NewSelectedPieceCellId;
+                MoveEvent.MoveType = MoveType;
+                MoveEvent.FromWorldTransform = FromWorldTransform;
+                MoveEvent.ToWorldTransform = ToWorldTransform;
+            }
+        }
+    }
 
     if (NewFactionId != PrevFactionId)
     {
@@ -1976,17 +2774,18 @@ bool APlanetTessellatedMesh::HandleHISMClickHit(const FHitResult& Hit)
     }
 
     RebuildG1DebugPieces_();
-    SyncP1PiecePresentation_();
+    SyncP1PiecePresentation_(P2MoveEvents);
 
     UE_LOG(LogPlanetTess, Log,
-        TEXT("[Tess][G2] HISM Click -> Gameplay Cell=%d Instance=%d Component=%s Handled=%d CurrentFaction=%d Turn=%d Phase=%d"),
+        TEXT("[Tess][G2] HISM Click -> Gameplay Cell=%d Instance=%d Component=%s Handled=%d CurrentFaction=%d Turn=%d Phase=%d P2MoveEvents=%d"),
         CellId,
         Hit.Item,
         *GetNameSafe(Hit.GetComponent()),
         bGameplayHandled ? 1 : 0,
         GameplayContainer->GetCurrentFactionId(),
         GameplayContainer->GetTurnIndex(),
-        static_cast<int32>(GameplayContainer->GetInteractionPhase()));
+        static_cast<int32>(GameplayContainer->GetInteractionPhase()),
+        P2MoveEvents.Num());
 
     return true;
 }

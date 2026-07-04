@@ -5,6 +5,7 @@
 #include "TerraPiecePresentationTypes.generated.h"
 
 class USkeletalMesh;
+class UAnimationAsset;
 
 UENUM(BlueprintType)
 enum class ETerraPieceAnimActionState : uint8
@@ -23,6 +24,14 @@ enum class ETerraPiecePresentationStepType : uint8
     Spawn UMETA(DisplayName = "Spawn"),
     Update UMETA(DisplayName = "Update"),
     Remove UMETA(DisplayName = "Remove"),
+};
+
+UENUM(BlueprintType)
+enum class ETerraPiecePresentationMoveType : uint8
+{
+    None UMETA(DisplayName = "None"),
+    Move UMETA(DisplayName = "Move"),
+    Jump UMETA(DisplayName = "Jump"),
 };
 
 USTRUCT(BlueprintType)
@@ -72,6 +81,24 @@ struct PIECEPRESENTATION_API FTerraPieceVisualConfig
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation")
     FRotator MeshRelativeRotation = FRotator::ZeroRotator;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P2")
+    TObjectPtr<UAnimationAsset> IdleAnimation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P2")
+    TObjectPtr<UAnimationAsset> MoveAnimation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P2")
+    TObjectPtr<UAnimationAsset> JumpAnimation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P2", meta = (ClampMin = "0.001"))
+    float MoveDurationSeconds = 0.35f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P2", meta = (ClampMin = "0.001"))
+    float JumpDurationSeconds = 0.55f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P2", meta = (ClampMin = "0.0"))
+    float JumpHeightCM = 650.0f;
+
     USkeletalMesh* ResolveMesh(ETerraGameplayPieceType PieceType) const;
 };
 
@@ -94,6 +121,9 @@ struct PIECEPRESENTATION_API FTerraPiecePresentationSnapshot
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
     FTransform WorldTransform = FTransform::Identity;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    bool bForceFacingFromSnapshot = false;
 };
 
 USTRUCT(BlueprintType)
@@ -106,4 +136,37 @@ struct PIECEPRESENTATION_API FTerraPiecePresentationStep
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
     FTerraPiecePresentationSnapshot Snapshot;
+};
+
+USTRUCT(BlueprintType)
+struct PIECEPRESENTATION_API FTerraPiecePresentationMoveEvent
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    int32 PieceId = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    int32 FromCellId = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    int32 ToCellId = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    ETerraPiecePresentationMoveType MoveType = ETerraPiecePresentationMoveType::None;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    FTransform FromWorldTransform = FTransform::Identity;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    FTransform ToWorldTransform = FTransform::Identity;
+
+    bool IsValidMove() const
+    {
+        return PieceId != INDEX_NONE
+            && FromCellId != INDEX_NONE
+            && ToCellId != INDEX_NONE
+            && FromCellId != ToCellId
+            && MoveType != ETerraPiecePresentationMoveType::None;
+    }
 };

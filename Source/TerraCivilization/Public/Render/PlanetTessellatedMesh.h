@@ -15,6 +15,7 @@ class UMaterialInterface;
 class UMaterialInstanceDynamic;
 class UTexture2D;
 class UTexture2DArray;
+class UAnimationAsset;
 class FSphereTopology;
 class FMeshDisplacementBuilder;
 class FWorldGenerator;   // T4：TUniquePtr<FWorldGenerator>，避免在头文件 include "WorldGenerator.h"
@@ -404,9 +405,9 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
     FVector P1MeshRelativeLocation = FVector::ZeroVector;
 
-    /** P1 模型组件相对棋子 Actor 根节点的旋转修正。 */
+    /** P1 模型组件相对棋子 Actor 根节点的导入朝向修正。默认 Yaw=90，用于修正当前人物模型“逻辑朝前实际朝右”的资源坐标差异。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
-    FRotator P1MeshRelativeRotation = FRotator::ZeroRotator;
+    FRotator P1MeshRelativeRotation = FRotator(0.0f, 90.0f, 0.0f);
 
     /** 主将模型。推荐挂 Content/Animations/Adventurers/Characters/Mage1。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
@@ -424,6 +425,46 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
     TObjectPtr<USkeletalMesh> P1ArcherMesh;
 
+    /** P2 待机动画。推荐 Rig_Medium_GeneralIdle_A。为空时只更新驱动状态，不强制播放动画。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UAnimationAsset> P2IdleAnimation;
+
+    /** P2 普通移动动画。推荐 Rig_Medium_MovementBasicWalking_A。为空时仍播放位移插值。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UAnimationAsset> P2MoveAnimation;
+
+    /** P2 跳跃动画。推荐 Rig_Medium_MovementBasicJump_Full_Short。为空时仍播放跳跃弧线。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UAnimationAsset> P2JumpAnimation;
+
+    /** P2 普通移动单段时长（秒）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "10.0"))
+    float P2MoveDurationSeconds = 0.35f;
+
+    /** P2 跳跃单段时长（秒）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "10.0"))
+    float P2JumpDurationSeconds = 0.55f;
+
+    /** P2 跳跃最高额外外抬高度（cm）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "10000.0"))
+    float P2JumpHeightCM = 650.0f;
+
+    /** P2.5：true 时通过 HISM 碰撞射线修正棋子 Actor 的球面高度。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    bool bEnableP2_5HISMPieceHeightTrace = true;
+
+    /** P2.5：棋子高度射线从球面外侧额外多远开始（cm）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "100000.0"))
+    float P2_5PieceHeightTraceStartOffsetCM = 5000.0f;
+
+    /** P2.5：棋子高度射线穿过球心后继续多远（cm）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "100000.0"))
+    float P2_5PieceHeightTracePastCenterOffsetCM = 1000.0f;
+
+    /** P2.5：true 时输出棋子 HISM 高度射线诊断日志。验收后可关闭。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    bool bDebugP2_5HISMPieceHeightTrace = true;
+
     //----------------------------------------------------------
     // SimpleGameplay G2.5：视角与当前阵营提示
     //----------------------------------------------------------
@@ -435,6 +476,18 @@ public:
     /** 回合开始时摄像机位于大本营球面外侧的额外高度（cm）。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G2.5", meta = (ClampMin = "0.0", ClampMax = "100000.0"))
     float G2_5TurnStartCameraHeightCM = 8000.0f;
+
+    /** C2：true 时回合开始切到当前阵营活棋子的战区中心斜俯视；false 时保留 G2.5 主将/大本营正上方视角。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C2 Camera", meta = (DisplayName = "Enable C2 Turn Start War Zone Camera"))
+    bool bEnableC2TurnStartWarZoneCamera = true;
+
+    /** C2：回合开始斜俯视时，相机到战区中心目标点的距离（cm）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C2 Camera", meta = (ClampMin = "1000.0", ClampMax = "200000.0"))
+    float C2TurnStartCameraDistanceCM = 18000.0f;
+
+    /** C2：回合开始斜俯视时，视线中心方向与目标点地面切平面的夹角（度）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C2 Camera", meta = (ClampMin = "5.0", ClampMax = "85.0"))
+    float C2TurnStartCameraTiltDeg = 55.0f;
 
     /** 当前阵营所有棋子脚下 Cell 的淡粉色提示。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G2.5")
@@ -629,17 +682,32 @@ private:
     /** SimpleGameplay G2.5：回合开始时移动到 Cell 上方并朝向 Cell，或仅旋转当前视角对准 Cell。 */
     void FocusCameraOnCell_(int32 CellId, bool bMoveCamera);
 
+    /** SimpleGameplay C2：回合开始时视角切到当前阵营活棋子战区中心斜俯视。成功处理返回 true。 */
+    bool FocusCameraOnCurrentFactionWarZone_();
+
+    /** SimpleGameplay C2：计算当前阵营活棋子的平均球面方向。 */
+    bool TryBuildCurrentFactionWarZoneDirection_(FVector& OutLocalWarZoneDir) const;
+
+    /** SimpleGameplay C2：计算当前阵营主将/大本营方向，供斜俯视方位参考。 */
+    bool TryBuildCurrentFactionCommanderDirection_(FVector& OutLocalCommanderDir) const;
+
     /** SimpleGameplay G2.5：回合开始时视角切到当前阵营大本营正上方。 */
     void FocusCameraOnCurrentFactionBase_();
 
-    /** SimpleGameplay P1：根据当前 Gameplay 快照增量同步真实棋子 Actor。 */
-    void SyncP1PiecePresentation_();
+    /** SimpleGameplay P1/P2：根据当前 Gameplay 快照增量同步真实棋子 Actor，可选播放 P2 移动事件。 */
+    void SyncP1PiecePresentation_(const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents = TArray<FTerraPiecePresentationMoveEvent>());
 
     /** SimpleGameplay P1：清空真实棋子 Actor 表现。 */
     void ClearP1PiecePresentation_();
 
     /** SimpleGameplay P1：把 CellId 转为棋子 Actor 的球面世界 Transform。 */
     bool BuildP1PieceWorldTransform_(int32 CellId, FTransform& OutWorldTransform) const;
+
+    /** SimpleGameplay P2.5：从 Cell 外侧向球心方向射线命中 HISM，以命中点修正棋子高度。 */
+    bool TryResolveP2_5PieceHeightFromHISM_(int32 CellId, const FVector& WorldUp, FVector& OutWorldPosition) const;
+
+    /** SimpleGameplay P1/P2：按“背向本阵营主将”规则计算初始棋子朝向。 */
+    bool BuildP1PieceWorldTransformForPiece_(const FTerraGameplayPieceState& Piece, const TArray<FTerraGameplayPieceState>& Pieces, FTransform& OutWorldTransform) const;
 
     /** SimpleGameplay P1：从 Details 面板资产槽生成表现配置。 */
     FTerraPieceVisualConfig BuildP1PieceVisualConfig_() const;
@@ -651,11 +719,41 @@ public:
     /** G8：取球半径（cm）。 */
     float GetPlanetRadiusCM_() const { return GlobeRadiusCM; }
 
-    /** G8：把某个世界位置同步成球面轨道参数。 */
+    /** G8：把某个世界位置同步成球面轨道参数。C3 后仅保留兼容旧路径。 */
     bool SyncOrbitCameraStateFromWorldPosition(const FVector& CameraWorldPosition, float& InOutLongitudeDeg, float& InOutLatitudeDeg, float& InOutHeightOffsetCM) const;
 
-    /** G8：按球面轨道参数把视角应用到当前 PlayerController / ViewTarget。 */
+    /** G8：按球面轨道参数把视角应用到当前 PlayerController / ViewTarget。C3 后仅保留兼容旧路径。 */
     bool ApplyOrbitCameraState(float LongitudeDeg, float LatitudeDeg, float HeightOffsetCM);
+
+    /**
+     * C3：从当前相机位置和旋转反推焦点式手动相机状态。仅在进入手动模式的首帧被调用一次；
+     * 后续帧不再调用（详见 C3FocusCameraManualControlDesign.md §4.2）。
+     */
+    bool SyncFocusCameraStateFromView(
+        const FVector& CameraWorldPosition,
+        const FRotator& CameraWorldRotation,
+        FVector& OutFocusUnitDir,
+        float& OutDistanceToFocusCM,
+        float& OutTiltDeg,
+        float& OutYawAroundFocusDeg) const;
+
+    /** C3：按焦点式相机状态把视角应用到当前 PlayerController / ViewTarget。 */
+    bool ApplyFocusCameraState(
+        const FVector& FocusUnitDir,
+        float DistanceToFocusCM,
+        float TiltDeg,
+        float YawAroundFocusDeg);
+
+    /**
+     * C3：在当前焦点局部切平面上沿测地线（大圆）推进焦点，同时用 Rodrigues 旋转把 Yaw
+     * 平行运输到新焦点。这样连续按住 A/D 或 W/S 会走一整条大圆，不会退化成纬线。
+     * 详见 C3FocusCameraManualControlDesign.md §5.1.3。
+     */
+    bool OffsetFocusCameraStateOnTangent(
+        float RightDeltaDeg,
+        float ForwardDeltaDeg,
+        FVector& InOutFocusUnitDir,
+        float& InOutYawAroundFocusDeg) const;
 
     /** SimpleGameplay G1/G2：按当前 Gameplay 棋子状态重建调试棋子缓存。 */
     void RebuildG1DebugPieces_();

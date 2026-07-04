@@ -78,7 +78,7 @@ void APlanetInteractionController::PlayerTick(float DeltaTime)
     APlanetTessellatedMesh* Tess = CachedBinder->GetTessellatedMesh();
     if (Tess)
     {
-        UpdateG8ManualCameraControl_(DeltaTime, Tess);
+        UpdateC3FocusCameraControl_(DeltaTime, Tess);
 
         if (WasInputKeyJustPressed(EKeys::RightMouseButton))
         {
@@ -124,7 +124,7 @@ void APlanetInteractionController::PlayerTick(float DeltaTime)
     }
 }
 
-bool APlanetInteractionController::InitializeG8OrbitCameraState_(APlanetTessellatedMesh* Tess)
+bool APlanetInteractionController::InitializeC3FocusCameraState_(APlanetTessellatedMesh* Tess)
 {
     if (!Tess || !Tess->bEnableG8ManualCameraControl)
     {
@@ -145,78 +145,91 @@ bool APlanetInteractionController::InitializeG8OrbitCameraState_(APlanetTessella
         return false;
     }
 
-    if (!Tess->SyncOrbitCameraStateFromWorldPosition(CameraWorldPosition, G8CameraLongitudeDeg, G8CameraLatitudeDeg, G8CameraHeightOffsetCM))
+    FRotator CameraWorldRotation = FRotator::ZeroRotator;
+    if (PlayerCameraManager)
+    {
+        CameraWorldRotation = PlayerCameraManager->GetCameraRotation();
+    }
+    else if (AActor* ViewTarget = GetViewTarget())
+    {
+        CameraWorldRotation = ViewTarget->GetActorRotation();
+    }
+    else
     {
         return false;
     }
 
-    bG8OrbitCameraInitialized = true;
+    if (!Tess->SyncFocusCameraStateFromView(
+        CameraWorldPosition,
+        CameraWorldRotation,
+        C3FocusUnitDir,
+        C3DistanceToFocusCM,
+        C3TiltDeg,
+        C3YawAroundFocusDeg))
+    {
+        return false;
+    }
+
+    // 派生调试用经纬度。
+    C3FocusUnitDir = C3FocusUnitDir.GetSafeNormal();
+    C3FocusLatitudeDeg = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(static_cast<float>(C3FocusUnitDir.Z), -1.0f, 1.0f)));
+    C3FocusLongitudeDeg = FRotator::NormalizeAxis(FMath::RadiansToDegrees(
+        FMath::Atan2(static_cast<float>(C3FocusUnitDir.Y), static_cast<float>(C3FocusUnitDir.X))));
+
+    bC3FocusCameraInitialized = true;
     return true;
 }
 
-void APlanetInteractionController::UpdateG8ManualCameraControl_(float DeltaTime, APlanetTessellatedMesh* Tess)
+void APlanetInteractionController::UpdateC3FocusCameraControl_(float DeltaTime, APlanetTessellatedMesh* Tess)
 {
     if (!Tess || !Tess->bEnableG8ManualCameraControl)
     {
         return;
     }
 
-    if (!bG8OrbitCameraInitialized && !InitializeG8OrbitCameraState_(Tess))
+    if (!bC3FocusCameraInitialized && !InitializeC3FocusCameraState_(Tess))
     {
         return;
     }
 
-    FVector CameraWorldPosition = FVector::ZeroVector;
-    if (AActor* ViewTarget = GetViewTarget())
-    {
-        CameraWorldPosition = ViewTarget->GetActorLocation();
-    }
-    else if (PlayerCameraManager)
-    {
-        CameraWorldPosition = PlayerCameraManager->GetCameraLocation();
-    }
-
-    float SyncedLongitudeDeg = G8CameraLongitudeDeg;
-    float SyncedLatitudeDeg = G8CameraLatitudeDeg;
-    float SyncedHeightOffsetCM = G8CameraHeightOffsetCM;
-    if (Tess->SyncOrbitCameraStateFromWorldPosition(CameraWorldPosition, SyncedLongitudeDeg, SyncedLatitudeDeg, SyncedHeightOffsetCM))
-    {
-        G8CameraLongitudeDeg = SyncedLongitudeDeg;
-        G8CameraLatitudeDeg = SyncedLatitudeDeg;
-        G8CameraHeightOffsetCM = SyncedHeightOffsetCM;
-    }
+    // 注意：这里刻意不再每帧从相机反解 (FocusUnitDir, Yaw, Tilt, Distance)。
+    // 这条同步在旧实现里会形成"每帧 Yaw≈0 → 沿新焦点当地东切向重启"的自反闭环，
+    // 使 A/D 积分成纬线而非大圆，并在极点让 W/S 卡住原地打转。
+    // 详见 Docs/SimpleGameplay/C3FocusCameraManualControlDesign.md §4.2。
 
     const float OrbitDeltaDeg = Tess->G8CameraOrbitDegreesPerSecond * DeltaTime;
     bool bCameraChanged = false;
+    float FocusRightDeltaDeg = 0.0f;
+    float FocusForwardDeltaDeg = 0.0f;
 
     if (IsInputKeyDown(EKeys::W))
     {
-        G8CameraLatitudeDeg += OrbitDeltaDeg;
+        FocusForwardDeltaDeg += OrbitDeltaDeg;
         bCameraChanged = true;
     }
     if (IsInputKeyDown(EKeys::S))
     {
-        G8CameraLatitudeDeg -= OrbitDeltaDeg;
+        FocusForwardDeltaDeg -= OrbitDeltaDeg;
         bCameraChanged = true;
     }
     if (IsInputKeyDown(EKeys::A))
     {
-        G8CameraLongitudeDeg += OrbitDeltaDeg;
+        FocusRightDeltaDeg -= OrbitDeltaDeg;
         bCameraChanged = true;
     }
     if (IsInputKeyDown(EKeys::D))
     {
-        G8CameraLongitudeDeg -= OrbitDeltaDeg;
+        FocusRightDeltaDeg += OrbitDeltaDeg;
         bCameraChanged = true;
     }
     if (WasInputKeyJustPressed(EKeys::MouseScrollUp))
     {
-        G8CameraHeightOffsetCM -= Tess->G8CameraZoomStepCM;
+        C3DistanceToFocusCM -= Tess->G8CameraZoomStepCM;
         bCameraChanged = true;
     }
     if (WasInputKeyJustPressed(EKeys::MouseScrollDown))
     {
-        G8CameraHeightOffsetCM += Tess->G8CameraZoomStepCM;
+        C3DistanceToFocusCM += Tess->G8CameraZoomStepCM;
         bCameraChanged = true;
     }
 
@@ -225,12 +238,32 @@ void APlanetInteractionController::UpdateG8ManualCameraControl_(float DeltaTime,
         return;
     }
 
-    G8CameraLatitudeDeg = FMath::Clamp(G8CameraLatitudeDeg, -89.0f, 89.0f);
-    G8CameraHeightOffsetCM = FMath::Clamp(
-        G8CameraHeightOffsetCM,
+    if (!FMath::IsNearlyZero(FocusRightDeltaDeg) || !FMath::IsNearlyZero(FocusForwardDeltaDeg))
+    {
+        // 沿测地线推进焦点，同时把 Yaw 平行运输到新焦点。
+        Tess->OffsetFocusCameraStateOnTangent(
+            FocusRightDeltaDeg,
+            FocusForwardDeltaDeg,
+            C3FocusUnitDir,
+            C3YawAroundFocusDeg);
+    }
+
+    C3DistanceToFocusCM = FMath::Clamp(
+        C3DistanceToFocusCM,
         Tess->G8CameraMinHeightOffsetCM,
         FMath::Max(Tess->G8CameraMinHeightOffsetCM, Tess->G8CameraMaxHeightOffsetCM));
-    G8CameraLongitudeDeg = FRotator::NormalizeAxis(G8CameraLongitudeDeg);
+    C3TiltDeg = FMath::Clamp(C3TiltDeg, 5.0f, 85.0f);
+    C3YawAroundFocusDeg = FRotator::NormalizeAxis(C3YawAroundFocusDeg);
+    C3FocusUnitDir = C3FocusUnitDir.GetSafeNormal();
 
-    Tess->ApplyOrbitCameraState(G8CameraLongitudeDeg, G8CameraLatitudeDeg, G8CameraHeightOffsetCM);
+    // 派生调试用经纬度（不再对纬度做 [-89, 89] clamp——真值是 3D 单位向量，允许穿越极点）。
+    C3FocusLatitudeDeg = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(static_cast<float>(C3FocusUnitDir.Z), -1.0f, 1.0f)));
+    C3FocusLongitudeDeg = FRotator::NormalizeAxis(FMath::RadiansToDegrees(
+        FMath::Atan2(static_cast<float>(C3FocusUnitDir.Y), static_cast<float>(C3FocusUnitDir.X))));
+
+    Tess->ApplyFocusCameraState(
+        C3FocusUnitDir,
+        C3DistanceToFocusCM,
+        C3TiltDeg,
+        C3YawAroundFocusDeg);
 }
