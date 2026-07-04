@@ -80,6 +80,12 @@ void APlanetInteractionController::PlayerTick(float DeltaTime)
     {
         UpdateC3FocusCameraControl_(DeltaTime, Tess);
 
+        if (WasInputKeyJustPressed(EKeys::Tab))
+        {
+            const bool bReverseTab = IsInputKeyDown(EKeys::LeftShift) || IsInputKeyDown(EKeys::RightShift);
+            Tess->HandleC5NavigateCurrentFactionPiece(bReverseTab);
+        }
+
         if (WasInputKeyJustPressed(EKeys::RightMouseButton))
         {
             Tess->HandleHISMUndo();
@@ -226,6 +232,11 @@ bool APlanetInteractionController::RequestC2_5FocusOnUnitDir(const FVector& Targ
     return RequestC4FocusOnUnitDir(TargetFocusUnitDir, BlendSeconds);
 }
 
+bool APlanetInteractionController::RequestC6FocusOnUnitDir(const FVector& TargetFocusUnitDir, float BlendSeconds)
+{
+    return RequestC4FocusOnUnitDir(TargetFocusUnitDir, BlendSeconds);
+}
+
 bool APlanetInteractionController::SetC3FocusCameraState(const FVector& FocusUnitDir, float DistanceToFocusCM, float YawAroundFocusDeg)
 {
     const FVector NormalizedFocus = FocusUnitDir.GetSafeNormal();
@@ -257,6 +268,14 @@ bool APlanetInteractionController::HasC3ManualCameraInput_() const
         || WasInputKeyJustPressed(EKeys::MouseScrollDown);
 }
 
+bool APlanetInteractionController::HasAutoCameraInterruptInput_() const
+{
+    return HasC3ManualCameraInput_()
+        || WasInputKeyJustPressed(EKeys::LeftMouseButton)
+        || WasInputKeyJustPressed(EKeys::RightMouseButton)
+        || WasInputKeyJustPressed(EKeys::Tab);
+}
+
 void APlanetInteractionController::UpdateC3FocusCameraControl_(float DeltaTime, APlanetTessellatedMesh* Tess)
 {
     if (!Tess || !Tess->bEnableG8ManualCameraControl)
@@ -274,8 +293,8 @@ void APlanetInteractionController::UpdateC3FocusCameraControl_(float DeltaTime, 
     // 使 A/D 积分成纬线而非大圆，并在极点让 W/S 卡住原地打转。
     // 详见 Docs/SimpleGameplay/C3FocusCameraManualControlDesign.md §4.2。
 
-    const bool bManualCameraInput = HasC3ManualCameraInput_();
-    if (bManualCameraInput)
+    const bool bAutoCameraInterruptInput = HasAutoCameraInterruptInput_();
+    if (bAutoCameraInterruptInput)
     {
         bC4SelectionFocusBlendActive = false;
     }

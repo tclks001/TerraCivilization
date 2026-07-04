@@ -1756,6 +1756,63 @@ bool APlanetTessellatedMesh::RequestC4SelectionFocus_(int32 CellId) const
         FMath::Max(0.0f, C4SelectedPieceFocusBlendSeconds));
 }
 
+float APlanetTessellatedMesh::GetC6ActionCameraBlendSeconds_(ETerraPiecePresentationMoveType MoveType) const
+{
+    return MoveType == ETerraPiecePresentationMoveType::Jump
+        ? FMath::Max(P2JumpDurationSeconds, 0.001f)
+        : FMath::Max(P2MoveDurationSeconds, 0.001f);
+}
+
+void APlanetTessellatedMesh::RequestC6ActionCameraTrackingForMoveEvents_(const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents) const
+{
+    if (!bEnableC6ActionCameraTracking || MoveEvents.Num() <= 0)
+    {
+        return;
+    }
+
+    APlanetInteractionController* InteractionController = Cast<APlanetInteractionController>(UGameplayStatics::GetPlayerController(this, 0));
+    if (!InteractionController || !CellTopology.IsValid())
+    {
+        return;
+    }
+
+    for (const FTerraPiecePresentationMoveEvent& MoveEvent : MoveEvents)
+    {
+        if (!MoveEvent.IsValidMove() || !CellTopology->Cells.IsValidIndex(MoveEvent.ToCellId))
+        {
+            continue;
+        }
+
+        if (IsCellInC4ComfortView_(MoveEvent.ToCellId))
+        {
+            UE_LOG(LogPlanetTess, Verbose,
+                TEXT("[Tess][C6] Move target in comfort view. Piece=%d ToCell=%d"),
+                MoveEvent.PieceId,
+                MoveEvent.ToCellId);
+            continue;
+        }
+
+        const FVector TargetFocusUnitDir = CellTopology->Cells[MoveEvent.ToCellId].UnitCenter.GetSafeNormal();
+        if (TargetFocusUnitDir.IsNearlyZero())
+        {
+            continue;
+        }
+
+        const float BlendSeconds = GetC6ActionCameraBlendSeconds_(MoveEvent.MoveType);
+        const bool bRequested = InteractionController->RequestC6FocusOnUnitDir(TargetFocusUnitDir, BlendSeconds);
+        if (bRequested)
+        {
+            UE_LOG(LogPlanetTess, Log,
+                TEXT("[Tess][C6] Requested action camera tracking. Piece=%d FromCell=%d ToCell=%d MoveType=%d Blend=%.2f"),
+                MoveEvent.PieceId,
+                MoveEvent.FromCellId,
+                MoveEvent.ToCellId,
+                static_cast<int32>(MoveEvent.MoveType),
+                BlendSeconds);
+        }
+    }
+}
+
 void APlanetTessellatedMesh::FocusCameraOnSelectedCellSmart_(int32 CellId)
 {
     if (!bEnableG2_5CameraAssist)
@@ -2894,14 +2951,96 @@ bool APlanetTessellatedMesh::HandleHISMClickHit(const FHitResult& Hit)
     }
 
     LastHISMClickedCellId = CellId;
+    return HandleGameplayCellClick_(CellId, TEXT("HISM Click"), Hit.Item, GetNameSafe(Hit.GetComponent()));
+}
 
+bool APlanetTessellatedMesh::HandleC5NavigateCurrentFactionPiece(bool bReverse)
+{
     if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
     {
         UE_LOG(LogPlanetTess, Warning,
-            TEXT("[Tess][G2] HISM Click ignored: GameplayContainer is not ready. Cell=%d Instance=%d Component=%s"),
+            TEXT("[Tess][C5] Tab navigation ignored: GameplayContainer is not ready."));
+        return false;
+    }
+
+    const ETerraGameplayInteractionPhase Phase = GameplayContainer->GetInteractionPhase();
+    if (Phase != ETerraGameplayInteractionPhase::Idle
+        && Phase != ETerraGameplayInteractionPhase::PieceSelected)
+    {
+        UE_LOG(LogPlanetTess, Log,
+            TEXT("[Tess][C5] Tab navigation ignored in Phase=%d."),
+            static_cast<int32>(Phase));
+        return false;
+    }
+
+    TArray<int32> SelectablePieceIds;
+    if (!GameplayContainer->CollectCurrentFactionSelectablePieceIds(SelectablePieceIds))
+    {
+        UE_LOG(LogPlanetTess, Log,
+            TEXT("[Tess][C5] Tab navigation ignored: no selectable pieces. CurrentFaction=%d Turn=%d"),
+            GameplayContainer->GetCurrentFactionId(),
+            GameplayContainer->GetTurnIndex());
+        return false;
+    }
+
+    const int32 CurrentSelectedPieceId = GameplayContainer->GetSelectedPieceId();
+    int32 CurrentIndex = INDEX_NONE;
+    if (CurrentSelectedPieceId != INDEX_NONE)
+    {
+        CurrentIndex = SelectablePieceIds.IndexOfByKey(CurrentSelectedPieceId);
+    }
+
+    int32 TargetIndex = INDEX_NONE;
+    if (CurrentIndex == INDEX_NONE)
+    {
+        TargetIndex = bReverse ? SelectablePieceIds.Num() - 1 : 0;
+    }
+    else
+    {
+        const int32 Direction = bReverse ? -1 : 1;
+        TargetIndex = (CurrentIndex + Direction + SelectablePieceIds.Num()) % SelectablePieceIds.Num();
+    }
+
+    if (!SelectablePieceIds.IsValidIndex(TargetIndex))
+    {
+        return false;
+    }
+
+    const int32 TargetPieceId = SelectablePieceIds[TargetIndex];
+    int32 TargetCellId = INDEX_NONE;
+    if (!GameplayContainer->TryGetPieceCellId(TargetPieceId, TargetCellId))
+    {
+        return false;
+    }
+
+    LastHISMClickedCellId = TargetCellId;
+    const bool bHandled = HandleGameplayCellClick_(
+        TargetCellId,
+        bReverse ? TEXT("C5 Shift+Tab") : TEXT("C5 Tab"),
+        INDEX_NONE,
+        TEXT("Keyboard"));
+
+    UE_LOG(LogPlanetTess, Log,
+        TEXT("[Tess][C5] Navigate Reverse=%d TargetPiece=%d TargetCell=%d Handled=%d Index=%d/%d"),
+        bReverse ? 1 : 0,
+        TargetPieceId,
+        TargetCellId,
+        bHandled ? 1 : 0,
+        TargetIndex,
+        SelectablePieceIds.Num());
+    return bHandled;
+}
+
+bool APlanetTessellatedMesh::HandleGameplayCellClick_(int32 CellId, const TCHAR* SourceLabel, int32 InstanceIndex, const FString& ComponentName)
+{
+    if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
+    {
+        UE_LOG(LogPlanetTess, Warning,
+            TEXT("[Tess][G2] %s ignored: GameplayContainer is not ready. Cell=%d Instance=%d Component=%s"),
+            SourceLabel ? SourceLabel : TEXT("CellClick"),
             CellId,
-            Hit.Item,
-            *GetNameSafe(Hit.GetComponent()));
+            InstanceIndex,
+            *ComponentName);
         return true;
     }
 
@@ -2992,13 +3131,15 @@ bool APlanetTessellatedMesh::HandleHISMClickHit(const FHitResult& Hit)
     }
 
     RebuildG1DebugPieces_();
+    RequestC6ActionCameraTrackingForMoveEvents_(P2MoveEvents);
     SyncP1PiecePresentation_(P2MoveEvents);
 
     UE_LOG(LogPlanetTess, Log,
-        TEXT("[Tess][G2] HISM Click -> Gameplay Cell=%d Instance=%d Component=%s Handled=%d CurrentFaction=%d Turn=%d Phase=%d P2MoveEvents=%d"),
+        TEXT("[Tess][G2] %s -> Gameplay Cell=%d Instance=%d Component=%s Handled=%d CurrentFaction=%d Turn=%d Phase=%d P2MoveEvents=%d"),
+        SourceLabel ? SourceLabel : TEXT("CellClick"),
         CellId,
-        Hit.Item,
-        *GetNameSafe(Hit.GetComponent()),
+        InstanceIndex,
+        *ComponentName,
         bGameplayHandled ? 1 : 0,
         GameplayContainer->GetCurrentFactionId(),
         GameplayContainer->GetTurnIndex(),
@@ -3015,6 +3156,9 @@ bool APlanetTessellatedMesh::HandleHISMUndo()
         return false;
     }
 
+    const ETerraGameplayInteractionPhase PrevPhase = GameplayContainer->GetInteractionPhase();
+    const TArray<FTerraGameplayPieceState> PrevPieces = GameplayContainer->GetPieces();
+
     TArray<int32> DirtyCellIds;
     const bool bUndone = GameplayContainer->UndoCurrentInteraction(DirtyCellIds);
     if (!bUndone)
@@ -3022,17 +3166,57 @@ bool APlanetTessellatedMesh::HandleHISMUndo()
         return false;
     }
 
+    const TArray<FTerraGameplayPieceState>& NewPieces = GameplayContainer->GetPieces();
+    TArray<FTerraPiecePresentationMoveEvent> UndoMoveEvents;
+    for (const FTerraGameplayPieceState& NewPiece : NewPieces)
+    {
+        if (!NewPiece.bAlive || !PrevPieces.IsValidIndex(NewPiece.PieceId))
+        {
+            continue;
+        }
+
+        const FTerraGameplayPieceState& PrevPiece = PrevPieces[NewPiece.PieceId];
+        if (!PrevPiece.bAlive
+            || PrevPiece.CellId == NewPiece.CellId
+            || PrevPiece.OwnerFactionId != NewPiece.OwnerFactionId)
+        {
+            continue;
+        }
+
+        ETerraPiecePresentationMoveType MoveType = ETerraPiecePresentationMoveType::Move;
+        if (PrevPhase == ETerraGameplayInteractionPhase::PieceJumpingCanContinue)
+        {
+            MoveType = ETerraPiecePresentationMoveType::Jump;
+        }
+
+        FTransform FromWorldTransform = FTransform::Identity;
+        FTransform ToWorldTransform = FTransform::Identity;
+        if (BuildP1PieceWorldTransform_(PrevPiece.CellId, FromWorldTransform)
+            && BuildP1PieceWorldTransform_(NewPiece.CellId, ToWorldTransform))
+        {
+            FTerraPiecePresentationMoveEvent& MoveEvent = UndoMoveEvents.AddDefaulted_GetRef();
+            MoveEvent.PieceId = NewPiece.PieceId;
+            MoveEvent.FromCellId = PrevPiece.CellId;
+            MoveEvent.ToCellId = NewPiece.CellId;
+            MoveEvent.MoveType = MoveType;
+            MoveEvent.FromWorldTransform = FromWorldTransform;
+            MoveEvent.ToWorldTransform = ToWorldTransform;
+        }
+    }
+
     RefreshGameplayHighlights_(DirtyCellIds);
     RefreshCurrentFactionPieceHighlights_();
     RefreshG4CapturePreviewCellsForActionTarget_(HISMCurrentHoverCellId);
     RebuildG1DebugPieces_();
-    SyncP1PiecePresentation_();
+    RequestC6ActionCameraTrackingForMoveEvents_(UndoMoveEvents);
+    SyncP1PiecePresentation_(UndoMoveEvents);
 
     UE_LOG(LogPlanetTess, Log,
-        TEXT("[Tess][G9] HISM Undo -> CurrentFaction=%d Turn=%d Phase=%d"),
+        TEXT("[Tess][G9] HISM Undo -> CurrentFaction=%d Turn=%d Phase=%d UndoMoveEvents=%d"),
         GameplayContainer->GetCurrentFactionId(),
         GameplayContainer->GetTurnIndex(),
-        static_cast<int32>(GameplayContainer->GetInteractionPhase()));
+        static_cast<int32>(GameplayContainer->GetInteractionPhase()),
+        UndoMoveEvents.Num());
     return true;
 }
 

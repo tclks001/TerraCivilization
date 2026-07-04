@@ -43,6 +43,9 @@ public:
     /** C2.5：请求回合开始时平滑移动 C3 焦点，不改变当前距离与 yaw。 */
     bool RequestC2_5FocusOnUnitDir(const FVector& TargetFocusUnitDir, float BlendSeconds);
 
+    /** C6：请求行动过程中平滑移动 C3 焦点，不改变当前距离与 yaw。 */
+    bool RequestC6FocusOnUnitDir(const FVector& TargetFocusUnitDir, float BlendSeconds);
+
     /** C2/C3：外部自动镜头写入 C3 焦点式相机状态，避免下一帧被旧 C3 状态覆盖。 */
     bool SetC3FocusCameraState(const FVector& FocusUnitDir, float DistanceToFocusCM, float YawAroundFocusDeg);
 
@@ -103,4 +106,7 @@ private:
 
     /** C4：是否存在手动相机输入。 */
     bool HasC3ManualCameraInput_() const;
+
+    /** C2.5/C4/C6：是否存在会打断自动镜头 Blend 的玩家输入。 */
+    bool HasAutoCameraInterruptInput_() const;
 };

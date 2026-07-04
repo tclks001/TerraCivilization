@@ -45,6 +45,7 @@ public:
     bool CollectCapturePreviewCellIdsForActionTarget(int32 ActionTargetCellId, TArray<int32>& OutCellIds) const;
     bool CollectFactionPieceCellIds(int32 FactionId, TArray<int32>& OutCellIds) const;
     bool CollectCurrentFactionPieceCellIds(TArray<int32>& OutCellIds) const;
+    bool CollectCurrentFactionSelectablePieceIds(TArray<int32>& OutPieceIds) const;
     bool TryGetPieceCellId(int32 PieceId, int32& OutCellId) const;
     const TArray<FTerraGameplayPieceState>& GetPieces() const { return Pieces; }
     const TArray<FTerraGameplayFactionState>& GetFactions() const { return Factions; }

@@ -577,6 +577,10 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C4 Camera", meta = (ClampMin = "0.0", ClampMax = "5.0"))
     float C4SelectedPieceFocusBlendSeconds = 0.35f;
 
+    /** C6：true 时棋子行动落点离开 C4 舒适区会同步触发行动镜头追踪。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C6 Camera")
+    bool bEnableC6ActionCameraTracking = true;
+
     //----------------------------------------------------------
     // 生命周期
     //----------------------------------------------------------
@@ -611,6 +615,9 @@ public:
 
     /** 输入层 click 命中 HISM 时调用；成功处理返回 true。 */
     bool HandleHISMClickHit(const FHitResult& Hit);
+
+    /** 输入层 Tab / Shift+Tab 循环当前阵营可行动棋子时调用；成功处理返回 true。 */
+    bool HandleC5NavigateCurrentFactionPiece(bool bReverse);
 
     /** 输入层右键撤销当前未提交行动时调用；成功处理返回 true。 */
     bool HandleHISMUndo();
@@ -710,6 +717,9 @@ private:
     /** SimpleGameplay G2：刷新 Gameplay 容器报告的脏 Cell 高亮。 */
     void RefreshGameplayHighlights_(const TArray<int32>& DirtyCellIds);
 
+    /** SimpleGameplay G2/C5：统一处理 Gameplay Cell 点击及其表现侧后处理。 */
+    bool HandleGameplayCellClick_(int32 CellId, const TCHAR* SourceLabel, int32 InstanceIndex, const FString& ComponentName);
+
     /** SimpleGameplay G2.5：刷新指定阵营所有棋子所在 Cell 的 HISM 高亮。 */
     void RefreshFactionPieceHighlights_(int32 FactionId);
 
@@ -730,6 +740,12 @@ private:
 
     /** SimpleGameplay C4：向当前 PlayerController 请求 C3 焦点 Blend。 */
     bool RequestC4SelectionFocus_(int32 CellId) const;
+
+    /** SimpleGameplay C6：根据 P2 移动事件请求行动镜头追踪。 */
+    void RequestC6ActionCameraTrackingForMoveEvents_(const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents) const;
+
+    /** SimpleGameplay C6：按移动类型取与 P2 表现一致的镜头 Blend 时长。 */
+    float GetC6ActionCameraBlendSeconds_(ETerraPiecePresentationMoveType MoveType) const;
 
     /** SimpleGameplay C2：游戏开始时硬设置到当前阵营活棋子战区中心斜俯视。成功处理返回 true。 */
     bool FocusCameraOnCurrentFactionWarZoneHard_();

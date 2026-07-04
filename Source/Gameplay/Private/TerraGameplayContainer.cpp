@@ -157,6 +157,26 @@ bool FTerraGameplayContainer::CollectCurrentFactionPieceCellIds(TArray<int32>& O
     return CollectFactionPieceCellIds(CurrentFactionId, OutCellIds);
 }
 
+bool FTerraGameplayContainer::CollectCurrentFactionSelectablePieceIds(TArray<int32>& OutPieceIds) const
+{
+    OutPieceIds.Reset();
+    if (!bInitialized || bMatchEnded || CurrentFactionId == INDEX_NONE)
+    {
+        return false;
+    }
+
+    for (const FTerraGameplayPieceState& Piece : Pieces)
+    {
+        if (IsPieceSelectable_(Piece))
+        {
+            OutPieceIds.Add(Piece.PieceId);
+        }
+    }
+
+    OutPieceIds.Sort();
+    return OutPieceIds.Num() > 0;
+}
+
 bool FTerraGameplayContainer::TryGetPieceCellId(int32 PieceId, int32& OutCellId) const
 {
     OutCellId = INDEX_NONE;
