@@ -181,6 +181,82 @@ bool APlanetInteractionController::InitializeC3FocusCameraState_(APlanetTessella
     return true;
 }
 
+bool APlanetInteractionController::RequestC4FocusOnUnitDir(const FVector& TargetFocusUnitDir, float BlendSeconds)
+{
+    const FVector NormalizedTarget = TargetFocusUnitDir.GetSafeNormal();
+    if (NormalizedTarget.IsNearlyZero())
+    {
+        return false;
+    }
+
+    if (!bC3FocusCameraInitialized)
+    {
+        if (APlanetTessellatedMesh* Tess = CachedBinder ? CachedBinder->GetTessellatedMesh() : nullptr)
+        {
+            InitializeC3FocusCameraState_(Tess);
+        }
+    }
+
+    C3FocusUnitDir = C3FocusUnitDir.GetSafeNormal();
+    if (C3FocusUnitDir.IsNearlyZero())
+    {
+        C3FocusUnitDir = FVector::ForwardVector;
+    }
+
+    const float Duration = FMath::Max(0.0f, BlendSeconds);
+    if (Duration <= KINDA_SMALL_NUMBER)
+    {
+        C3FocusUnitDir = NormalizedTarget;
+        bC4SelectionFocusBlendActive = false;
+        bC3FocusCameraInitialized = true;
+        return true;
+    }
+
+    C4SelectionFocusStartUnitDir = C3FocusUnitDir;
+    C4SelectionFocusTargetUnitDir = NormalizedTarget;
+    C4SelectionFocusElapsedSeconds = 0.0f;
+    C4SelectionFocusDurationSeconds = Duration;
+    bC4SelectionFocusBlendActive = true;
+    bC3FocusCameraInitialized = true;
+    return true;
+}
+
+bool APlanetInteractionController::RequestC2_5FocusOnUnitDir(const FVector& TargetFocusUnitDir, float BlendSeconds)
+{
+    return RequestC4FocusOnUnitDir(TargetFocusUnitDir, BlendSeconds);
+}
+
+bool APlanetInteractionController::SetC3FocusCameraState(const FVector& FocusUnitDir, float DistanceToFocusCM, float YawAroundFocusDeg)
+{
+    const FVector NormalizedFocus = FocusUnitDir.GetSafeNormal();
+    if (NormalizedFocus.IsNearlyZero())
+    {
+        return false;
+    }
+
+    C3FocusUnitDir = NormalizedFocus;
+    C3DistanceToFocusCM = FMath::Max(1.0f, DistanceToFocusCM);
+    C3YawAroundFocusDeg = FRotator::NormalizeAxis(YawAroundFocusDeg);
+    C3FocusLatitudeDeg = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(static_cast<float>(C3FocusUnitDir.Z), -1.0f, 1.0f)));
+    C3FocusLongitudeDeg = FRotator::NormalizeAxis(FMath::RadiansToDegrees(
+        FMath::Atan2(static_cast<float>(C3FocusUnitDir.Y), static_cast<float>(C3FocusUnitDir.X))));
+    bC3FocusCameraInitialized = true;
+    bC4SelectionFocusBlendActive = false;
+    return true;
+}
+
+bool APlanetInteractionController::HasC3ManualCameraInput_() const
+{
+    return IsInputKeyDown(EKeys::W)
+        || IsInputKeyDown(EKeys::S)
+        || IsInputKeyDown(EKeys::A)
+        || IsInputKeyDown(EKeys::D)
+        || IsInputKeyDown(EKeys::Q)
+        || IsInputKeyDown(EKeys::E)
+        || WasInputKeyJustPressed(EKeys::MouseScrollUp)
+        || WasInputKeyJustPressed(EKeys::MouseScrollDown);
+}
+
 void APlanetInteractionController::UpdateC3FocusCameraControl_(float DeltaTime, APlanetTessellatedMesh* Tess)
 {
     if (!Tess || !Tess->bEnableG8ManualCameraControl)
@@ -197,6 +273,29 @@ void APlanetInteractionController::UpdateC3FocusCameraControl_(float DeltaTime, 
     // 这条同步在旧实现里会形成"每帧 Yaw≈0 → 沿新焦点当地东切向重启"的自反闭环，
     // 使 A/D 积分成纬线而非大圆，并在极点让 W/S 卡住原地打转。
     // 详见 Docs/SimpleGameplay/C3FocusCameraManualControlDesign.md §4.2。
+
+    const bool bManualCameraInput = HasC3ManualCameraInput_();
+    if (bManualCameraInput)
+    {
+        bC4SelectionFocusBlendActive = false;
+    }
+    else if (bC4SelectionFocusBlendActive)
+    {
+        C4SelectionFocusElapsedSeconds += DeltaTime;
+        const float BlendAlpha = C4SelectionFocusDurationSeconds > KINDA_SMALL_NUMBER
+            ? FMath::Clamp(C4SelectionFocusElapsedSeconds / C4SelectionFocusDurationSeconds, 0.0f, 1.0f)
+            : 1.0f;
+        const float SmoothAlpha = FMath::InterpEaseInOut(0.0f, 1.0f, BlendAlpha, 2.0f);
+        const FQuat FocusDeltaQuat = FQuat::FindBetweenNormals(C4SelectionFocusStartUnitDir, C4SelectionFocusTargetUnitDir);
+        C3FocusUnitDir = FQuat::Slerp(FQuat::Identity, FocusDeltaQuat, SmoothAlpha)
+            .RotateVector(C4SelectionFocusStartUnitDir)
+            .GetSafeNormal();
+        if (BlendAlpha >= 1.0f)
+        {
+            C3FocusUnitDir = C4SelectionFocusTargetUnitDir.GetSafeNormal();
+            bC4SelectionFocusBlendActive = false;
+        }
+    }
 
     const float OrbitDeltaDeg = Tess->G8CameraOrbitDegreesPerSecond * DeltaTime;
     float FocusRightDeltaDeg = 0.0f;

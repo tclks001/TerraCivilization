@@ -39,6 +39,7 @@
 #include "Animation/AnimationAsset.h"
 #include "GameFramework/PlayerController.h"
 #include "Camera/PlayerCameraManager.h"
+#include "Interaction/PlanetInteractionController.h"
 #include "Kismet/GameplayStatics.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogPlanetTess, Log, All);
@@ -1474,6 +1475,7 @@ void APlanetTessellatedMesh::RebuildGameplay_()
         ClearP1PiecePresentation_();
         G2_5LastHighlightedFactionId = INDEX_NONE;
         G2_5LastCameraFocusedTurnIndex = INDEX_NONE;
+        bC2GameStartCameraApplied = false;
         return;
     }
 
@@ -1489,6 +1491,7 @@ void APlanetTessellatedMesh::RebuildGameplay_()
         ClearP1PiecePresentation_();
         G2_5LastHighlightedFactionId = INDEX_NONE;
         G2_5LastCameraFocusedTurnIndex = INDEX_NONE;
+        bC2GameStartCameraApplied = false;
         return;
     }
 
@@ -1524,6 +1527,7 @@ void APlanetTessellatedMesh::RebuildGameplay_()
 
     G2_5LastHighlightedFactionId = GameplayContainer->GetCurrentFactionId();
     G2_5LastCameraFocusedTurnIndex = INDEX_NONE;
+    bC2GameStartCameraApplied = false;
     RefreshCurrentFactionPieceHighlights_();
     SyncP1PiecePresentation_();
 }
@@ -1663,6 +1667,125 @@ void APlanetTessellatedMesh::FocusCameraOnCell_(int32 CellId, bool bMoveCamera)
         TargetWorldPosition.Z);
 }
 
+bool APlanetTessellatedMesh::IsCellInC4ComfortView_(int32 CellId) const
+{
+    if (!CellTopology.IsValid() || !CellTopology->Cells.IsValidIndex(CellId))
+    {
+        return false;
+    }
+
+    UWorld* World = GetWorld();
+    if (!World || !World->IsGameWorld())
+    {
+        return false;
+    }
+    APlayerController* PlayerController = UGameplayStatics::GetPlayerController(World, 0);
+    if (!PlayerController)
+    {
+        return false;
+    }
+
+    FVector CameraWorldPosition = FVector::ZeroVector;
+    FRotator CameraWorldRotation = FRotator::ZeroRotator;
+    if (PlayerController->PlayerCameraManager)
+    {
+        CameraWorldPosition = PlayerController->PlayerCameraManager->GetCameraLocation();
+        CameraWorldRotation = PlayerController->PlayerCameraManager->GetCameraRotation();
+    }
+    else if (AActor* ViewTarget = PlayerController->GetViewTarget())
+    {
+        CameraWorldPosition = ViewTarget->GetActorLocation();
+        CameraWorldRotation = ViewTarget->GetActorRotation();
+    }
+    else
+    {
+        return false;
+    }
+
+    FVector CurrentFocusUnitDir = FVector::ZeroVector;
+    float CurrentDistanceToFocusCM = 0.0f;
+    float CurrentTiltDeg = 0.0f;
+    float CurrentYawAroundFocusDeg = 0.0f;
+    if (!SyncFocusCameraStateFromView(
+        CameraWorldPosition,
+        CameraWorldRotation,
+        CurrentFocusUnitDir,
+        CurrentDistanceToFocusCM,
+        CurrentTiltDeg,
+        CurrentYawAroundFocusDeg))
+    {
+        return false;
+    }
+
+    const FVector TargetFocusUnitDir = CellTopology->Cells[CellId].UnitCenter.GetSafeNormal();
+    CurrentFocusUnitDir = CurrentFocusUnitDir.GetSafeNormal();
+    if (TargetFocusUnitDir.IsNearlyZero() || CurrentFocusUnitDir.IsNearlyZero())
+    {
+        return false;
+    }
+
+    const float Dot = FMath::Clamp(static_cast<float>(FVector::DotProduct(CurrentFocusUnitDir, TargetFocusUnitDir)), -1.0f, 1.0f);
+    const float AngleDeg = FMath::RadiansToDegrees(FMath::Acos(Dot));
+    const float ComfortAngleDeg = FMath::Clamp(C4ComfortFocusAngleDeg, 0.0f, 180.0f);
+    return AngleDeg <= ComfortAngleDeg;
+}
+
+bool APlanetTessellatedMesh::RequestC4SelectionFocus_(int32 CellId) const
+{
+    if (!CellTopology.IsValid() || !CellTopology->Cells.IsValidIndex(CellId))
+    {
+        return false;
+    }
+
+    UWorld* World = GetWorld();
+    if (!World || !World->IsGameWorld())
+    {
+        return false;
+    }
+
+    APlanetInteractionController* InteractionController = Cast<APlanetInteractionController>(
+        UGameplayStatics::GetPlayerController(World, 0));
+    if (!InteractionController)
+    {
+        return false;
+    }
+
+    const FVector TargetFocusUnitDir = CellTopology->Cells[CellId].UnitCenter.GetSafeNormal();
+    return InteractionController->RequestC4FocusOnUnitDir(
+        TargetFocusUnitDir,
+        FMath::Max(0.0f, C4SelectedPieceFocusBlendSeconds));
+}
+
+void APlanetTessellatedMesh::FocusCameraOnSelectedCellSmart_(int32 CellId)
+{
+    if (!bEnableG2_5CameraAssist)
+    {
+        return;
+    }
+
+    if (!bEnableC4SmartSelectionFocus)
+    {
+        FocusCameraOnCell_(CellId, false);
+        return;
+    }
+
+    if (IsCellInC4ComfortView_(CellId))
+    {
+        UE_LOG(LogPlanetTess, Log, TEXT("[Tess][C4] Selected Cell=%d already in comfort view. Camera unchanged."), CellId);
+        return;
+    }
+
+    if (!RequestC4SelectionFocus_(CellId))
+    {
+        FocusCameraOnCell_(CellId, false);
+        return;
+    }
+
+    UE_LOG(LogPlanetTess, Log, TEXT("[Tess][C4] Requested smart selection focus. Cell=%d Blend=%.2f"),
+        CellId,
+        C4SelectedPieceFocusBlendSeconds);
+}
+
 void APlanetTessellatedMesh::FocusCameraOnCurrentFactionBase_()
 {
     if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
@@ -1670,7 +1793,15 @@ void APlanetTessellatedMesh::FocusCameraOnCurrentFactionBase_()
         return;
     }
 
-    if (bEnableC2TurnStartWarZoneCamera && FocusCameraOnCurrentFactionWarZone_())
+    if (!bC2GameStartCameraApplied)
+    {
+        bC2GameStartCameraApplied = true;
+        if (bEnableC2GameStartWarZoneCamera && FocusCameraOnCurrentFactionWarZoneHard_())
+        {
+            return;
+        }
+    }
+    else if (bEnableC2_5TurnStartWarZoneFocusBlend && BlendCameraFocusToCurrentFactionWarZone_())
     {
         return;
     }
@@ -1741,7 +1872,7 @@ bool APlanetTessellatedMesh::TryBuildCurrentFactionCommanderDirection_(FVector& 
     return false;
 }
 
-bool APlanetTessellatedMesh::FocusCameraOnCurrentFactionWarZone_()
+bool APlanetTessellatedMesh::FocusCameraOnCurrentFactionWarZoneHard_()
 {
     UWorld* World = GetWorld();
     if (!World || !World->IsGameWorld())
@@ -1811,8 +1942,18 @@ bool APlanetTessellatedMesh::FocusCameraOnCurrentFactionWarZone_()
         return false;
     }
 
-    const float CameraDistance = FMath::Max(1000.0f, C2TurnStartCameraDistanceCM);
-    const float TiltRad = FMath::DegreesToRadians(FMath::Clamp(C2TurnStartCameraTiltDeg, 5.0f, 85.0f));
+    const float CameraDistance = FMath::Clamp(
+        FMath::Max(1.0f, C3InitialDistanceToFocusCM),
+        G8CameraMinHeightOffsetCM,
+        FMath::Max(G8CameraMinHeightOffsetCM, G8CameraMaxHeightOffsetCM));
+    const float TiltT = (C3AutoTiltMaxDistanceCM > C3AutoTiltMinDistanceCM)
+        ? (CameraDistance - C3AutoTiltMinDistanceCM) / (C3AutoTiltMaxDistanceCM - C3AutoTiltMinDistanceCM)
+        : 0.0f;
+    const float CameraTiltDeg = FMath::Lerp(
+        C3AutoTiltAtMinDistanceDeg,
+        C3AutoTiltAtMaxDistanceDeg,
+        FMath::Clamp(TiltT, 0.0f, 1.0f));
+    const float TiltRad = FMath::DegreesToRadians(CameraTiltDeg);
     const float HorizontalDistance = CameraDistance * FMath::Cos(TiltRad);
     const float VerticalDistance = CameraDistance * FMath::Sin(TiltRad);
     const FVector CameraWorldPosition = TargetWorldPosition - WorldForwardHint * HorizontalDistance + WorldUp * VerticalDistance;
@@ -1825,6 +1966,43 @@ bool APlanetTessellatedMesh::FocusCameraOnCurrentFactionWarZone_()
 
     const FVector CameraForward = LookDirection.GetSafeNormal();
     const FRotator LookRotation = FRotationMatrix::MakeFromXZ(CameraForward, WorldUp).Rotator();
+
+    FVector LocalEast = FVector::CrossProduct(FVector::UpVector, LocalWarZoneDir).GetSafeNormal();
+    if (LocalEast.IsNearlyZero())
+    {
+        LocalEast = FVector::CrossProduct(FVector::RightVector, LocalWarZoneDir).GetSafeNormal();
+    }
+    const FVector LocalNorth = FVector::CrossProduct(LocalWarZoneDir, LocalEast).GetSafeNormal();
+    if (!LocalEast.IsNearlyZero() && !LocalNorth.IsNearlyZero())
+    {
+        const float C3YawAroundFocusDeg = FRotator::NormalizeAxis(FMath::RadiansToDegrees(FMath::Atan2(
+            static_cast<float>(FVector::DotProduct(LocalForwardHint, LocalEast)),
+            static_cast<float>(FVector::DotProduct(LocalForwardHint, LocalNorth)))));
+
+        if (APlanetInteractionController* InteractionController = Cast<APlanetInteractionController>(PlayerController))
+        {
+            InteractionController->SetC3FocusCameraState(LocalWarZoneDir, CameraDistance, C3YawAroundFocusDeg);
+            InteractionController->SetControlRotation(LookRotation);
+            ApplyFocusCameraState(LocalWarZoneDir, CameraDistance, CameraTiltDeg, C3YawAroundFocusDeg);
+
+            UE_LOG(LogPlanetTess, Log,
+                TEXT("[Tess][C2] Game start focus war zone camera via C3 state Faction=%d Turn=%d Camera=(%.1f, %.1f, %.1f) Target=(%.1f, %.1f, %.1f) Distance=%.1f Tilt=%.1f Yaw=%.1f"),
+                GameplayContainer.IsValid() ? GameplayContainer->GetCurrentFactionId() : INDEX_NONE,
+                GameplayContainer.IsValid() ? GameplayContainer->GetTurnIndex() : INDEX_NONE,
+                CameraWorldPosition.X,
+                CameraWorldPosition.Y,
+                CameraWorldPosition.Z,
+                TargetWorldPosition.X,
+                TargetWorldPosition.Y,
+                TargetWorldPosition.Z,
+                CameraDistance,
+                CameraTiltDeg,
+                C3YawAroundFocusDeg);
+
+            return true;
+        }
+    }
+
     if (AActor* ViewTarget = PlayerController->GetViewTarget())
     {
         ViewTarget->SetActorLocation(CameraWorldPosition);
@@ -1833,7 +2011,7 @@ bool APlanetTessellatedMesh::FocusCameraOnCurrentFactionWarZone_()
     PlayerController->SetControlRotation(LookRotation);
 
     UE_LOG(LogPlanetTess, Log,
-        TEXT("[Tess][C2] Focus war zone camera Faction=%d Turn=%d Camera=(%.1f, %.1f, %.1f) Target=(%.1f, %.1f, %.1f) Distance=%.1f Tilt=%.1f"),
+        TEXT("[Tess][C2] Game start focus war zone camera fallback Faction=%d Turn=%d Camera=(%.1f, %.1f, %.1f) Target=(%.1f, %.1f, %.1f) Distance=%.1f Tilt=%.1f"),
         GameplayContainer.IsValid() ? GameplayContainer->GetCurrentFactionId() : INDEX_NONE,
         GameplayContainer.IsValid() ? GameplayContainer->GetTurnIndex() : INDEX_NONE,
         CameraWorldPosition.X,
@@ -1843,9 +2021,49 @@ bool APlanetTessellatedMesh::FocusCameraOnCurrentFactionWarZone_()
         TargetWorldPosition.Y,
         TargetWorldPosition.Z,
         CameraDistance,
-        C2TurnStartCameraTiltDeg);
+        CameraTiltDeg);
 
     return true;
+}
+
+bool APlanetTessellatedMesh::BlendCameraFocusToCurrentFactionWarZone_()
+{
+    if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized() || !CellTopology.IsValid())
+    {
+        return false;
+    }
+
+    FVector LocalWarZoneDir = FVector::ZeroVector;
+    if (!TryBuildCurrentFactionWarZoneDirection_(LocalWarZoneDir))
+    {
+        return false;
+    }
+
+    UWorld* World = GetWorld();
+    if (!World || !World->IsGameWorld())
+    {
+        return false;
+    }
+
+    APlanetInteractionController* InteractionController = Cast<APlanetInteractionController>(
+        UGameplayStatics::GetPlayerController(World, 0));
+    if (!InteractionController)
+    {
+        return false;
+    }
+
+    const bool bRequested = InteractionController->RequestC2_5FocusOnUnitDir(
+        LocalWarZoneDir,
+        FMath::Max(0.0f, C2_5TurnStartFocusBlendSeconds));
+    if (bRequested)
+    {
+        UE_LOG(LogPlanetTess, Log,
+            TEXT("[Tess][C2.5] Requested turn start war zone focus blend Faction=%d Turn=%d Blend=%.2f"),
+            GameplayContainer->GetCurrentFactionId(),
+            GameplayContainer->GetTurnIndex(),
+            C2_5TurnStartFocusBlendSeconds);
+    }
+    return bRequested;
 }
 
 void APlanetTessellatedMesh::SyncP1PiecePresentation_(const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents)
@@ -2769,7 +2987,7 @@ bool APlanetTessellatedMesh::HandleHISMClickHit(const FHitResult& Hit)
         int32 SelectedPieceCellId = INDEX_NONE;
         if (GameplayContainer->TryGetPieceCellId(NewSelectedPieceId, SelectedPieceCellId))
         {
-            FocusCameraOnCell_(SelectedPieceCellId, false);
+            FocusCameraOnSelectedCellSmart_(SelectedPieceCellId);
         }
     }
 
@@ -3326,4 +3544,3 @@ void APlanetTessellatedMesh::UpdateHISMHoverCell_(int32 NewCellId)
     WriteHISMHighlightForCell_(NewCellId, false);
     RefreshG4CapturePreviewCellsForActionTarget_(NewCellId, true);
 }
-

@@ -37,6 +37,15 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Planet|Interaction")
     TEnumAsByte<ECollisionChannel> HoverTraceChannel = ECC_Visibility;
 
+    /** C4：请求把 C3 焦点平滑移动到指定球面方向。 */
+    bool RequestC4FocusOnUnitDir(const FVector& TargetFocusUnitDir, float BlendSeconds);
+
+    /** C2.5：请求回合开始时平滑移动 C3 焦点，不改变当前距离与 yaw。 */
+    bool RequestC2_5FocusOnUnitDir(const FVector& TargetFocusUnitDir, float BlendSeconds);
+
+    /** C2/C3：外部自动镜头写入 C3 焦点式相机状态，避免下一帧被旧 C3 状态覆盖。 */
+    bool SetC3FocusCameraState(const FVector& FocusUnitDir, float DistanceToFocusCM, float YawAroundFocusDeg);
+
 private:
     /** C3：是否已经从当前视角同步过焦点式手动相机状态。 */
     bool bC3FocusCameraInitialized = false;
@@ -64,6 +73,21 @@ private:
      */
     float C3YawAroundFocusDeg = 0.0f;
 
+    /** C4：是否正在执行选中棋子自动聚焦。 */
+    bool bC4SelectionFocusBlendActive = false;
+
+    /** C4：自动聚焦起点。 */
+    FVector C4SelectionFocusStartUnitDir = FVector::ForwardVector;
+
+    /** C4：自动聚焦目标。 */
+    FVector C4SelectionFocusTargetUnitDir = FVector::ForwardVector;
+
+    /** C4：自动聚焦已经经过的时间。 */
+    float C4SelectionFocusElapsedSeconds = 0.0f;
+
+    /** C4：自动聚焦总时长。 */
+    float C4SelectionFocusDurationSeconds = 0.0f;
+
     /** 在关卡里自动查找的 Binder 缓存。 */
     UPROPERTY(Transient)
     TObjectPtr<APlanetBinder> CachedBinder;
@@ -76,4 +100,7 @@ private:
 
     /** C3：焦点式手动球面相机控制。 */
     void UpdateC3FocusCameraControl_(float DeltaTime, APlanetTessellatedMesh* Tess);
+
+    /** C4：是否存在手动相机输入。 */
+    bool HasC3ManualCameraInput_() const;
 };

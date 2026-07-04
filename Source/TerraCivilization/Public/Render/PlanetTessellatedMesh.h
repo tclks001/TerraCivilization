@@ -477,16 +477,24 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G2.5", meta = (ClampMin = "0.0", ClampMax = "100000.0"))
     float G2_5TurnStartCameraHeightCM = 8000.0f;
 
-    /** C2：true 时回合开始切到当前阵营活棋子的战区中心斜俯视；false 时保留 G2.5 主将/大本营正上方视角。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C2 Camera", meta = (DisplayName = "Enable C2 Turn Start War Zone Camera"))
-    bool bEnableC2TurnStartWarZoneCamera = true;
+    /** C2：true 时游戏开始硬设置到当前阵营活棋子的战区中心斜俯视。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C2 Camera", meta = (DisplayName = "Enable C2 Game Start War Zone Camera"))
+    bool bEnableC2GameStartWarZoneCamera = true;
 
-    /** C2：回合开始斜俯视时，相机到战区中心目标点的距离（cm）。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C2 Camera", meta = (ClampMin = "1000.0", ClampMax = "200000.0"))
+    /** C2.5：true 时每次回合开始平滑把 C3 视角中心切到当前阵营战区中心。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C2.5 Camera")
+    bool bEnableC2_5TurnStartWarZoneFocusBlend = true;
+
+    /** C2.5：回合开始平滑切换视角中心的 Blend 时长（秒），不改变当前距离。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C2.5 Camera", meta = (ClampMin = "0.0", ClampMax = "5.0"))
+    float C2_5TurnStartFocusBlendSeconds = 0.45f;
+
+    /** C2：已禁用。回合开始距离改由 C3InitialDistanceToFocusCM 控制。字段仅保留以兼容旧关卡序列化。 */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|SimpleGameplay C2 Camera|Deprecated", meta = (DeprecatedProperty, DeprecationMessage = "Disabled. Use C3InitialDistanceToFocusCM instead."))
     float C2TurnStartCameraDistanceCM = 18000.0f;
 
-    /** C2：回合开始斜俯视时，视线中心方向与目标点地面切平面的夹角（度）。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C2 Camera", meta = (ClampMin = "5.0", ClampMax = "85.0"))
+    /** C2：已禁用。回合开始倾角改由 C3.7 自动倾角逻辑根据距离派生。字段仅保留以兼容旧关卡序列化。 */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|SimpleGameplay C2 Camera|Deprecated", meta = (DeprecatedProperty, DeprecationMessage = "Disabled. C3.7 auto tilt derives tilt from distance."))
     float C2TurnStartCameraTiltDeg = 55.0f;
 
     /** 当前阵营所有棋子脚下 Cell 的淡粉色提示。 */
@@ -556,6 +564,18 @@ public:
     /** C3：聚焦相机手动模式的 fallback 初始距离（cm）。仅在首次进入手动模式且 Sync 尚未完成时使用。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "0.0", ClampMax = "200000.0"))
     float C3InitialDistanceToFocusCM = 8000.0f;
+
+    /** C4：true 时点击选中棋子会先判断是否需要智能聚焦。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C4 Camera")
+    bool bEnableC4SmartSelectionFocus = true;
+
+    /** C4：选中单位与当前视角中心的球面角距离不超过该值时，认为已在舒适区内。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C4 Camera", meta = (ClampMin = "0.0", ClampMax = "180.0"))
+    float C4ComfortFocusAngleDeg = 18.0f;
+
+    /** C4：选中屏幕外/边缘棋子时 C3 焦点 Blend 时长（秒）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C4 Camera", meta = (ClampMin = "0.0", ClampMax = "5.0"))
+    float C4SelectedPieceFocusBlendSeconds = 0.35f;
 
     //----------------------------------------------------------
     // 生命周期
@@ -702,8 +722,20 @@ private:
     /** SimpleGameplay G2.5：回合开始时移动到 Cell 上方并朝向 Cell，或仅旋转当前视角对准 Cell。 */
     void FocusCameraOnCell_(int32 CellId, bool bMoveCamera);
 
-    /** SimpleGameplay C2：回合开始时视角切到当前阵营活棋子战区中心斜俯视。成功处理返回 true。 */
-    bool FocusCameraOnCurrentFactionWarZone_();
+    /** SimpleGameplay C4：选中棋子时按焦点角距离舒适区判断是否需要聚焦。 */
+    void FocusCameraOnSelectedCellSmart_(int32 CellId);
+
+    /** SimpleGameplay C4：判断 Cell 与当前视角中心的球面角距离是否在舒适阈值内。 */
+    bool IsCellInC4ComfortView_(int32 CellId) const;
+
+    /** SimpleGameplay C4：向当前 PlayerController 请求 C3 焦点 Blend。 */
+    bool RequestC4SelectionFocus_(int32 CellId) const;
+
+    /** SimpleGameplay C2：游戏开始时硬设置到当前阵营活棋子战区中心斜俯视。成功处理返回 true。 */
+    bool FocusCameraOnCurrentFactionWarZoneHard_();
+
+    /** SimpleGameplay C2.5：回合开始时平滑把 C3 视角中心切到当前阵营活棋子战区中心。成功处理返回 true。 */
+    bool BlendCameraFocusToCurrentFactionWarZone_();
 
     /** SimpleGameplay C2：计算当前阵营活棋子的平均球面方向。 */
     bool TryBuildCurrentFactionWarZoneDirection_(FVector& OutLocalWarZoneDir) const;
@@ -903,6 +935,9 @@ public:
 
     /** SimpleGameplay G2.5：上一次已经执行回合开始相机切换的 TurnIndex。 */
     int32 G2_5LastCameraFocusedTurnIndex = INDEX_NONE;
+
+    /** SimpleGameplay C2：本局是否已经完成游戏开始硬设置镜头。 */
+    bool bC2GameStartCameraApplied = false;
 
     /** SimpleGameplay G1/G2：当前初始化出的调试棋子缓存。 */
     TArray<FTerraG1DebugPiece> G1DebugPieces;

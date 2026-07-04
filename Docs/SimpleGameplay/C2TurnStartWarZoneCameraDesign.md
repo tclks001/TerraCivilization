@@ -1,90 +1,95 @@
-# TerraCivilization SimpleGameplay C2 回合开始斜俯视战区中心设计稿
+# TerraCivilization SimpleGameplay C2 游戏开始斜俯视战区中心设计稿
 
 > 本稿从 [CameraTrackingAndInteractionDesign.md](CameraTrackingAndInteractionDesign.md) 的 C2 阶段拆出。
 >
-> C2 只改变“回合开始自动视角”的目标和构图，不改变 Gameplay 规则、不改变 HISM 点击/高亮、不改变 G8 的 `WSAD + 滚轮` 手动轨道控制。
+> C2 现阶段只负责“游戏开始之初”的一次性硬设置镜头；回合开始时的平滑焦点切换由 [C2_5TurnStartWarZoneFocusBlendDesign.md](C2_5TurnStartWarZoneFocusBlendDesign.md) 负责。
 
 ---
 
 ## 1. 目标
 
-C2 要解决 G2.5 回合开始“垂直俯视主将/大本营”过于僵硬的问题。
+C2 要解决游戏刚开始时“垂直俯视主将/大本营”过于僵硬的问题。
 
 目标行为：
-
-1. 回合开始时，镜头不再切到当前阵营主将/大本营正上方。
-2. 镜头切到当前阵营所有活棋子的战区中心。
-3. 镜头以斜俯视角观察战区中心，保留球面空间感。
-4. 选中棋子时，仍保留 G2.5 的旧逻辑：只旋转当前相机对准被选棋子，不移动相机。
+1. PIE / 游戏开始后的首次自动镜头，不再切到当前阵营主将/大本营正上方。
+2. 镜头硬设置到当前阵营所有活棋子的战区中心。
+3. 镜头使用 C3 焦点式相机状态，后续 `WSAD / Q/E / 滚轮` 可以从同一套状态继续控制。
+4. 距离只由 `C3InitialDistanceToFocusCM` 控制。
+5. 倾角只按 C3.7 自动倾角逻辑由距离派生。
+6. 后续回合开始不再由 C2 硬设置镜头。
 
 ---
 
-## 2. 当前基础
+## 2. 触发时机
 
-当前自动视角入口在：
+C2 只在本局开始后第一次需要自动镜头时触发。
+
+运行期状态：
+
+| 字段 | 作用 |
+| --- | --- |
+| `bC2GameStartCameraApplied` | 本局是否已经完成游戏开始硬设置镜头 |
+
+触发入口仍复用旧的回合相机辅助入口：
 
 ```cpp
 APlanetTessellatedMesh::FocusCameraOnCurrentFactionBase_()
 ```
 
-触发时机：
-
-1. Gameplay 初始化后的首个 Tick。
-2. 回合切换后。
-
-旧行为：
+但入口内部改为：
 
 ```text
-当前阵营 BaseCellId
-    -> Cell 球面外侧 G2_5TurnStartCameraHeightCM
-    -> 相机看向该 Cell
+if !bC2GameStartCameraApplied:
+    bC2GameStartCameraApplied = true
+    尝试 C2 游戏开始硬设置
+else:
+    交给 C2.5 回合开始平滑切焦点
 ```
 
-问题：
-
-- 视角接近垂直俯视，缺少前后空间感。
-- 主将/大本营不一定代表玩家当前最需要看的区域。
-- 棋子分散后，玩家需要额外手动寻找可行动棋子。
+重建 Gameplay 时必须把 `bC2GameStartCameraApplied` 重置为 `false`。
 
 ---
 
 ## 3. C2 战区中心定义
 
-初版战区中心使用当前阵营所有活棋子的 Cell 球面方向平均值：
+战区中心使用当前阵营所有活棋子的 Cell 球面方向平均值：
 
 ```text
 WarZoneDir = Normalize(Sum(CurrentFactionAlivePiece.Cell.UnitCenter))
 ```
 
 过滤条件：
-
 - `Piece.bAlive == true`
 - `Piece.OwnerFactionId == CurrentFactionId`
 - `Piece.CellId` 有效
 
-如果没有可用棋子，或方向和接近零，则退回旧逻辑：
-
-```text
-CurrentFactionBaseCellId
-```
-
-原因：
-
-- 这个定义稳定、可解释、实现简单。
-- 能自然覆盖“棋子离开主将后，镜头看向当前阵营整体分布”的情况。
-- 后续 C6 行动跟随、C7 对手回合观看可以在这个基础上改为加权中心。
+如果没有可用棋子，或方向和接近零，则退回当前阵营主将/大本营方向。
 
 ---
 
-## 4. C2 斜俯视构图
+## 4. C2 构图职责
 
-新增参数：
+C2 只负责游戏开始硬设置：
+1. 计算战区中心 `WarZoneDir`。
+2. 计算观察方位 `ForwardHint`。
+3. 使用 `C3InitialDistanceToFocusCM` 和 C3.7 自动倾角公式摆出初始镜头。
+4. 将焦点、距离和 yaw 写入 C3 状态，避免下一帧被 C3.5 稳态锁拉回旧位置。
+
+启用参数：
 
 | 参数 | 默认值 | 作用 |
 | --- | --- | --- |
-| `bEnableC2TurnStartWarZoneCamera` | `true` | 是否启用 C2 回合开始战区中心镜头 |
-| `C2TurnStartCameraDistanceCM` | `18000` | 相机到战区中心的距离 |
-| `C2TurnStartCameraTiltDeg` | `55` | 视线中心方向与目标点地面切平面的夹角 |
+| `bEnableC2GameStartWarZoneCamera` | `true` | 是否启用 C2 游戏开始战区中心硬设置 |
+| `C3InitialDistanceToFocusCM` | `8000` | 游戏开始自动镜头到战区中心的初始距离 |
+| `C3AutoTiltMinDistanceCM / C3AutoTiltMaxDistanceCM` | `2500 / 30000` | C3.7 自动倾角的距离区间 |
+| `C3AutoTiltAtMinDistanceDeg / C3AutoTiltAtMaxDistanceDeg` | `10 / 85` | C3.7 自动倾角的角度区间 |
+
+已禁用参数：
+
+| 参数 | 状态 | 替代方案 |
+| --- | --- | --- |
+| `C2TurnStartCameraDistanceCM` | 禁用，仅保留兼容旧关卡序列化 | 使用 `C3InitialDistanceToFocusCM` |
+| `C2TurnStartCameraTiltDeg` | 禁用，仅保留兼容旧关卡序列化 | 使用 C3.7 自动倾角 |
 
 构图规则：
 
@@ -92,68 +97,43 @@ CurrentFactionBaseCellId
 Target = WarZoneDir * GlobeRadiusCM
 Up = WarZoneDir
 ForwardHint = Project(WarZoneDir - CommanderDir, Up)
+Distance = Clamp(C3InitialDistanceToFocusCM, G8CameraMinHeightOffsetCM, G8CameraMaxHeightOffsetCM)
+Tilt = C3.7_AutoTiltFromDistance(Distance)
 Camera = Target - ForwardHint * Distance * cos(Tilt) + Up * Distance * sin(Tilt)
 CameraForward = Normalize(Target - Camera)
 CameraRotation = MakeFromXZ(CameraForward, Up)
 ```
 
-其中：
-
-- `ForwardHint` 表示从主将/大本营方向指向战区中心的切平面方向。
-- 相机放在 `ForwardHint` 的反方向，并向球面外侧抬高。
-- 这样画面语义是“从本阵营后方看向本阵营战区”。
-- 相机正前方严格看向地表目标点 `Target`。
-- `Tilt` 控制视线中心方向与目标点地面切平面的夹角。
-- 相机 up 方向使用目标点外法线 `Up` 约束，避免不同经纬度下画面上下方向不稳定。
-
-如果 `ForwardHint` 无法计算：
-
-1. 优先从当前相机到战区中心的切平面方向推导。
-2. 仍失败时，使用与 `Up` 正交的固定切线方向。
-
 ---
 
-## 5. 与 G8 的关系
+## 5. 与 C3 的状态同步
 
-C2 仍直接设置当前 ViewTarget 的位置和旋转。
+C2 不能只直接设置 `ViewTarget` 的位置和旋转。C3.5 之后，焦点式手动相机会每帧按控制器内部状态执行 `ApplyFocusCameraState(...)`。
 
-G8 每帧会从当前相机世界位置同步轨道参数：
-
-```cpp
-SyncOrbitCameraStateFromWorldPosition(...)
-```
-
-因此 C2 自动切镜后，玩家继续按 `WSAD` 或滚轮时，G8 会从 C2 的新位置继续控制，不会跳回旧轨道状态。
-
-C2 不修改：
-
-- `APlanetInteractionController`
-- `G8CameraLongitudeDeg`
-- `G8CameraLatitudeDeg`
-- `G8CameraHeightOffsetCM`
+同步规则：
+1. C2 计算出 `WarZoneDir / ForwardHint`。
+2. C2 按 C3 的局部 `North/East` 基把 `ForwardHint` 反解为 `YawAroundFocusDeg`。
+3. C2 调用 `APlanetInteractionController::SetC3FocusCameraState(...)` 写入：
+   - `FocusUnitDir = WarZoneDir`
+   - `DistanceToFocusCM = Clamp(C3InitialDistanceToFocusCM, G8CameraMinHeightOffsetCM, G8CameraMaxHeightOffsetCM)`
+   - `YawAroundFocusDeg`
+4. C2 立即调用 `ApplyFocusCameraState(...)`。
 
 ---
 
 ## 6. 验收
 
-1. PIE 启动后，首个回合镜头切到当前阵营整体棋子附近，而不是主将正上方。
-2. 结束回合后，新阵营回合开始时同样切到该阵营整体棋子附近。
-3. 镜头能看到主要可行动棋子。
-4. 视角有明显斜俯视空间感，不是垂直俯视。
-5. 点击己方棋子后，仍只旋转镜头对准该棋子，不移动镜头。
-6. 自动切镜后，`WSAD + 滚轮` 仍可继续手动调整。
+1. PIE / 游戏开始后，首次镜头硬设置到当前阵营整体棋子附近，而不是主将正上方。
+2. C3.5 每帧 Apply 开启后，初始镜头不会在下一帧跳回旧焦点。
+3. 调整 `C3InitialDistanceToFocusCM` 后，游戏开始镜头距离明显变化。
+4. 调整 C3.7 自动倾角参数后，游戏开始镜头倾角按同一套规则变化。
+5. 后续回合开始不再执行 C2 硬设置，而由 C2.5 平滑切焦点。
 
 ---
 
 ## 7. 暂不处理
 
 C2 暂不实现：
-
-- 平滑过渡。
-- 玩家输入打断自动镜头。
-- 屏幕内可见性判断。
-- Tab/Shift+Tab 棋子导航。
-- 行动过程相机跟随。
-- 对手回合视角恢复。
-
-这些内容分别留给 C3 之后的阶段。
+- 游戏开始硬设置的平滑过渡。
+- 玩家输入打断游戏开始硬设置。
+- 回合开始平滑切焦点，该能力由 C2.5 实现。
