@@ -592,6 +592,21 @@ Gameplay 规则
 - 极区操作不再明显退化。
 - `WSAD` 不改变视野中球体的相对屏幕位置，只沿当前视野中心的局部切平面移动焦点。
 
+### C3.5：无输入帧相机稳态
+
+阶段稿：[C3_5IdleFrameCameraStabilityDesign.md](C3_5IdleFrameCameraStabilityDesign.md)。
+
+目标：
+
+- 修复 C3 收尾发现的一个副作用：在 C3 手动模式下松开 W/S/A/D、无任何输入的帧里，相机会缓慢漂移，只有再次按下按键触发 Apply 才被拉回焦点。
+- 让相机在无输入帧仍严格锚定当前 `(FocusUnitDir, Yaw, Tilt, Distance)`，不接受来自 UE 默认 Pawn / PlayerController 的隐式姿态回写。
+
+验收：
+
+- 进入 C3 手动模式后，若玩家不做任何输入，相机在数秒内不发生任何可见位移与旋转。
+- 松开 W/S/A/D 的瞬间与松开前的最后一帧姿态完全一致，且此后保持不动。
+- 与 C4 智能选中聚焦兼容：C3.5 的稳态锁只对 C3 手动状态生效，不影响未来自动镜头 Blend。
+
 ### C4：智能选中聚焦
 
 目标：

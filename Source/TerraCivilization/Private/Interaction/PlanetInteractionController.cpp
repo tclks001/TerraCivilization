@@ -198,44 +198,32 @@ void APlanetInteractionController::UpdateC3FocusCameraControl_(float DeltaTime, 
     // 详见 Docs/SimpleGameplay/C3FocusCameraManualControlDesign.md §4.2。
 
     const float OrbitDeltaDeg = Tess->G8CameraOrbitDegreesPerSecond * DeltaTime;
-    bool bCameraChanged = false;
     float FocusRightDeltaDeg = 0.0f;
     float FocusForwardDeltaDeg = 0.0f;
 
     if (IsInputKeyDown(EKeys::W))
     {
         FocusForwardDeltaDeg += OrbitDeltaDeg;
-        bCameraChanged = true;
     }
     if (IsInputKeyDown(EKeys::S))
     {
         FocusForwardDeltaDeg -= OrbitDeltaDeg;
-        bCameraChanged = true;
     }
     if (IsInputKeyDown(EKeys::A))
     {
         FocusRightDeltaDeg -= OrbitDeltaDeg;
-        bCameraChanged = true;
     }
     if (IsInputKeyDown(EKeys::D))
     {
         FocusRightDeltaDeg += OrbitDeltaDeg;
-        bCameraChanged = true;
     }
     if (WasInputKeyJustPressed(EKeys::MouseScrollUp))
     {
         C3DistanceToFocusCM -= Tess->G8CameraZoomStepCM;
-        bCameraChanged = true;
     }
     if (WasInputKeyJustPressed(EKeys::MouseScrollDown))
     {
         C3DistanceToFocusCM += Tess->G8CameraZoomStepCM;
-        bCameraChanged = true;
-    }
-
-    if (!bCameraChanged)
-    {
-        return;
     }
 
     if (!FMath::IsNearlyZero(FocusRightDeltaDeg) || !FMath::IsNearlyZero(FocusForwardDeltaDeg))
@@ -248,6 +236,12 @@ void APlanetInteractionController::UpdateC3FocusCameraControl_(float DeltaTime, 
             C3YawAroundFocusDeg);
     }
 
+    // C3.5：每帧无条件 Clamp / 派生 / Apply。即便本帧无输入也走 Apply，
+    // 目的是把相机严格锚定到当前 (FocusUnitDir, Yaw, Tilt, Distance)，
+    // 避免 UE 默认 Pawn / PlayerController / CameraManager 在无输入帧偷偷改动相机姿态。
+    // 详见 Docs/SimpleGameplay/C3_5IdleFrameCameraStabilityDesign.md。
+    // 注意：这里只每帧"写"（Apply），不每帧"读回覆盖"（Sync），因此不会重新引入 C3 §4.2 消灭的
+    // "沿纬线走 / 极点卡死"闭环。
     C3DistanceToFocusCM = FMath::Clamp(
         C3DistanceToFocusCM,
         Tess->G8CameraMinHeightOffsetCM,

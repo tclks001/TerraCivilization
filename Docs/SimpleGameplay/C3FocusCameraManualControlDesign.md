@@ -297,5 +297,6 @@ C3 暂不实现：
 - 自动镜头 Blend。
 - 玩家输入打断自动镜头。
 - Tab 棋子导航。
+- **无输入帧的相机稳态**：C3 手动模式下 Apply 只在 W/S/A/D/滚轮任一有输入时执行；无输入帧不主动摆相机。因此若 UE 默认 Pawn / PlayerController 在无输入帧仍在推 `ControlRotation` 或 Pawn 姿态，相机会缓慢漂移，直到玩家再次按下按键才被 Apply "拉回焦点"。**此问题独立留给 [C3_5IdleFrameCameraStabilityDesign.md](C3_5IdleFrameCameraStabilityDesign.md) 阶段解决**，不塞进 C3。
 
 **已从"暂不处理"移除**：极点穿越。C3 用 3D 单位向量作为焦点真值 + Yaw 平行运输后，极点穿越是自然行为，不再是需要单独处理的特殊情况。
