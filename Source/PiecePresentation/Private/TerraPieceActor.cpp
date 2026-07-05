@@ -69,6 +69,27 @@ ATerraPieceActor::ATerraPieceActor()
     HumanMesh->SetGenerateOverlapEvents(false);
     HumanMesh->SetCanEverAffectNavigation(false);
     HumanMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
+
+    HorseMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("HorseMesh"));
+    HorseMesh->SetupAttachment(RootScene);
+    HorseMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    HorseMesh->SetGenerateOverlapEvents(false);
+    HorseMesh->SetCanEverAffectNavigation(false);
+    HorseMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
+    HorseMesh->SetHiddenInGame(true);
+    HorseMesh->SetVisibility(false);
+
+    RiderAnchor = CreateDefaultSubobject<USceneComponent>(TEXT("RiderAnchor"));
+    RiderAnchor->SetupAttachment(RootScene);
+
+    RiderMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("RiderMesh"));
+    RiderMesh->SetupAttachment(RiderAnchor);
+    RiderMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    RiderMesh->SetGenerateOverlapEvents(false);
+    RiderMesh->SetCanEverAffectNavigation(false);
+    RiderMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
+    RiderMesh->SetHiddenInGame(true);
+    RiderMesh->SetVisibility(false);
 }
 
 void ATerraPieceActor::ApplyPresentationSnapshot(const FTerraPiecePresentationSnapshot& Snapshot, const FTerraPieceVisualConfig& VisualConfig)
@@ -115,7 +136,14 @@ void ATerraPieceActor::ApplyPresentationSnapshot(const FTerraPiecePresentationSn
     NewDriveState.FacingDirection = GetActorForwardVector();
     NewDriveState.bDead = false;
     SetDriveState_(NewDriveState);
-    PlayConfiguredAnimation_(VisualConfig.IdleAnimation, true);
+    if (IsMountedCavalry_())
+    {
+        PlayMountedIdleAnimations_();
+    }
+    else
+    {
+        PlayConfiguredAnimation_(VisualConfig.IdleAnimation, true);
+    }
     SetActorTickEnabled(bHasActiveFacingBlend || bHasActiveDeathFade);
 }
 
@@ -182,9 +210,16 @@ void ATerraPieceActor::PlayPresentationMove(
     NewDriveState.bDead = false;
     SetDriveState_(NewDriveState);
 
-    PlayConfiguredAnimation_(
-        MoveEvent.MoveType == ETerraPiecePresentationMoveType::Jump ? VisualConfig.JumpAnimation : VisualConfig.MoveAnimation,
-        MoveEvent.MoveType != ETerraPiecePresentationMoveType::Jump);
+    if (IsMountedCavalry_())
+    {
+        PlayMountedMoveAnimation_(MoveEvent.MoveType);
+    }
+    else
+    {
+        PlayConfiguredAnimation_(
+            MoveEvent.MoveType == ETerraPiecePresentationMoveType::Jump ? VisualConfig.JumpAnimation : VisualConfig.MoveAnimation,
+            MoveEvent.MoveType != ETerraPiecePresentationMoveType::Jump);
+    }
 
     SetActorTickEnabled(true);
 }
@@ -249,7 +284,15 @@ void ATerraPieceActor::PlayPresentationOnlyMoveTo(const FTransform& TargetTransf
     NewDriveState.FacingDirection = ActiveMoveDesiredFacingDirection;
     NewDriveState.bDead = false;
     SetDriveState_(NewDriveState);
-    PlayConfiguredAnimation_(MoveAnimation, true);
+    if (IsMountedCavalry_())
+    {
+        PlayAnimationOnMesh_(HorseMesh, CachedVisualConfig.HorseMoveAnimation, true, 0.0f);
+        PlayAnimationOnMesh_(RiderMesh, CachedVisualConfig.RiderSittingAnimation, true, 0.0f);
+    }
+    else
+    {
+        PlayConfiguredAnimation_(MoveAnimation, true);
+    }
     SetActorTickEnabled(true);
 }
 
@@ -379,9 +422,59 @@ void ATerraPieceActor::ApplyVisualConfig_(const FTerraPieceVisualConfig& VisualC
     }
 
     HumanMesh->SetSkeletalMesh(VisualConfig.ResolveMesh(PieceType));
-    HumanMesh->SetRelativeLocation(VisualConfig.MeshRelativeLocation);
-    HumanMesh->SetRelativeRotation(VisualConfig.MeshRelativeRotation);
-    HumanMesh->SetRelativeScale3D(FVector(FMath::Max(VisualConfig.UniformScale, 0.001f)));
+
+    if (IsMountedCavalry_())
+    {
+        HumanMesh->SetHiddenInGame(true);
+        HumanMesh->SetVisibility(false);
+
+        if (HorseMesh)
+        {
+            HorseMesh->SetSkeletalMesh(VisualConfig.HorseMesh);
+            HorseMesh->SetRelativeLocation(VisualConfig.HorseRelativeLocation);
+            HorseMesh->SetRelativeRotation(VisualConfig.HorseRelativeRotation);
+            HorseMesh->SetRelativeScale3D(FVector(FMath::Max(VisualConfig.HorseUniformScale, 0.001f)));
+            HorseMesh->SetHiddenInGame(false);
+            HorseMesh->SetVisibility(true);
+        }
+
+        if (RiderAnchor)
+        {
+            RiderAnchor->SetRelativeLocation(VisualConfig.RiderRelativeLocation);
+            RiderAnchor->SetRelativeRotation(VisualConfig.RiderRelativeRotation);
+            RiderAnchor->SetRelativeScale3D(FVector(FMath::Max(VisualConfig.RiderUniformScale, 0.001f)));
+        }
+
+        if (RiderMesh)
+        {
+            RiderMesh->SetSkeletalMesh(VisualConfig.ResolveMesh(PieceType));
+            RiderMesh->SetRelativeLocation(FVector::ZeroVector);
+            RiderMesh->SetRelativeRotation(VisualConfig.MeshRelativeRotation);
+            RiderMesh->SetRelativeScale3D(FVector(FMath::Max(VisualConfig.UniformScale, 0.001f)));
+            RiderMesh->SetHiddenInGame(false);
+            RiderMesh->SetVisibility(true);
+        }
+    }
+    else
+    {
+        HumanMesh->SetRelativeLocation(VisualConfig.MeshRelativeLocation);
+        HumanMesh->SetRelativeRotation(VisualConfig.MeshRelativeRotation);
+        HumanMesh->SetRelativeScale3D(FVector(FMath::Max(VisualConfig.UniformScale, 0.001f)));
+        HumanMesh->SetHiddenInGame(false);
+        HumanMesh->SetVisibility(true);
+
+        if (HorseMesh)
+        {
+            HorseMesh->SetHiddenInGame(true);
+            HorseMesh->SetVisibility(false);
+        }
+        if (RiderMesh)
+        {
+            RiderMesh->SetHiddenInGame(true);
+            RiderMesh->SetVisibility(false);
+        }
+    }
+
     SetActorHiddenInGame(false);
     SetActorScale3D(FVector::OneVector);
 }
@@ -408,21 +501,55 @@ void ATerraPieceActor::PlayConfiguredAnimation_(UAnimationAsset* AnimationAsset,
 
 void ATerraPieceActor::PlayConfiguredAnimation_(UAnimationAsset* AnimationAsset, bool bLooping, float StartOffsetSeconds)
 {
-    if (!HumanMesh || !AnimationAsset)
+    PlayAnimationOnMesh_(HumanMesh, AnimationAsset, bLooping, StartOffsetSeconds);
+}
+
+void ATerraPieceActor::PlayAnimationOnMesh_(USkeletalMeshComponent* MeshComponent, UAnimationAsset* AnimationAsset, bool bLooping, float StartOffsetSeconds, float PlayRate)
+{
+    if (!MeshComponent || !AnimationAsset)
     {
         return;
     }
 
-    if (Cast<UTerraPieceAnimInstance>(HumanMesh->GetAnimInstance()))
+    if (Cast<UTerraPieceAnimInstance>(MeshComponent->GetAnimInstance()))
     {
         return;
     }
 
-    HumanMesh->PlayAnimation(AnimationAsset, bLooping);
+    MeshComponent->PlayAnimation(AnimationAsset, bLooping);
+    MeshComponent->SetPlayRate(FMath::Max(PlayRate, 0.001f));
     if (StartOffsetSeconds > 0.0f)
     {
-        HumanMesh->SetPosition(FMath::Max(StartOffsetSeconds, 0.0f), false);
+        MeshComponent->SetPosition(FMath::Max(StartOffsetSeconds, 0.0f), false);
     }
+}
+
+void ATerraPieceActor::PlayMountedMoveAnimation_(ETerraPiecePresentationMoveType MoveType)
+{
+    if (MoveType == ETerraPiecePresentationMoveType::Jump)
+    {
+        float HorseJumpPlayRate = 1.0f;
+        if (CachedVisualConfig.HorseJumpAnimation && ActiveMoveDurationSeconds > KINDA_SMALL_NUMBER)
+        {
+            HorseJumpPlayRate = CachedVisualConfig.HorseJumpAnimation->GetPlayLength()
+                / ActiveMoveDurationSeconds
+                * FMath::Max(CachedVisualConfig.HorseJumpPlayRateScale, 0.001f);
+        }
+
+        PlayAnimationOnMesh_(HorseMesh, CachedVisualConfig.HorseJumpAnimation, false, 0.0f, HorseJumpPlayRate);
+    }
+    else
+    {
+        PlayAnimationOnMesh_(HorseMesh, CachedVisualConfig.HorseMoveAnimation, true, 0.0f);
+    }
+
+    PlayAnimationOnMesh_(RiderMesh, CachedVisualConfig.RiderSittingAnimation, true, 0.0f);
+}
+
+void ATerraPieceActor::PlayMountedIdleAnimations_()
+{
+    PlayAnimationOnMesh_(HorseMesh, CachedVisualConfig.HorseIdleAnimation, true, 0.0f);
+    PlayAnimationOnMesh_(RiderMesh, CachedVisualConfig.RiderSittingAnimation, true, 0.0f);
 }
 
 void ATerraPieceActor::FinishActiveMove_()
@@ -445,7 +572,14 @@ void ATerraPieceActor::FinishActiveMove_()
     NewDriveState.FacingDirection = GetActorForwardVector();
     NewDriveState.bDead = false;
     SetDriveState_(NewDriveState);
-    PlayConfiguredAnimation_(CachedVisualConfig.IdleAnimation, true);
+    if (IsMountedCavalry_())
+    {
+        PlayMountedIdleAnimations_();
+    }
+    else
+    {
+        PlayConfiguredAnimation_(CachedVisualConfig.IdleAnimation, true);
+    }
     SetActorTickEnabled(bHasActiveFacingBlend || bHasActiveDeathFade);
 }
 
@@ -487,4 +621,9 @@ FQuat ATerraPieceActor::BuildRotationFromFacing_(const FVector& WorldPosition, c
     }
 
     return FRotationMatrix::MakeFromXZ(Forward, Up).ToQuat();
+}
+
+bool ATerraPieceActor::IsMountedCavalry_() const
+{
+    return PieceType == ETerraGameplayPieceType::Cavalry;
 }

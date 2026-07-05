@@ -958,6 +958,10 @@ Content/PiecePresentation/
 
 ### P4：骑兵双骨骼方案
 
+P4.1 静态骑乘 Idle 阶段设计见：[P4_1MountedCavalryIdleDesign.md](P4_1MountedCavalryIdleDesign.md)。
+
+P4.2 骑兵移动 / 跳跃阶段设计见：[P4_2MountedCavalryMoveJumpDesign.md](P4_2MountedCavalryMoveJumpDesign.md)。
+
 目标：
 
 - 马体独立 locomotion

@@ -465,6 +465,54 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
     bool bDebugP2_5HISMPieceHeightTrace = true;
 
+    /** P4.1 骑兵马模型。推荐 Content/Animations/Horse/Horse。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<USkeletalMesh> P4HorseMesh;
+
+    /** P4.1 马 Idle 动画。推荐 HorseIdle。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UAnimationAsset> P4HorseIdleAnimation;
+
+    /** P4.2 马移动动画。推荐 HorseWalk。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UAnimationAsset> P4HorseMoveAnimation;
+
+    /** P4.2 马跳跃动画。推荐 HorseGallop_Jump。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UAnimationAsset> P4HorseJumpAnimation;
+
+    /** P4.2 马跳跃动画播放速率缩放。最终速率 = 动画长度 / P2 跳跃时长 * 本参数。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "10.0"))
+    float P4HorseJumpPlayRateScale = 1.0f;
+
+    /** P4.1 骑手坐姿 Idle。推荐 Rig_Medium_GeneralSitting。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UAnimationAsset> P4RiderSittingAnimation;
+
+    /** P4.1 马相对骑兵 Actor 根节点的位置修正。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FVector P4HorseRelativeLocation = FVector::ZeroVector;
+
+    /** P4.1 马相对骑兵 Actor 根节点的导入朝向修正。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FRotator P4HorseRelativeRotation = FRotator::ZeroRotator;
+
+    /** P4.1 马模型统一缩放。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
+    float P4HorseUniformScale = 1.0f;
+
+    /** P4.1 骑手相对 RiderAnchor / 马背锚点的位置。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FVector P4RiderRelativeLocation = FVector::ZeroVector;
+
+    /** P4.1 骑手相对 RiderAnchor / 马背锚点的旋转。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FRotator P4RiderRelativeRotation = FRotator::ZeroRotator;
+
+    /** P4.1 骑手相对缩放。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
+    float P4RiderUniformScale = 1.0f;
+
     /** P3 主将施法攻击动画。推荐 Rig_Medium_GeneralMagic_Spell_Casting。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
     TObjectPtr<UAnimationAsset> P3CommanderMagicAttackAnimation;

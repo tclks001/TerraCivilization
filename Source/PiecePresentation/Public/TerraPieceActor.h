@@ -41,6 +41,15 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Terra|Piece Presentation")
     TObjectPtr<USkeletalMeshComponent> HumanMesh;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Terra|Piece Presentation|P4.1")
+    TObjectPtr<USkeletalMeshComponent> HorseMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Terra|Piece Presentation|P4.1")
+    TObjectPtr<USceneComponent> RiderAnchor;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Terra|Piece Presentation|P4.1")
+    TObjectPtr<USkeletalMeshComponent> RiderMesh;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Terra|Piece Presentation")
     int32 PieceId = INDEX_NONE;
 
@@ -61,9 +70,13 @@ private:
     void SetDriveState_(const FTerraPieceAnimDriveState& NewDriveState);
     void PlayConfiguredAnimation_(UAnimationAsset* AnimationAsset, bool bLooping);
     void PlayConfiguredAnimation_(UAnimationAsset* AnimationAsset, bool bLooping, float StartOffsetSeconds);
+    void PlayAnimationOnMesh_(USkeletalMeshComponent* MeshComponent, UAnimationAsset* AnimationAsset, bool bLooping, float StartOffsetSeconds, float PlayRate = 1.0f);
+    void PlayMountedMoveAnimation_(ETerraPiecePresentationMoveType MoveType);
+    void PlayMountedIdleAnimations_();
     void FinishActiveMove_();
     FVector EvaluateActiveMovePosition_(float Alpha, const FTerraPieceVisualConfig& VisualConfig) const;
     FQuat BuildRotationFromFacing_(const FVector& WorldPosition, const FVector& DesiredFacingDirection, const FQuat& FallbackRotation) const;
+    bool IsMountedCavalry_() const;
 
 private:
     UPROPERTY(Transient)
@@ -113,4 +126,5 @@ private:
 
     UPROPERTY(Transient)
     FVector DeathFadeStartScale = FVector::OneVector;
+
 };
