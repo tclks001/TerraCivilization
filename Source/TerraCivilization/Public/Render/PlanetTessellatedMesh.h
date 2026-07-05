@@ -465,6 +465,82 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
     bool bDebugP2_5HISMPieceHeightTrace = true;
 
+    /** P3 主将施法攻击动画。推荐 Rig_Medium_GeneralMagic_Spell_Casting。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UAnimationAsset> P3CommanderMagicAttackAnimation;
+
+    /** P3 弓兵射击攻击动画。推荐 Rig_Medium_GeneralShooting_Arrow。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UAnimationAsset> P3ArcherRangedAttackAnimation;
+
+    /** P3 步兵近战攻击动画。推荐 Rig_Medium_GeneralSword_And_Shield_Slash。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UAnimationAsset> P3InfantryMeleeAttackAnimation;
+
+    /** P3 骑兵占位近战攻击动画。推荐 Rig_Medium_GeneralUpward_Thrust。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UAnimationAsset> P3CavalryMeleeAttackAnimation;
+
+    /** P3 通用受击动画。推荐 Rig_Medium_GeneralHit_A。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UAnimationAsset> P3HitAnimation;
+
+    /** P3 通用死亡动画。推荐 Rig_Medium_GeneralDeath_A。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UAnimationAsset> P3DeathAnimation;
+
+    /** P3 攻击前面向目标的 slerp 时长（秒）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "5.0"))
+    float P3FacingBlendSeconds = 0.15f;
+
+    /** P3 步兵 / 骑兵跑入被吃棋子 Cell 的时长（秒）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "5.0"))
+    float P3MeleeRunInSeconds = 0.25f;
+
+    /** P3 步兵 / 骑兵攻击后跑回原位的时长（秒）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "5.0"))
+    float P3MeleeReturnSeconds = 0.25f;
+
+    /** P3 攻击动画起播偏移（秒），用于校准有效攻击帧。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "10.0"))
+    float P3AttackAnimationStartOffsetSeconds = 0.0f;
+
+    /** P3 主将攻击动画起播后多久对齐到受击开始（秒）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "10.0"))
+    float P3CommanderAttackToHitSeconds = 0.35f;
+
+    /** P3 弓兵攻击动画起播后多久对齐到受击开始（秒）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "10.0"))
+    float P3ArcherAttackToHitSeconds = 0.35f;
+
+    /** P3 步兵攻击动画起播后多久对齐到受击开始（秒）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "10.0"))
+    float P3InfantryAttackToHitSeconds = 0.25f;
+
+    /** P3 骑兵攻击动画起播后多久对齐到受击开始（秒）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "10.0"))
+    float P3CavalryAttackToHitSeconds = 0.25f;
+
+    /** P3 兼容旧参数：作为没有攻击者时的最小受击延迟；有攻击者时会与各兵种 AttackToHit 取最大值。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "10.0"))
+    float P3HitReactDelaySeconds = 0.2f;
+
+    /** P3 受击动画起播偏移（秒），用于校准受击帧。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "10.0"))
+    float P3HitAnimationStartOffsetSeconds = 0.0f;
+
+    /** P3 受击触发后多久触发死亡动画（秒）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "10.0"))
+    float P3DeathAfterHitDelaySeconds = 0.2f;
+
+    /** P3 死亡动画起播偏移（秒），用于校准死亡帧。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "10.0"))
+    float P3DeathAnimationStartOffsetSeconds = 0.0f;
+
+    /** P3 被吃棋子死亡后淡出时长（秒）。当前首版用缩放淡出后销毁。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "10.0"))
+    float P3CapturedFadeSeconds = 0.35f;
+
     //----------------------------------------------------------
     // SimpleGameplay G2.5：视角与当前阵营提示
     //----------------------------------------------------------
@@ -763,7 +839,9 @@ private:
     void FocusCameraOnCurrentFactionBase_();
 
     /** SimpleGameplay P1/P2：根据当前 Gameplay 快照增量同步真实棋子 Actor，可选播放 P2 移动事件。 */
-    void SyncP1PiecePresentation_(const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents = TArray<FTerraPiecePresentationMoveEvent>());
+    void SyncP1PiecePresentation_(
+        const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents = TArray<FTerraPiecePresentationMoveEvent>(),
+        const TArray<FTerraPiecePresentationCaptureEvent>& CaptureEvents = TArray<FTerraPiecePresentationCaptureEvent>());
 
     /** SimpleGameplay P1：清空真实棋子 Actor 表现。 */
     void ClearP1PiecePresentation_();
@@ -776,6 +854,12 @@ private:
 
     /** SimpleGameplay P1/P2：按"背向本阵营主将"规则计算初始棋子朝向。 */
     bool BuildP1PieceWorldTransformForPiece_(const FTerraGameplayPieceState& Piece, const TArray<FTerraGameplayPieceState>& Pieces, FTransform& OutWorldTransform) const;
+
+    /** SimpleGameplay P3：把 Gameplay 待结算吃子条目转换成表现事件。 */
+    void BuildP3CaptureEventsFromPendingEntries_(
+        const TArray<FTerraGameplayCaptureEntry>& CaptureEntries,
+        const TArray<FTerraGameplayPieceState>& PiecesBeforeResolution,
+        TArray<FTerraPiecePresentationCaptureEvent>& OutCaptureEvents) const;
 
     /** SimpleGameplay P1：从 Details 面板资产槽生成表现配置。 */
     FTerraPieceVisualConfig BuildP1PieceVisualConfig_() const;

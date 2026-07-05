@@ -2123,7 +2123,9 @@ bool APlanetTessellatedMesh::BlendCameraFocusToCurrentFactionWarZone_()
     return bRequested;
 }
 
-void APlanetTessellatedMesh::SyncP1PiecePresentation_(const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents)
+void APlanetTessellatedMesh::SyncP1PiecePresentation_(
+    const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents,
+    const TArray<FTerraPiecePresentationCaptureEvent>& CaptureEvents)
 {
     UWorld* World = GetWorld();
     if (!World || !World->IsGameWorld() || !bEnableP1PiecePresentation)
@@ -2178,7 +2180,7 @@ void APlanetTessellatedMesh::SyncP1PiecePresentation_(const TArray<FTerraPiecePr
             MissingMeshCount);
     }
 
-    PiecePresentationManager->SyncPieces(Snapshots, VisualConfig, MoveEvents);
+    PiecePresentationManager->SyncPieces(Snapshots, VisualConfig, MoveEvents, CaptureEvents);
 }
 
 void APlanetTessellatedMesh::ClearP1PiecePresentation_()
@@ -2476,6 +2478,64 @@ bool APlanetTessellatedMesh::BuildP1PieceWorldTransformForPiece_(
     return true;
 }
 
+void APlanetTessellatedMesh::BuildP3CaptureEventsFromPendingEntries_(
+    const TArray<FTerraGameplayCaptureEntry>& CaptureEntries,
+    const TArray<FTerraGameplayPieceState>& PiecesBeforeResolution,
+    TArray<FTerraPiecePresentationCaptureEvent>& OutCaptureEvents) const
+{
+    OutCaptureEvents.Reset();
+    OutCaptureEvents.Reserve(CaptureEntries.Num());
+
+    auto BuildParticipant = [this, &PiecesBeforeResolution](int32 PieceId, FTerraPiecePresentationCaptureParticipant& OutParticipant) -> bool
+    {
+        if (!PiecesBeforeResolution.IsValidIndex(PieceId))
+        {
+            return false;
+        }
+
+        const FTerraGameplayPieceState& Piece = PiecesBeforeResolution[PieceId];
+        if (Piece.PieceId == INDEX_NONE || Piece.CellId == INDEX_NONE)
+        {
+            return false;
+        }
+
+        FTransform WorldTransform = FTransform::Identity;
+        if (!BuildP1PieceWorldTransformForPiece_(Piece, PiecesBeforeResolution, WorldTransform))
+        {
+            return false;
+        }
+
+        OutParticipant.PieceId = Piece.PieceId;
+        OutParticipant.CellId = Piece.CellId;
+        OutParticipant.PieceType = Piece.PieceType;
+        OutParticipant.WorldTransform = WorldTransform;
+        return true;
+    };
+
+    for (const FTerraGameplayCaptureEntry& CaptureEntry : CaptureEntries)
+    {
+        FTerraPiecePresentationCaptureEvent CaptureEvent;
+        const bool bHasCaptured = BuildParticipant(CaptureEntry.CapturedPieceId, CaptureEvent.Captured);
+        const bool bHasAttacker = BuildParticipant(CaptureEntry.AttackerPieceId, CaptureEvent.Attacker);
+        const bool bHasVanguard = BuildParticipant(CaptureEntry.VanguardPieceId, CaptureEvent.Vanguard);
+
+        if (!bHasCaptured || (!bHasAttacker && !bHasVanguard))
+        {
+            UE_LOG(LogPlanetTess, Warning,
+                TEXT("[Tess][P3] Skip capture presentation event. Captured=%d HasCaptured=%d Attacker=%d HasAttacker=%d Vanguard=%d HasVanguard=%d"),
+                CaptureEntry.CapturedPieceId,
+                bHasCaptured ? 1 : 0,
+                CaptureEntry.AttackerPieceId,
+                bHasAttacker ? 1 : 0,
+                CaptureEntry.VanguardPieceId,
+                bHasVanguard ? 1 : 0);
+            continue;
+        }
+
+        OutCaptureEvents.Add(CaptureEvent);
+    }
+}
+
 FTerraPieceVisualConfig APlanetTessellatedMesh::BuildP1PieceVisualConfig_() const
 {
     FTerraPieceVisualConfig VisualConfig;
@@ -2489,9 +2549,28 @@ FTerraPieceVisualConfig APlanetTessellatedMesh::BuildP1PieceVisualConfig_() cons
     VisualConfig.IdleAnimation = P2IdleAnimation.Get() ? P2IdleAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Adventurers/Animations/Rig_Medium_GeneralIdle_A.Rig_Medium_GeneralIdle_A"));
     VisualConfig.MoveAnimation = P2MoveAnimation.Get() ? P2MoveAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Adventurers/Animations/Rig_Medium_MovementBasicWalking_A.Rig_Medium_MovementBasicWalking_A"));
     VisualConfig.JumpAnimation = P2JumpAnimation.Get() ? P2JumpAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Adventurers/Animations/Rig_Medium_MovementBasicJump_Full_Short.Rig_Medium_MovementBasicJump_Full_Short"));
+    VisualConfig.CommanderMagicAttackAnimation = P3CommanderMagicAttackAnimation.Get() ? P3CommanderMagicAttackAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Adventurers/Animations/Rig_Medium_GeneralMagic_Spell_Casting.Rig_Medium_GeneralMagic_Spell_Casting"));
+    VisualConfig.ArcherRangedAttackAnimation = P3ArcherRangedAttackAnimation.Get() ? P3ArcherRangedAttackAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Adventurers/Animations/Rig_Medium_GeneralShooting_Arrow.Rig_Medium_GeneralShooting_Arrow"));
+    VisualConfig.InfantryMeleeAttackAnimation = P3InfantryMeleeAttackAnimation.Get() ? P3InfantryMeleeAttackAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Adventurers/Animations/Rig_Medium_GeneralSword_And_Shield_Slash.Rig_Medium_GeneralSword_And_Shield_Slash"));
+    VisualConfig.CavalryMeleeAttackAnimation = P3CavalryMeleeAttackAnimation.Get() ? P3CavalryMeleeAttackAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Adventurers/Animations/Rig_Medium_GeneralUpward_Thrust.Rig_Medium_GeneralUpward_Thrust"));
+    VisualConfig.HitAnimation = P3HitAnimation.Get() ? P3HitAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Adventurers/Animations/Rig_Medium_GeneralHit_A.Rig_Medium_GeneralHit_A"));
+    VisualConfig.DeathAnimation = P3DeathAnimation.Get() ? P3DeathAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Adventurers/Animations/Rig_Medium_GeneralDeath_A.Rig_Medium_GeneralDeath_A"));
     VisualConfig.MoveDurationSeconds = FMath::Max(P2MoveDurationSeconds, 0.001f);
     VisualConfig.JumpDurationSeconds = FMath::Max(P2JumpDurationSeconds, 0.001f);
     VisualConfig.JumpHeightCM = FMath::Max(P2JumpHeightCM, 0.0f);
+    VisualConfig.P3FacingBlendSeconds = FMath::Max(P3FacingBlendSeconds, 0.0f);
+    VisualConfig.P3MeleeRunInSeconds = FMath::Max(P3MeleeRunInSeconds, 0.001f);
+    VisualConfig.P3MeleeReturnSeconds = FMath::Max(P3MeleeReturnSeconds, 0.001f);
+    VisualConfig.P3AttackAnimationStartOffsetSeconds = FMath::Max(P3AttackAnimationStartOffsetSeconds, 0.0f);
+    VisualConfig.P3CommanderAttackToHitSeconds = FMath::Max(P3CommanderAttackToHitSeconds, 0.0f);
+    VisualConfig.P3ArcherAttackToHitSeconds = FMath::Max(P3ArcherAttackToHitSeconds, 0.0f);
+    VisualConfig.P3InfantryAttackToHitSeconds = FMath::Max(P3InfantryAttackToHitSeconds, 0.0f);
+    VisualConfig.P3CavalryAttackToHitSeconds = FMath::Max(P3CavalryAttackToHitSeconds, 0.0f);
+    VisualConfig.P3HitReactDelaySeconds = FMath::Max(P3HitReactDelaySeconds, 0.0f);
+    VisualConfig.P3HitAnimationStartOffsetSeconds = FMath::Max(P3HitAnimationStartOffsetSeconds, 0.0f);
+    VisualConfig.P3DeathAfterHitDelaySeconds = FMath::Max(P3DeathAfterHitDelaySeconds, 0.0f);
+    VisualConfig.P3DeathAnimationStartOffsetSeconds = FMath::Max(P3DeathAnimationStartOffsetSeconds, 0.0f);
+    VisualConfig.P3CapturedFadeSeconds = FMath::Max(P3CapturedFadeSeconds, 0.0f);
     return VisualConfig;
 }
 
@@ -3049,10 +3128,22 @@ bool APlanetTessellatedMesh::HandleGameplayCellClick_(int32 CellId, const TCHAR*
     const int32 PrevFactionId = GameplayContainer->GetCurrentFactionId();
     const int32 PrevSelectedPieceId = GameplayContainer->GetSelectedPieceId();
     const ETerraGameplayInteractionPhase PrevPhase = GameplayContainer->GetInteractionPhase();
+    const TArray<FTerraGameplayPieceState> PrevPieces = GameplayContainer->GetPieces();
     int32 PrevSelectedPieceCellId = INDEX_NONE;
     if (PrevSelectedPieceId != INDEX_NONE)
     {
         GameplayContainer->TryGetPieceCellId(PrevSelectedPieceId, PrevSelectedPieceCellId);
+    }
+
+    TArray<FTerraGameplayCaptureEntry> PendingCaptureEntriesBeforeClick;
+    const bool bCouldConfirmTurnBeforeClick =
+        PrevSelectedPieceId != INDEX_NONE
+        && PrevSelectedPieceCellId == CellId
+        && (PrevPhase == ETerraGameplayInteractionPhase::PieceMovedCanEndTurn
+            || PrevPhase == ETerraGameplayInteractionPhase::PieceJumpingCanContinue);
+    if (bCouldConfirmTurnBeforeClick)
+    {
+        GameplayContainer->CollectPendingCaptureEntries(PendingCaptureEntriesBeforeClick);
     }
 
     TArray<int32> DirtyCellIds;
@@ -3067,6 +3158,15 @@ bool APlanetTessellatedMesh::HandleGameplayCellClick_(int32 CellId, const TCHAR*
     if (NewSelectedPieceId != INDEX_NONE)
     {
         GameplayContainer->TryGetPieceCellId(NewSelectedPieceId, NewSelectedPieceCellId);
+    }
+
+    TArray<FTerraPiecePresentationCaptureEvent> P3CaptureEvents;
+    if (bGameplayHandled
+        && bCouldConfirmTurnBeforeClick
+        && PendingCaptureEntriesBeforeClick.Num() > 0
+        && NewPhase == ETerraGameplayInteractionPhase::Idle)
+    {
+        BuildP3CaptureEventsFromPendingEntries_(PendingCaptureEntriesBeforeClick, PrevPieces, P3CaptureEvents);
     }
 
     TArray<FTerraPiecePresentationMoveEvent> P2MoveEvents;
@@ -3132,10 +3232,10 @@ bool APlanetTessellatedMesh::HandleGameplayCellClick_(int32 CellId, const TCHAR*
 
     RebuildG1DebugPieces_();
     RequestC6ActionCameraTrackingForMoveEvents_(P2MoveEvents);
-    SyncP1PiecePresentation_(P2MoveEvents);
+    SyncP1PiecePresentation_(P2MoveEvents, P3CaptureEvents);
 
     UE_LOG(LogPlanetTess, Log,
-        TEXT("[Tess][G2] %s -> Gameplay Cell=%d Instance=%d Component=%s Handled=%d CurrentFaction=%d Turn=%d Phase=%d P2MoveEvents=%d"),
+        TEXT("[Tess][G2] %s -> Gameplay Cell=%d Instance=%d Component=%s Handled=%d CurrentFaction=%d Turn=%d Phase=%d P2MoveEvents=%d P3CaptureEvents=%d"),
         SourceLabel ? SourceLabel : TEXT("CellClick"),
         CellId,
         InstanceIndex,
@@ -3144,7 +3244,8 @@ bool APlanetTessellatedMesh::HandleGameplayCellClick_(int32 CellId, const TCHAR*
         GameplayContainer->GetCurrentFactionId(),
         GameplayContainer->GetTurnIndex(),
         static_cast<int32>(GameplayContainer->GetInteractionPhase()),
-        P2MoveEvents.Num());
+        P2MoveEvents.Num(),
+        P3CaptureEvents.Num());
 
     return true;
 }

@@ -19,11 +19,18 @@ public:
     void ApplyPresentationSnapshot(const FTerraPiecePresentationSnapshot& Snapshot, const FTerraPieceVisualConfig& VisualConfig);
     void PlayPresentationMove(const FTerraPiecePresentationSnapshot& TargetSnapshot, const FTerraPiecePresentationMoveEvent& MoveEvent, const FTerraPieceVisualConfig& VisualConfig);
     void CancelPresentationMove(const FTerraPiecePresentationSnapshot& Snapshot, const FTerraPieceVisualConfig& VisualConfig);
+    void FaceTowards(const FVector& TargetWorldLocation, float BlendSeconds);
+    void PlayPresentationOnlyMoveTo(const FTransform& TargetTransform, float DurationSeconds, UAnimationAsset* MoveAnimation);
+    void PlayAttackAnimation(UAnimationAsset* AttackAnimation, float StartOffsetSeconds);
+    void PlayHitAnimation(UAnimationAsset* HitAnimation, float StartOffsetSeconds);
+    void PlayDeathAnimation(UAnimationAsset* DeathAnimation, float StartOffsetSeconds);
+    void StartDeathFade(float FadeSeconds);
 
     int32 GetPieceId() const { return PieceId; }
     int32 GetCellId() const { return CellId; }
     ETerraGameplayPieceType GetPieceType() const { return PieceType; }
     const FTerraPieceAnimDriveState& GetAnimDriveState() const { return AnimDriveState; }
+    bool IsPresentationMoveActive() const { return bHasActiveMove; }
 
 protected:
     virtual void Tick(float DeltaSeconds) override;
@@ -53,6 +60,7 @@ private:
     void ApplyVisualConfig_(const FTerraPieceVisualConfig& VisualConfig);
     void SetDriveState_(const FTerraPieceAnimDriveState& NewDriveState);
     void PlayConfiguredAnimation_(UAnimationAsset* AnimationAsset, bool bLooping);
+    void PlayConfiguredAnimation_(UAnimationAsset* AnimationAsset, bool bLooping, float StartOffsetSeconds);
     void FinishActiveMove_();
     FVector EvaluateActiveMovePosition_(float Alpha, const FTerraPieceVisualConfig& VisualConfig) const;
     FQuat BuildRotationFromFacing_(const FVector& WorldPosition, const FVector& DesiredFacingDirection, const FQuat& FallbackRotation) const;
@@ -75,4 +83,34 @@ private:
 
     UPROPERTY(Transient)
     FVector ActiveMoveDesiredFacingDirection = FVector::ForwardVector;
+
+    UPROPERTY(Transient)
+    bool bPresentationOnlyMove = false;
+
+    UPROPERTY(Transient)
+    bool bHasActiveFacingBlend = false;
+
+    UPROPERTY(Transient)
+    float ActiveFacingBlendElapsedSeconds = 0.0f;
+
+    UPROPERTY(Transient)
+    float ActiveFacingBlendDurationSeconds = 0.0f;
+
+    UPROPERTY(Transient)
+    FQuat ActiveFacingBlendStartRotation = FQuat::Identity;
+
+    UPROPERTY(Transient)
+    FQuat ActiveFacingBlendTargetRotation = FQuat::Identity;
+
+    UPROPERTY(Transient)
+    bool bHasActiveDeathFade = false;
+
+    UPROPERTY(Transient)
+    float ActiveDeathFadeElapsedSeconds = 0.0f;
+
+    UPROPERTY(Transient)
+    float ActiveDeathFadeDurationSeconds = 0.0f;
+
+    UPROPERTY(Transient)
+    FVector DeathFadeStartScale = FVector::OneVector;
 };

@@ -86,10 +86,10 @@ void ATerraPieceActor::ApplyPresentationSnapshot(const FTerraPiecePresentationSn
     }
 
     bHasActiveMove = false;
+    bPresentationOnlyMove = false;
     ActiveMoveElapsedSeconds = 0.0f;
     ActiveMoveDurationSeconds = 0.0f;
     ActiveMoveEvent = FTerraPiecePresentationMoveEvent();
-    SetActorTickEnabled(false);
 
     const int32 PreviousCellId = CellId;
     const bool bShouldApplySnapshotFacing = Snapshot.bForceFacingFromSnapshot || PreviousCellId != Snapshot.CellId;
@@ -116,6 +116,7 @@ void ATerraPieceActor::ApplyPresentationSnapshot(const FTerraPiecePresentationSn
     NewDriveState.bDead = false;
     SetDriveState_(NewDriveState);
     PlayConfiguredAnimation_(VisualConfig.IdleAnimation, true);
+    SetActorTickEnabled(bHasActiveFacingBlend || bHasActiveDeathFade);
 }
 
 void ATerraPieceActor::PlayPresentationMove(
@@ -156,6 +157,7 @@ void ATerraPieceActor::PlayPresentationMove(
         ? FMath::Max(VisualConfig.JumpDurationSeconds, 0.001f)
         : FMath::Max(VisualConfig.MoveDurationSeconds, 0.001f);
     bHasActiveMove = true;
+    bPresentationOnlyMove = false;
 
     SetActorTransform(ActiveMoveEvent.FromWorldTransform);
     ActiveMoveDesiredFacingDirection = ActiveMoveEvent.ToWorldTransform.GetLocation() - ActiveMoveEvent.FromWorldTransform.GetLocation();
@@ -192,38 +194,180 @@ void ATerraPieceActor::CancelPresentationMove(const FTerraPiecePresentationSnaps
     ApplyPresentationSnapshot(Snapshot, VisualConfig);
 }
 
+void ATerraPieceActor::FaceTowards(const FVector& TargetWorldLocation, float BlendSeconds)
+{
+    const FVector Position = GetActorLocation();
+    const FVector DesiredFacingDirection = TargetWorldLocation - Position;
+    if (DesiredFacingDirection.IsNearlyZero())
+    {
+        return;
+    }
+
+    ActiveFacingBlendStartRotation = GetActorQuat();
+    ActiveFacingBlendTargetRotation = BuildRotationFromFacing_(Position, DesiredFacingDirection, GetActorQuat());
+    if ((ActiveFacingBlendStartRotation | ActiveFacingBlendTargetRotation) < 0.0f)
+    {
+        ActiveFacingBlendTargetRotation = ActiveFacingBlendTargetRotation * -1.0f;
+    }
+    ActiveFacingBlendElapsedSeconds = 0.0f;
+    ActiveFacingBlendDurationSeconds = FMath::Max(BlendSeconds, 0.001f);
+    bHasActiveFacingBlend = true;
+    SetActorTickEnabled(true);
+}
+
+void ATerraPieceActor::PlayPresentationOnlyMoveTo(const FTransform& TargetTransform, float DurationSeconds, UAnimationAsset* MoveAnimation)
+{
+    CachedVisualConfig.MoveDurationSeconds = FMath::Max(DurationSeconds, 0.001f);
+    ActiveMoveEvent = FTerraPiecePresentationMoveEvent();
+    ActiveMoveEvent.PieceId = PieceId;
+    ActiveMoveEvent.FromCellId = CellId;
+    ActiveMoveEvent.ToCellId = CellId;
+    ActiveMoveEvent.MoveType = ETerraPiecePresentationMoveType::Move;
+    ActiveMoveEvent.FromWorldTransform = GetActorTransform();
+    ActiveMoveEvent.ToWorldTransform = TargetTransform;
+    ActiveMoveElapsedSeconds = 0.0f;
+    ActiveMoveDurationSeconds = FMath::Max(DurationSeconds, 0.001f);
+    bHasActiveMove = true;
+    bPresentationOnlyMove = true;
+
+    ActiveMoveDesiredFacingDirection = ActiveMoveEvent.ToWorldTransform.GetLocation() - ActiveMoveEvent.FromWorldTransform.GetLocation();
+    if (ActiveMoveDesiredFacingDirection.IsNearlyZero())
+    {
+        ActiveMoveDesiredFacingDirection = GetActorForwardVector();
+    }
+    else
+    {
+        ActiveMoveDesiredFacingDirection.Normalize();
+    }
+
+    FTerraPieceAnimDriveState NewDriveState;
+    NewDriveState.ActionState = ETerraPieceAnimActionState::Move;
+    NewDriveState.MoveSpeed = FVector::Distance(
+        ActiveMoveEvent.FromWorldTransform.GetLocation(),
+        ActiveMoveEvent.ToWorldTransform.GetLocation()) / ActiveMoveDurationSeconds;
+    NewDriveState.NormalizedPhase = 0.0f;
+    NewDriveState.FacingDirection = ActiveMoveDesiredFacingDirection;
+    NewDriveState.bDead = false;
+    SetDriveState_(NewDriveState);
+    PlayConfiguredAnimation_(MoveAnimation, true);
+    SetActorTickEnabled(true);
+}
+
+void ATerraPieceActor::PlayAttackAnimation(UAnimationAsset* AttackAnimation, float StartOffsetSeconds)
+{
+    bHasActiveMove = false;
+    bPresentationOnlyMove = false;
+    FTerraPieceAnimDriveState NewDriveState = AnimDriveState;
+    NewDriveState.ActionState = ETerraPieceAnimActionState::Attack;
+    NewDriveState.MoveSpeed = 0.0f;
+    NewDriveState.NormalizedPhase = 0.0f;
+    NewDriveState.FacingDirection = GetActorForwardVector();
+    NewDriveState.bDead = false;
+    SetDriveState_(NewDriveState);
+    PlayConfiguredAnimation_(AttackAnimation, false, StartOffsetSeconds);
+    SetActorTickEnabled(bHasActiveFacingBlend || bHasActiveDeathFade);
+}
+
+void ATerraPieceActor::PlayHitAnimation(UAnimationAsset* HitAnimation, float StartOffsetSeconds)
+{
+    bHasActiveMove = false;
+    bPresentationOnlyMove = false;
+    FTerraPieceAnimDriveState NewDriveState = AnimDriveState;
+    NewDriveState.ActionState = ETerraPieceAnimActionState::Hit;
+    NewDriveState.MoveSpeed = 0.0f;
+    NewDriveState.NormalizedPhase = 0.0f;
+    NewDriveState.FacingDirection = GetActorForwardVector();
+    NewDriveState.bDead = false;
+    SetDriveState_(NewDriveState);
+    PlayConfiguredAnimation_(HitAnimation, false, StartOffsetSeconds);
+    SetActorTickEnabled(bHasActiveFacingBlend || bHasActiveDeathFade);
+}
+
+void ATerraPieceActor::PlayDeathAnimation(UAnimationAsset* DeathAnimation, float StartOffsetSeconds)
+{
+    bHasActiveMove = false;
+    bPresentationOnlyMove = false;
+    FTerraPieceAnimDriveState NewDriveState = AnimDriveState;
+    NewDriveState.ActionState = ETerraPieceAnimActionState::Death;
+    NewDriveState.MoveSpeed = 0.0f;
+    NewDriveState.NormalizedPhase = 1.0f;
+    NewDriveState.FacingDirection = GetActorForwardVector();
+    NewDriveState.bDead = true;
+    SetDriveState_(NewDriveState);
+    PlayConfiguredAnimation_(DeathAnimation, false, StartOffsetSeconds);
+    SetActorTickEnabled(bHasActiveFacingBlend || bHasActiveDeathFade);
+}
+
+void ATerraPieceActor::StartDeathFade(float FadeSeconds)
+{
+    ActiveDeathFadeElapsedSeconds = 0.0f;
+    ActiveDeathFadeDurationSeconds = FMath::Max(FadeSeconds, 0.001f);
+    DeathFadeStartScale = GetActorScale3D();
+    bHasActiveDeathFade = true;
+    SetActorTickEnabled(true);
+}
+
 void ATerraPieceActor::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
 
-    if (!bHasActiveMove)
+    const float SafeDeltaSeconds = FMath::Max(DeltaSeconds, 0.0f);
+
+    if (bHasActiveFacingBlend)
+    {
+        ActiveFacingBlendElapsedSeconds += SafeDeltaSeconds;
+        const float Alpha = FMath::Clamp(ActiveFacingBlendElapsedSeconds / FMath::Max(ActiveFacingBlendDurationSeconds, 0.001f), 0.0f, 1.0f);
+        const FQuat Rotation = FQuat::Slerp(ActiveFacingBlendStartRotation, ActiveFacingBlendTargetRotation, Alpha).GetNormalized();
+        SetActorRotation(Rotation);
+        if (Alpha >= 1.0f - KINDA_SMALL_NUMBER)
+        {
+            bHasActiveFacingBlend = false;
+        }
+    }
+
+    if (bHasActiveMove)
+    {
+        ActiveMoveElapsedSeconds += SafeDeltaSeconds;
+        const float Alpha = FMath::Clamp(ActiveMoveElapsedSeconds / FMath::Max(ActiveMoveDurationSeconds, 0.001f), 0.0f, 1.0f);
+
+        const FVector Position = EvaluateActiveMovePosition_(Alpha, CachedVisualConfig);
+        FQuat DesiredRotation = BuildRotationFromFacing_(Position, ActiveMoveDesiredFacingDirection, ActiveMoveEvent.ToWorldTransform.GetRotation());
+        const FQuat CurrentRotation = GetActorQuat();
+        if ((CurrentRotation | DesiredRotation) < 0.0f)
+        {
+            DesiredRotation = DesiredRotation * -1.0f;
+        }
+        const float RotationAlpha = FMath::Clamp(SafeDeltaSeconds * 12.0f, 0.0f, 1.0f);
+        const FQuat Rotation = FQuat::Slerp(CurrentRotation, DesiredRotation, RotationAlpha).GetNormalized();
+        SetActorTransform(FTransform(Rotation, Position, GetActorScale3D()));
+
+        FTerraPieceAnimDriveState NewDriveState = AnimDriveState;
+        NewDriveState.NormalizedPhase = Alpha;
+        NewDriveState.FacingDirection = GetActorForwardVector();
+        SetDriveState_(NewDriveState);
+
+        if (Alpha >= 1.0f - KINDA_SMALL_NUMBER)
+        {
+            FinishActiveMove_();
+        }
+    }
+
+    if (bHasActiveDeathFade)
+    {
+        ActiveDeathFadeElapsedSeconds += SafeDeltaSeconds;
+        const float Alpha = FMath::Clamp(ActiveDeathFadeElapsedSeconds / FMath::Max(ActiveDeathFadeDurationSeconds, 0.001f), 0.0f, 1.0f);
+        const float ScaleAlpha = 1.0f - Alpha;
+        SetActorScale3D(DeathFadeStartScale * ScaleAlpha);
+        if (Alpha >= 1.0f - KINDA_SMALL_NUMBER)
+        {
+            bHasActiveDeathFade = false;
+            SetActorHiddenInGame(true);
+        }
+    }
+
+    if (!bHasActiveMove && !bHasActiveFacingBlend && !bHasActiveDeathFade)
     {
         SetActorTickEnabled(false);
-        return;
-    }
-
-    ActiveMoveElapsedSeconds += FMath::Max(DeltaSeconds, 0.0f);
-    const float Alpha = FMath::Clamp(ActiveMoveElapsedSeconds / FMath::Max(ActiveMoveDurationSeconds, 0.001f), 0.0f, 1.0f);
-
-    const FVector Position = EvaluateActiveMovePosition_(Alpha, CachedVisualConfig);
-    FQuat DesiredRotation = BuildRotationFromFacing_(Position, ActiveMoveDesiredFacingDirection, ActiveMoveEvent.ToWorldTransform.GetRotation());
-    const FQuat CurrentRotation = GetActorQuat();
-    if ((CurrentRotation | DesiredRotation) < 0.0f)
-    {
-        DesiredRotation = DesiredRotation * -1.0f;
-    }
-    const float RotationAlpha = FMath::Clamp(DeltaSeconds * 12.0f, 0.0f, 1.0f);
-    const FQuat Rotation = FQuat::Slerp(CurrentRotation, DesiredRotation, RotationAlpha).GetNormalized();
-    SetActorTransform(FTransform(Rotation, Position, FVector::OneVector));
-
-    FTerraPieceAnimDriveState NewDriveState = AnimDriveState;
-    NewDriveState.NormalizedPhase = Alpha;
-    NewDriveState.FacingDirection = GetActorForwardVector();
-    SetDriveState_(NewDriveState);
-
-    if (Alpha >= 1.0f - KINDA_SMALL_NUMBER)
-    {
-        FinishActiveMove_();
     }
 }
 
@@ -238,6 +382,8 @@ void ATerraPieceActor::ApplyVisualConfig_(const FTerraPieceVisualConfig& VisualC
     HumanMesh->SetRelativeLocation(VisualConfig.MeshRelativeLocation);
     HumanMesh->SetRelativeRotation(VisualConfig.MeshRelativeRotation);
     HumanMesh->SetRelativeScale3D(FVector(FMath::Max(VisualConfig.UniformScale, 0.001f)));
+    SetActorHiddenInGame(false);
+    SetActorScale3D(FVector::OneVector);
 }
 
 void ATerraPieceActor::SetDriveState_(const FTerraPieceAnimDriveState& NewDriveState)
@@ -257,6 +403,11 @@ void ATerraPieceActor::SetDriveState_(const FTerraPieceAnimDriveState& NewDriveS
 
 void ATerraPieceActor::PlayConfiguredAnimation_(UAnimationAsset* AnimationAsset, bool bLooping)
 {
+    PlayConfiguredAnimation_(AnimationAsset, bLooping, 0.0f);
+}
+
+void ATerraPieceActor::PlayConfiguredAnimation_(UAnimationAsset* AnimationAsset, bool bLooping, float StartOffsetSeconds)
+{
     if (!HumanMesh || !AnimationAsset)
     {
         return;
@@ -268,6 +419,10 @@ void ATerraPieceActor::PlayConfiguredAnimation_(UAnimationAsset* AnimationAsset,
     }
 
     HumanMesh->PlayAnimation(AnimationAsset, bLooping);
+    if (StartOffsetSeconds > 0.0f)
+    {
+        HumanMesh->SetPosition(FMath::Max(StartOffsetSeconds, 0.0f), false);
+    }
 }
 
 void ATerraPieceActor::FinishActiveMove_()
@@ -277,9 +432,9 @@ void ATerraPieceActor::FinishActiveMove_()
     const FTransform TargetTransform(TargetRotation, TargetPosition, FVector::OneVector);
 
     bHasActiveMove = false;
+    bPresentationOnlyMove = false;
     ActiveMoveElapsedSeconds = 0.0f;
     ActiveMoveDurationSeconds = 0.0f;
-    SetActorTickEnabled(false);
 
     SetActorTransform(TargetTransform);
 
@@ -291,6 +446,7 @@ void ATerraPieceActor::FinishActiveMove_()
     NewDriveState.bDead = false;
     SetDriveState_(NewDriveState);
     PlayConfiguredAnimation_(CachedVisualConfig.IdleAnimation, true);
+    SetActorTickEnabled(bHasActiveFacingBlend || bHasActiveDeathFade);
 }
 
 FVector ATerraPieceActor::EvaluateActiveMovePosition_(float Alpha, const FTerraPieceVisualConfig& VisualConfig) const
@@ -300,6 +456,7 @@ FVector ATerraPieceActor::EvaluateActiveMovePosition_(float Alpha, const FTerraP
     const FVector Center = GetPiecePresentationCenter(this);
 
     const float ExtraHeightCM = ActiveMoveEvent.MoveType == ETerraPiecePresentationMoveType::Jump
+        && !bPresentationOnlyMove
         ? FMath::Max(VisualConfig.JumpHeightCM, 0.0f) * FMath::Sin(Alpha * PI)
         : 0.0f;
 

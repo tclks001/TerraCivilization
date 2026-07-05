@@ -177,6 +177,12 @@ bool FTerraGameplayContainer::CollectCurrentFactionSelectablePieceIds(TArray<int
     return OutPieceIds.Num() > 0;
 }
 
+bool FTerraGameplayContainer::CollectPendingCaptureEntries(TArray<FTerraGameplayCaptureEntry>& OutCaptureEntries) const
+{
+    OutCaptureEntries = GetSortedPendingCaptureEntries_();
+    return OutCaptureEntries.Num() > 0;
+}
+
 bool FTerraGameplayContainer::TryGetPieceCellId(int32 PieceId, int32& OutCellId) const
 {
     OutCellId = INDEX_NONE;

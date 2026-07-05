@@ -90,6 +90,24 @@ struct PIECEPRESENTATION_API FTerraPieceVisualConfig
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P2")
     TObjectPtr<UAnimationAsset> JumpAnimation;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3")
+    TObjectPtr<UAnimationAsset> CommanderMagicAttackAnimation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3")
+    TObjectPtr<UAnimationAsset> ArcherRangedAttackAnimation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3")
+    TObjectPtr<UAnimationAsset> InfantryMeleeAttackAnimation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3")
+    TObjectPtr<UAnimationAsset> CavalryMeleeAttackAnimation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3")
+    TObjectPtr<UAnimationAsset> HitAnimation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3")
+    TObjectPtr<UAnimationAsset> DeathAnimation;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P2", meta = (ClampMin = "0.001"))
     float MoveDurationSeconds = 0.35f;
 
@@ -99,7 +117,48 @@ struct PIECEPRESENTATION_API FTerraPieceVisualConfig
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P2", meta = (ClampMin = "0.0"))
     float JumpHeightCM = 650.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3", meta = (ClampMin = "0.0"))
+    float P3FacingBlendSeconds = 0.15f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3", meta = (ClampMin = "0.001"))
+    float P3MeleeRunInSeconds = 0.25f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3", meta = (ClampMin = "0.001"))
+    float P3MeleeReturnSeconds = 0.25f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3", meta = (ClampMin = "0.0"))
+    float P3AttackAnimationStartOffsetSeconds = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3", meta = (ClampMin = "0.0"))
+    float P3CommanderAttackToHitSeconds = 0.35f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3", meta = (ClampMin = "0.0"))
+    float P3ArcherAttackToHitSeconds = 0.35f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3", meta = (ClampMin = "0.0"))
+    float P3InfantryAttackToHitSeconds = 0.25f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3", meta = (ClampMin = "0.0"))
+    float P3CavalryAttackToHitSeconds = 0.25f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3", meta = (ClampMin = "0.0"))
+    float P3HitReactDelaySeconds = 0.2f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3", meta = (ClampMin = "0.0"))
+    float P3HitAnimationStartOffsetSeconds = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3", meta = (ClampMin = "0.0"))
+    float P3DeathAfterHitDelaySeconds = 0.2f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3", meta = (ClampMin = "0.0"))
+    float P3DeathAnimationStartOffsetSeconds = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3", meta = (ClampMin = "0.0"))
+    float P3CapturedFadeSeconds = 0.35f;
+
     USkeletalMesh* ResolveMesh(ETerraGameplayPieceType PieceType) const;
+    UAnimationAsset* ResolveAttackAnimation(ETerraGameplayPieceType PieceType) const;
+    float ResolveAttackToHitSeconds(ETerraGameplayPieceType PieceType) const;
 };
 
 USTRUCT(BlueprintType)
@@ -168,5 +227,48 @@ struct PIECEPRESENTATION_API FTerraPiecePresentationMoveEvent
             && ToCellId != INDEX_NONE
             && FromCellId != ToCellId
             && MoveType != ETerraPiecePresentationMoveType::None;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct PIECEPRESENTATION_API FTerraPiecePresentationCaptureParticipant
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    int32 PieceId = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    int32 CellId = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    ETerraGameplayPieceType PieceType = ETerraGameplayPieceType::Infantry;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    FTransform WorldTransform = FTransform::Identity;
+
+    bool IsValid() const
+    {
+        return PieceId != INDEX_NONE && CellId != INDEX_NONE;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct PIECEPRESENTATION_API FTerraPiecePresentationCaptureEvent
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    FTerraPiecePresentationCaptureParticipant Captured;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    FTerraPiecePresentationCaptureParticipant Attacker;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    FTerraPiecePresentationCaptureParticipant Vanguard;
+
+    bool IsValidCapture() const
+    {
+        return Captured.IsValid() && (Attacker.IsValid() || Vanguard.IsValid());
     }
 };
