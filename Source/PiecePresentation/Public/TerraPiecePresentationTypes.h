@@ -36,6 +36,14 @@ enum class ETerraPiecePresentationMoveType : uint8
     Jump UMETA(DisplayName = "Jump"),
 };
 
+UENUM(BlueprintType)
+enum class ETerraPiecePresentationForwardMode : uint8
+{
+    MoveDirection   UMETA(DisplayName = "Move Direction"),
+    FaceTarget      UMETA(DisplayName = "Face Target"),
+    LockSource      UMETA(DisplayName = "Lock Source Forward"),
+};
+
 USTRUCT(BlueprintType)
 struct PIECEPRESENTATION_API FTerraPieceAnimDriveState
 {

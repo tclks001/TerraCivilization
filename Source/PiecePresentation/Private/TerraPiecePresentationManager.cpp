@@ -311,12 +311,11 @@ void UTerraPiecePresentationManager::RunP3MeleeAttackStep_(FTerraPiecePresentati
             return;
         }
 
-        FTransform AttackTransform = CaptureEvent.Captured.WorldTransform;
-        AttackTransform.SetRotation(PieceActor->GetActorQuat());
         PieceActor->PlayPresentationOnlyMoveTo(
-            AttackTransform,
+            CaptureEvent.Captured.WorldTransform,
             FMath::Max(CachedVisualConfig.P3MeleeRunInSeconds, 0.001f),
-            CachedVisualConfig.MoveAnimation);
+            CachedVisualConfig.MoveAnimation,
+            ETerraPiecePresentationForwardMode::MoveDirection);
     };
 
     RunInIfMelee(AttackerActor, CaptureEvent.Attacker);
@@ -444,15 +443,11 @@ void UTerraPiecePresentationManager::FinishP3CaptureEvent_(FTerraPiecePresentati
             return;
         }
 
-        FTransform ReturnTransform = Participant.WorldTransform;
-        ReturnTransform.SetRotation(FRotationMatrix::MakeFromXZ(
-            CaptureEvent.Captured.WorldTransform.GetLocation() - Participant.WorldTransform.GetLocation(),
-            Participant.WorldTransform.GetRotation().GetUpVector()).ToQuat());
         PieceActor->PlayPresentationOnlyMoveTo(
-            ReturnTransform,
+            Participant.WorldTransform,
             FMath::Max(CachedVisualConfig.P3MeleeReturnSeconds, 0.001f),
             CachedVisualConfig.MoveAnimation,
-            true);
+            ETerraPiecePresentationForwardMode::MoveDirection);
     };
 
     ReturnIfMelee(AttackerActor, CaptureEvent.Attacker);
@@ -467,8 +462,30 @@ void UTerraPiecePresentationManager::FinishP3CaptureEvent_(FTerraPiecePresentati
     }
 
     const float FinishDelay = FMath::Max(CachedVisualConfig.P3MeleeReturnSeconds, CachedVisualConfig.P3CapturedFadeSeconds);
-    const FTimerDelegate NextDelegate = FTimerDelegate::CreateWeakLambda(this, [this, CapturedPieceId = CaptureEvent.Captured.PieceId]()
+    const FTimerDelegate NextDelegate = FTimerDelegate::CreateWeakLambda(this, [this,
+        CapturedPieceId = CaptureEvent.Captured.PieceId,
+        AttackerId = CaptureEvent.Attacker.PieceId,
+        VanguardId = CaptureEvent.Vanguard.PieceId,
+        CapturedLocation = CaptureEvent.Captured.WorldTransform.GetLocation(),
+        bAttackerIsMelee = IsMeleePiece_(CaptureEvent.Attacker.PieceType),
+        bVanguardIsMelee = IsMeleePiece_(CaptureEvent.Vanguard.PieceType)]()
     {
+        auto FaceCaptured = [this, &CapturedLocation](int32 PieceId)
+        {
+            if (ATerraPieceActor* Actor = FindPieceActor_(PieceId))
+            {
+                Actor->FaceTowards(CapturedLocation, 0.0f);
+            }
+        };
+        if (bAttackerIsMelee)
+        {
+            FaceCaptured(AttackerId);
+        }
+        if (bVanguardIsMelee && VanguardId != AttackerId)
+        {
+            FaceCaptured(VanguardId);
+        }
+
         TObjectPtr<ATerraPieceActor> CapturedActorPtr;
         PieceActors.RemoveAndCopyValue(CapturedPieceId, CapturedActorPtr);
         if (IsValid(CapturedActorPtr))

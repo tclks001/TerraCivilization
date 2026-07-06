@@ -22,7 +22,7 @@ Gameplay 规则状态
     -> 表现层事件 / 状态快照
     -> 棋子表现模块
     -> SkeletalMesh / AnimBP / 特效 / 朝向 / 位移插值
-    -> 玩家看到“这枚棋子正在移动、跳跃、攻击、死亡、胜利待机”
+    -> 玩家看到"这枚棋子正在移动、跳跃、攻击、死亡、胜利待机"
 ```
 
 核心目标：
@@ -35,11 +35,11 @@ Gameplay 规则状态
 2. **表现驱动来自 Gameplay，而不是反过来**
    - `FTerraGameplayContainer` 仍然是真实规则来源。
    - 动画层不参与合法性判定、不维护第二套真规则。
-   - 表现层只消费“棋子从哪到哪、进行了什么动作、谁被移除、当前轮到谁”等结果。
+   - 表现层只消费"棋子从哪到哪、进行了什么动作、谁被移除、当前轮到谁"等结果。
 
 3. **优先复用现有 Adventurers / Horse 资产**
    - 人形棋子优先用 Adventurers 资源。
-   - 骑兵初版允许使用“人 + 马”双骨骼拼装，而不是等待完整骑兵专用动画。
+   - 骑兵初版允许使用"人 + 马"双骨骼拼装，而不是等待完整骑兵专用动画。
    - 初版先保证**能看、能分辨、能闭环**，再追求更细腻的骑乘同步。
 
 4. **阶段化落地**
@@ -155,7 +155,7 @@ Content/Animations/Adventurers/Animations/
 - 先把 Adventurers 角色视为**共享人形骨架 + 通用 locomotion / jump / hit / death 动作包**。
 - 若职业专属攻击动画在别处还没导入，初版先允许用：
   - 通用 attack 占位
-  - 或“位移 + 朝向 + 特效 + 受击 / 死亡”撑起表现闭环。
+  - 或"位移 + 朝向 + 特效 + 受击 / 死亡"撑起表现闭环。
 
 ### 3.2 马匹资产
 
@@ -184,7 +184,7 @@ Content/Animations/Horse/
   - 行走 / 奔跑
   - 跳跃
   - 死亡
-- 马也有攻击动画，但这并不等同于“骑兵持枪冲刺 / 骑兵挥砍”。
+- 马也有攻击动画，但这并不等同于"骑兵持枪冲刺 / 骑兵挥砍"。
 
 ### 3.3 武器与外观资产
 
@@ -216,10 +216,10 @@ Content/Animations/Adventurers/Assets/
 
 ### 3.4 对本项目最重要的现实结论
 
-1. **人形资源足够支持“落地、移动、跳跃、受击、死亡”的首版闭环。**
-2. **马资源足够支持“独立马体 locomotion”。**
-3. **最大缺口是“骑手与马一体化的专用骑兵动画”。**
-4. **因此骑兵初版最合理的方向不是等完整骑兵动画，而是做“双 SkeletalMesh 拼装方案”。**
+1. **人形资源足够支持"落地、移动、跳跃、受击、死亡"的首版闭环。**
+2. **马资源足够支持"独立马体 locomotion"。**
+3. **最大缺口是"骑手与马一体化的专用骑兵动画"。**
+4. **因此骑兵初版最合理的方向不是等完整骑兵动画，而是做"双 SkeletalMesh 拼装方案"。**
 
 ---
 
@@ -309,7 +309,7 @@ DefeatDisappear
 
 ## 5. 推荐的驱动方式
 
-### 5.1 不用“动画直接读底层规则细节”
+### 5.1 不用"动画直接读底层规则细节"
 
 不建议让 AnimBP 直接去读：
 
@@ -322,7 +322,7 @@ DefeatDisappear
 - 会把表现层强耦合到规则容器实现细节。
 - 以后规则微调时，动画层会跟着脆弱。
 
-### 5.2 用“表现事件 + 表现快照”驱动
+### 5.2 用"表现事件 + 表现快照"驱动
 
 推荐接口分两类：
 
@@ -344,15 +344,15 @@ DefeatDisappear
 推荐理解为：
 
 ```text
-快照负责“现在是什么”
-事件负责“刚刚发生了什么”
+快照负责"现在是什么"
+事件负责"刚刚发生了什么"
 ```
 
 ### 5.3 首版接口形态建议
 
 初版不要求一上来就做复杂委托系统。
 
-可以先在 `Gameplay` 模块中新增一层轻量“表现事件结构”，例如：
+可以先在 `Gameplay` 模块中新增一层轻量"表现事件结构"，例如：
 
 ```cpp
 FTerraPiecePresentationDelta
@@ -473,7 +473,7 @@ ATerraPieceActor
 理由：
 
 - 规则上主将不能移动。
-- 但表现上可以直接使用 `Mage` 角色站桩待机，作为“主将”而不是“可行动法师”。
+- 但表现上可以直接使用 `Mage` 角色站桩待机，作为"主将"而不是"可行动法师"。
 - 需要通过外观、UI 标识或后续特效明确它是主将，不是普通法师兵种。
 
 
@@ -486,7 +486,7 @@ ATerraPieceActor
 
 ### 7.3 武器挂载建议
 
-现有 `Assets/` 中武器资源很多，建议不要把“职业差异”全压在角色本体造型上。
+现有 `Assets/` 中武器资源很多，建议不要把"职业差异"全压在角色本体造型上。
 
 推荐通过 socket / 挂点绑定：
 
@@ -561,7 +561,7 @@ GetCellSurfaceWorldPosition_(CellId, RadiusOffsetCM, OutWorldPosition)
 
 推荐做法：
 
-- 由宿主层提供“某 CellId 的球面世界位置和外法线方向”。
+- 由宿主层提供"某 CellId 的球面世界位置和外法线方向"。
 - 棋子表现模块只负责把 actor 放上去。
 
 ### 9.2 姿态对齐
@@ -580,7 +580,7 @@ GetCellSurfaceWorldPosition_(CellId, RadiusOffsetCM, OutWorldPosition)
 
 方向规则统一如下：
 
-1. 初始生成时，除主将外，所有模型都面朝“背向本阵营主将”的方向；主将方向任意，使用稳定默认方向即可。
+1. 初始生成时，除主将外，所有模型都面朝"背向本阵营主将"的方向；主将方向任意，使用稳定默认方向即可。
 2. 行走、跳跃或攻击时，模型面向动作方向；当前 P2 的跳跃按移动方向处理。
 3. 受击时，模型面朝受击来源方向。
 4. 动作停止后，模型方向保持在动作结束时的方向；后续静态快照同步不改变方向。
@@ -590,7 +590,7 @@ GetCellSurfaceWorldPosition_(CellId, RadiusOffsetCM, OutWorldPosition)
 资源导入朝向修正单独处理，不混入棋子逻辑方向：
 
 - `ATerraPieceActor` 的逻辑约定仍是本地 `+X = Forward`、本地 `+Z = Up`。
-- 当前 Adventurers 人物资源存在“逻辑朝前实际朝右”的模型参考系偏差。
+- 当前 Adventurers 人物资源存在"逻辑朝前实际朝右"的模型参考系偏差。
 - 该偏差通过 `APlanetTessellatedMesh::P1MeshRelativeRotation` 修正，默认值为 `Yaw=90`。
 - 调试时只调整 `P1MeshRelativeRotation`，不要改移动、攻击、受击等逻辑朝向计算。
 - 若未来不同兵种或资源包朝向不一致，再把该字段升级为兵种级或资产级配置。
@@ -614,8 +614,50 @@ GetCellSurfaceWorldPosition_(CellId, RadiusOffsetCM, OutWorldPosition)
 - 额外叠加一条离球面法线方向抬起的高度曲线
 - 起跳 / 落地各留少量缓冲时间
 
-这样会比简单 `Lerp` 更像“从一个 Cell 跃到另一个 Cell”。
+这样会比简单 `Lerp` 更像"从一个 Cell 跃到另一个 Cell"。
 
+### 9.5 Up-Forward 解耦的旋转模型（SourceRotation）
+
+P3 出现近战棋子吃子后返回时歪斜的问题，根因是返回途中错误地携带了被吃棋子 Cell 的法线，导致棋子姿态不贴合脚下地表。
+
+解决方案是 **Up 始终随位置变化，Forward 由独立模式决定**，两者严格解耦。
+
+#### 9.5.1 模型
+
+每一帧的棋子旋转通过 `FRotationMatrix::MakeFromXZ(Forward, Up)` 构建，但 `Up` 和 `Forward` 的来源完全不同：
+
+| 维度 | 来源 | 说明 |
+| --- | --- | --- |
+| **Up** | `(CurrentWorldPosition - SphereCenter).SafeNormal()` | 每帧直接由当前插值位置的球面法线推导，绝不从来源/目标 Cell 继承法线 |
+| **Forward** | 由 `ETerraPiecePresentationForwardMode` 按模式选择来源后投影到 Up 平面 | 模式独立控制，解耦于当前位置 |
+
+这一模型统一用于所有 presentation-only 移动（跑入、返回等）。常规移动（P2）在 `BuildRotationFromFacing_` 中已经采用相同的 Up 推导方式，因此不受影响。
+
+#### 9.5.2 `ETerraPiecePresentationForwardMode`
+
+定义在 [TerraPiecePresentationTypes.h](Source/PiecePresentation/Public/TerraPiecePresentationTypes.h) 中：
+
+| 模式 | Forward 行为 | 典型用途 |
+| --- | --- | --- |
+| `MoveDirection` | 始终指向移动方向（From → To） | 跑入、返回、一般移动表现 |
+| `FaceTarget` | 持续指向一个固定世界位置 | 面向特定目标移动（预留） |
+| `LockSource` | 锁定起始时 Actor 的 Forward 方向 | 需要保持起始朝向的直线移动（预留） |
+
+#### 9.5.3 使用示例：近战返回
+
+P3 近战棋子返回原 Cell 的过程：
+
+1. Manager 调用 `PlayPresentationOnlyMoveTo(Participant.WorldTransform, P3MeleeReturnSeconds, MoveAnimation, MoveDirection)`
+2. Tick 中 `BuildPresentationOnlyMoveRotation_(Position)` 每帧计算：
+   - **Up** = 当前位置的球面法线 → 奔跑过程中始终贴合脚下地表
+   - **Forward** = 移动方向 `(FromPosition → ToPosition)` 投影到 Up 平面 → 棋子面向前进方向自然跑回
+3. 返回移动结束时，Manager 在回调中调用 `FaceTowards(被吃棋子位置)` → 最终朝向切为"原位指向被吃棋子"，满足 P3 设计稿要求
+
+#### 9.5.4 与常规移动的关系
+
+P2 常规移动的旋转由 `BuildRotationFromFacing_` 计算，其 Up 同样来自 `(Position - Center).SafeNormal()`，Forward 由 `ActiveMoveDesiredFacingDirection` 投影。两者的 Up 推导逻辑一致，差异仅在于 Forward 的来源——常规移动使用单一的移动方向，presentation-only 移动通过 ForwardMode 支持多种 Forward 策略。
+
+这一设计从根源上消除了跨 Cell 移动时错误继承来源 Cell 法线导致的旋转歪斜问题，同时保持 Forward 的灵活可控。
 ---
 
 ## 10. 骑兵方案
@@ -624,7 +666,7 @@ GetCellSurfaceWorldPosition_(CellId, RadiusOffsetCM, OutWorldPosition)
 
 ### 10.1 不等专用骑兵动画，先做双骨骼拼装
 
-当前没有看到“骑手骑马一体”的专用骑兵动作时，推荐方案是：
+当前没有看到"骑手骑马一体"的专用骑兵动作时，推荐方案是：
 
 ```text
 HorseMesh 播马自己的 locomotion
@@ -695,7 +737,7 @@ RiderMesh AttachToComponent(HorseMesh, SaddleSocket)
 - 骑手播短促上半身枪刺 / 挥砍动作
 - 马继续当前 locomotion，不强切攻击停顿
 
-这比“马突然播 Headbutt / Kick，当作骑兵攻击”更合理。
+这比"马突然播 Headbutt / Kick，当作骑兵攻击"更合理。
 
 马的 `HorseAttack_Kick` / `HorseAttack_Headbutt` 更适合：
 
@@ -824,7 +866,7 @@ MatchEnded
 APlanetTessellatedMesh
 ```
 
-但它只作为**宿主与桥接者**，不作为“动画逻辑本体”。
+但它只作为**宿主与桥接者**，不作为"动画逻辑本体"。
 
 也就是：
 
@@ -993,7 +1035,7 @@ P4.5 Rider 马背 Socket / 骨骼跟随阶段设计见：[P4_5MountedRiderSaddle
 验收：
 
 - 对局终局有明确反馈
-- 角色表现不再只是“能动”，而是“有读感”
+- 角色表现不再只是"能动"，而是"有读感"
 
 ---
 
@@ -1014,7 +1056,7 @@ P4.5 Rider 马背 Socket / 骨骼跟随阶段设计见：[P4_5MountedRiderSaddle
 
 ## 16. 推荐的首版实现结论
 
-如果以“尽快做出可玩且可看的版本”为目标，推荐路线是：
+如果以"尽快做出可玩且可看的版本"为目标，推荐路线是：
 
 1. **新增独立 `PiecePresentation` 模块**
 2. **先做人形棋子 actor + 共享 Humanoid AnimBP**
@@ -1029,7 +1071,7 @@ P4.5 Rider 马背 Socket / 骨骼跟随阶段设计见：[P4_5MountedRiderSaddle
 - 规则闭环已存在
 - 地形层已经够复杂，不适合继续塞棋子动画
 - 现有 Adventurers 与 Horse 资产正好能支撑这个方向
-- 真正短缺的只是“骑兵专用整套动作”，而这条路可以先绕开
+- 真正短缺的只是"骑兵专用整套动作"，而这条路可以先绕开
 
 ---
 
@@ -1047,5 +1089,3 @@ P4.5 Rider 马背 Socket / 骨骼跟随阶段设计见：[P4_5MountedRiderSaddle
    - 决定骑兵拼装成本
 
 如果这三项确认下来，后面的实现路径就会非常顺。
-
-

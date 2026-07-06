@@ -2,7 +2,7 @@
 
 > 本稿对应 [PieceAnimationPresentationDesign.md](PieceAnimationPresentationDesign.md) 中的 **P3：攻击、受击与死亡表现**。
 >
-> P3 建立在 P1/P2/P2.5 已有 `PiecePresentation` 独立模块之上：棋子已经能以 Actor 形式站在 Cell 上，并能播放移动 / 跳跃表现。本阶段只处理“回合确认后产生吃子”的表现，不改变 Gameplay 规则结算。
+> P3 建立在 P1/P2/P2.5 已有 `PiecePresentation` 独立模块之上：棋子已经能以 Actor 形式站在 Cell 上，并能播放移动 / 跳跃表现。本阶段只处理"回合确认后产生吃子"的表现，不改变 Gameplay 规则结算。
 
 ---
 
@@ -174,7 +174,7 @@ AttackStartDelay(piece) = SynchronizedHitDelay - ResolveAttackToHitSeconds(piece
 
 - 命中帧较晚的攻击动画先播。
 - 命中帧较早的攻击动画后播。
-- 所有攻击动画的“有效命中点”对齐到同一个受击动画开始时刻。
+- 所有攻击动画的"有效命中点"对齐到同一个受击动画开始时刻。
 - `P3HitReactDelaySeconds` 保留为最小受击延迟 / 兼容旧参数。
 
 ### 5.4 近战棋子返回
@@ -188,7 +188,23 @@ P2MoveAnimation
 P3MeleeReturnSeconds
 ```
 
-返回结束后回到 Idle，并恢复攻击时面向被吃棋子的朝向。也就是说，近战棋子虽然位置回到原 Cell，但最终朝向仍保持“原位指向被吃棋子”的方向，而不是面向返回移动方向。
+返回结束后回到 Idle，并恢复攻击时面向被吃棋子的朝向。也就是说，近战棋子虽然位置回到原 Cell，但最终朝向仍保持"原位指向被吃棋子"的方向，而不是面向返回移动方向。
+
+返回阶段的旋转使用 **Up 随位置变化** 模型：
+
+- **Up** 每帧直接从当前插值位置的球面法线 `(Position - Center).Normalized()` 推导，严格贴合脚下地表，绝不继承任何来源 Cell 的法线。
+- **Forward** 由统一的 `ETerraPiecePresentationForwardMode` 控制。返回过程使用 `MoveDirection` 模式，即 Forward 始终指向移动方向（从当前吃子位置到原 Cell），棋子沿球面"面向前进方向"自然跑回。
+- 返回移动结束时，由 Manager 在回调中调用 `FaceTowards(被吃棋子位置)` 将朝向切为"原位指向被吃棋子"，满足设计稿要求。
+
+`ETerraPiecePresentationForwardMode` 提供三种模式：
+
+| 模式 | Forward 行为 | 典型用途 |
+| --- | --- | --- |
+| `MoveDirection` | 始终指向移动方向（From → To） | 跑入、返回、一般移动表现 |
+| `FaceTarget` | 持续指向一个固定世界位置 | 面向特定目标移动（未来用途） |
+| `LockSource` | 锁定起始时的 Forward 方向 | 需要保持起始朝向的移动（未来用途） |
+
+这一设计将 Up 和 Forward 解耦：Up 总是正确的脚下法线，Forward 由模式独立决定，从根源上消除了跨 Cell 移动时的旋转歪斜问题。
 
 ### 5.5 被吃棋子淡出
 

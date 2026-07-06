@@ -111,7 +111,8 @@ void ATerraPieceActor::ApplyPresentationSnapshot(const FTerraPiecePresentationSn
 
     bHasActiveMove = false;
     bPresentationOnlyMove = false;
-    bUseTargetRotationOnPresentationOnlyMoveFinish = false;
+    PresentationOnlyMoveForwardMode = ETerraPiecePresentationForwardMode::MoveDirection;
+    PresentationOnlyMoveForwardTarget = FVector::ZeroVector;
     ActiveMoveElapsedSeconds = 0.0f;
     ActiveMoveDurationSeconds = 0.0f;
     ActiveMoveEvent = FTerraPiecePresentationMoveEvent();
@@ -190,7 +191,8 @@ void ATerraPieceActor::PlayPresentationMove(
         : FMath::Max(VisualConfig.MoveDurationSeconds, 0.001f);
     bHasActiveMove = true;
     bPresentationOnlyMove = false;
-    bUseTargetRotationOnPresentationOnlyMoveFinish = false;
+    PresentationOnlyMoveForwardMode = ETerraPiecePresentationForwardMode::MoveDirection;
+    PresentationOnlyMoveForwardTarget = FVector::ZeroVector;
 
     SetActorTransform(ActiveMoveEvent.FromWorldTransform);
     ActiveMoveDesiredFacingDirection = ActiveMoveEvent.ToWorldTransform.GetLocation() - ActiveMoveEvent.FromWorldTransform.GetLocation();
@@ -257,14 +259,15 @@ void ATerraPieceActor::FaceTowards(const FVector& TargetWorldLocation, float Ble
 
 void ATerraPieceActor::PlayPresentationOnlyMoveTo(const FTransform& TargetTransform, float DurationSeconds, UAnimationAsset* MoveAnimation)
 {
-    PlayPresentationOnlyMoveTo(TargetTransform, DurationSeconds, MoveAnimation, false);
+    PlayPresentationOnlyMoveTo(TargetTransform, DurationSeconds, MoveAnimation, ETerraPiecePresentationForwardMode::MoveDirection);
 }
 
 void ATerraPieceActor::PlayPresentationOnlyMoveTo(
     const FTransform& TargetTransform,
     float DurationSeconds,
     UAnimationAsset* MoveAnimation,
-    bool bUseTargetRotationOnFinish)
+    ETerraPiecePresentationForwardMode ForwardMode,
+    const FVector& ForwardTarget)
 {
     CachedVisualConfig.MoveDurationSeconds = FMath::Max(DurationSeconds, 0.001f);
     ActiveMoveEvent = FTerraPiecePresentationMoveEvent();
@@ -278,7 +281,10 @@ void ATerraPieceActor::PlayPresentationOnlyMoveTo(
     ActiveMoveDurationSeconds = FMath::Max(DurationSeconds, 0.001f);
     bHasActiveMove = true;
     bPresentationOnlyMove = true;
-    bUseTargetRotationOnPresentationOnlyMoveFinish = bUseTargetRotationOnFinish;
+    PresentationOnlyMoveForwardMode = ForwardMode;
+    PresentationOnlyMoveForwardTarget = ForwardTarget;
+
+    SetActorTransform(ActiveMoveEvent.FromWorldTransform);
 
     ActiveMoveDesiredFacingDirection = ActiveMoveEvent.ToWorldTransform.GetLocation() - ActiveMoveEvent.FromWorldTransform.GetLocation();
     if (ActiveMoveDesiredFacingDirection.IsNearlyZero())
@@ -323,7 +329,8 @@ void ATerraPieceActor::PlayAttackAnimation(UAnimationAsset* AttackAnimation, flo
 {
     bHasActiveMove = false;
     bPresentationOnlyMove = false;
-    bUseTargetRotationOnPresentationOnlyMoveFinish = false;
+    PresentationOnlyMoveForwardMode = ETerraPiecePresentationForwardMode::MoveDirection;
+    PresentationOnlyMoveForwardTarget = FVector::ZeroVector;
     FTerraPieceAnimDriveState NewDriveState = AnimDriveState;
     NewDriveState.ActionState = ETerraPieceAnimActionState::Attack;
     NewDriveState.MoveSpeed = 0.0f;
@@ -352,7 +359,8 @@ void ATerraPieceActor::PlayHitAnimation(UAnimationAsset* HitAnimation, float Sta
 {
     bHasActiveMove = false;
     bPresentationOnlyMove = false;
-    bUseTargetRotationOnPresentationOnlyMoveFinish = false;
+    PresentationOnlyMoveForwardMode = ETerraPiecePresentationForwardMode::MoveDirection;
+    PresentationOnlyMoveForwardTarget = FVector::ZeroVector;
     FTerraPieceAnimDriveState NewDriveState = AnimDriveState;
     NewDriveState.ActionState = ETerraPieceAnimActionState::Hit;
     NewDriveState.MoveSpeed = 0.0f;
@@ -380,7 +388,8 @@ void ATerraPieceActor::PlayDeathAnimation(UAnimationAsset* DeathAnimation, float
 {
     bHasActiveMove = false;
     bPresentationOnlyMove = false;
-    bUseTargetRotationOnPresentationOnlyMoveFinish = false;
+    PresentationOnlyMoveForwardMode = ETerraPiecePresentationForwardMode::MoveDirection;
+    PresentationOnlyMoveForwardTarget = FVector::ZeroVector;
     FTerraPieceAnimDriveState NewDriveState = AnimDriveState;
     NewDriveState.ActionState = ETerraPieceAnimActionState::Death;
     NewDriveState.MoveSpeed = 0.0f;
@@ -445,7 +454,15 @@ void ATerraPieceActor::Tick(float DeltaSeconds)
         const float Alpha = FMath::Clamp(ActiveMoveElapsedSeconds / FMath::Max(ActiveMoveDurationSeconds, 0.001f), 0.0f, 1.0f);
 
         const FVector Position = EvaluateActiveMovePosition_(Alpha, CachedVisualConfig);
-        FQuat DesiredRotation = BuildRotationFromFacing_(Position, ActiveMoveDesiredFacingDirection, ActiveMoveEvent.ToWorldTransform.GetRotation());
+        FQuat DesiredRotation;
+        if (bPresentationOnlyMove)
+        {
+            DesiredRotation = BuildPresentationOnlyMoveRotation_(Position);
+        }
+        else
+        {
+            DesiredRotation = BuildRotationFromFacing_(Position, ActiveMoveDesiredFacingDirection, ActiveMoveEvent.ToWorldTransform.GetRotation());
+        }
         const FQuat CurrentRotation = GetActorQuat();
         if ((CurrentRotation | DesiredRotation) < 0.0f)
         {
@@ -769,14 +786,15 @@ void ATerraPieceActor::ApplyMountedRiderDeathTransform_()
 void ATerraPieceActor::FinishActiveMove_()
 {
     const FVector TargetPosition = EvaluateActiveMovePosition_(1.0f, CachedVisualConfig);
-    const FQuat TargetRotation = bPresentationOnlyMove && bUseTargetRotationOnPresentationOnlyMoveFinish
-        ? ActiveMoveEvent.ToWorldTransform.GetRotation()
+    const FQuat TargetRotation = bPresentationOnlyMove
+        ? BuildPresentationOnlyMoveRotation_(TargetPosition)
         : BuildRotationFromFacing_(TargetPosition, ActiveMoveDesiredFacingDirection, ActiveMoveEvent.ToWorldTransform.GetRotation());
     const FTransform TargetTransform(TargetRotation, TargetPosition, FVector::OneVector);
 
     bHasActiveMove = false;
     bPresentationOnlyMove = false;
-    bUseTargetRotationOnPresentationOnlyMoveFinish = false;
+    PresentationOnlyMoveForwardMode = ETerraPiecePresentationForwardMode::MoveDirection;
+    PresentationOnlyMoveForwardTarget = FVector::ZeroVector;
     ActiveMoveElapsedSeconds = 0.0f;
     ActiveMoveDurationSeconds = 0.0f;
 
@@ -827,6 +845,51 @@ FQuat ATerraPieceActor::BuildRotationFromFacing_(const FVector& WorldPosition, c
     if (Forward.IsNearlyZero())
     {
         Forward = FVector::VectorPlaneProject(FallbackRotation.GetForwardVector(), Up).GetSafeNormal();
+    }
+    if (Forward.IsNearlyZero())
+    {
+        Forward = FVector::VectorPlaneProject(FVector::ForwardVector, Up).GetSafeNormal();
+    }
+    if (Forward.IsNearlyZero())
+    {
+        Forward = FVector::VectorPlaneProject(FVector::RightVector, Up).GetSafeNormal();
+    }
+
+    return FRotationMatrix::MakeFromXZ(Forward, Up).ToQuat();
+}
+
+FQuat ATerraPieceActor::BuildPresentationOnlyMoveRotation_(const FVector& WorldPosition) const
+{
+    const FVector Center = GetPiecePresentationCenter(this);
+    FVector Up = (WorldPosition - Center).GetSafeNormal();
+    if (Up.IsNearlyZero())
+    {
+        Up = ActiveMoveEvent.ToWorldTransform.GetRotation().GetUpVector();
+    }
+
+    FVector Forward = FVector::VectorPlaneProject(ActiveMoveDesiredFacingDirection, Up).GetSafeNormal();
+    switch (PresentationOnlyMoveForwardMode)
+    {
+    case ETerraPiecePresentationForwardMode::MoveDirection:
+        Forward = FVector::VectorPlaneProject(ActiveMoveDesiredFacingDirection, Up).GetSafeNormal();
+        break;
+    case ETerraPiecePresentationForwardMode::FaceTarget:
+    {
+        const FVector FaceDirection = (PresentationOnlyMoveForwardTarget - WorldPosition);
+        if (!FaceDirection.IsNearlyZero())
+        {
+            Forward = FVector::VectorPlaneProject(FaceDirection, Up).GetSafeNormal();
+        }
+        break;
+    }
+    case ETerraPiecePresentationForwardMode::LockSource:
+        Forward = FVector::VectorPlaneProject(ActiveMoveEvent.FromWorldTransform.GetRotation().GetForwardVector(), Up).GetSafeNormal();
+        break;
+    }
+
+    if (Forward.IsNearlyZero())
+    {
+        Forward = FVector::VectorPlaneProject(ActiveMoveEvent.FromWorldTransform.GetRotation().GetForwardVector(), Up).GetSafeNormal();
     }
     if (Forward.IsNearlyZero())
     {
