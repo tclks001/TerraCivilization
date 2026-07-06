@@ -4,6 +4,7 @@
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
+#include "TerraMountedRiderAnimInstance.h"
 #include "TerraPieceAnimInstance.h"
 
 namespace
@@ -299,7 +300,15 @@ void ATerraPieceActor::PlayPresentationOnlyMoveTo(
     if (IsMountedCavalry_())
     {
         PlayAnimationOnMesh_(HorseMesh, CachedVisualConfig.HorseMoveAnimation, true, 0.0f);
-        PlayAnimationOnMesh_(RiderMesh, CachedVisualConfig.RiderSittingAnimation, true, 0.0f);
+        if (UTerraMountedRiderAnimInstance* RiderAnimInstance = GetMountedRiderAnimInstance_())
+        {
+            RiderAnimInstance->SetSittingAnimation(CachedVisualConfig.RiderSittingAnimation);
+            RiderAnimInstance->EnterSitting();
+        }
+        else
+        {
+            PlayAnimationOnMesh_(RiderMesh, CachedVisualConfig.RiderSittingAnimation, true, 0.0f);
+        }
     }
     else
     {
@@ -323,7 +332,11 @@ void ATerraPieceActor::PlayAttackAnimation(UAnimationAsset* AttackAnimation, flo
     if (IsMountedCavalry_())
     {
         ApplyMountedRiderSaddleTransform_();
-        PlayAnimationOnMesh_(RiderMesh, AttackAnimation, false, StartOffsetSeconds);
+        const bool bMontagePlayed = PlayMountedRiderUpperBodyMontage_(CachedVisualConfig.RiderUpperBodyAttackMontage, StartOffsetSeconds);
+        if (!bMontagePlayed)
+        {
+            PlayAnimationOnMesh_(RiderMesh, AttackAnimation, false, StartOffsetSeconds);
+        }
         PlayAnimationOnMesh_(HorseMesh, CachedVisualConfig.HorseIdleAnimation, true, 0.0f);
     }
     else
@@ -348,7 +361,10 @@ void ATerraPieceActor::PlayHitAnimation(UAnimationAsset* HitAnimation, float Sta
     if (IsMountedCavalry_())
     {
         ApplyMountedRiderSaddleTransform_();
-        PlayAnimationOnMesh_(RiderMesh, HitAnimation, false, StartOffsetSeconds);
+        if (!PlayMountedRiderUpperBodyMontage_(CachedVisualConfig.RiderUpperBodyHitMontage, StartOffsetSeconds))
+        {
+            PlayAnimationOnMesh_(RiderMesh, HitAnimation, false, StartOffsetSeconds);
+        }
         PlayAnimationOnMesh_(HorseMesh, CachedVisualConfig.HorseIdleAnimation, true, 0.0f);
     }
     else
@@ -373,7 +389,19 @@ void ATerraPieceActor::PlayDeathAnimation(UAnimationAsset* DeathAnimation, float
     if (IsMountedCavalry_())
     {
         ApplyMountedRiderDeathTransform_();
-        PlayAnimationOnMesh_(RiderMesh, DeathAnimation, false, StartOffsetSeconds);
+        if (UTerraMountedRiderAnimInstance* RiderAnimInstance = GetMountedRiderAnimInstance_())
+        {
+            RiderAnimInstance->EnterDeath();
+        }
+        // 骑兵死亡：RiderMesh 从 AnimBP 模式切回 AnimationSingleNode，整身播放死亡动画。
+        // 必须绕过 PlayAnimationOnMesh_（其内部 Cast<UTerraMountedRiderAnimInstance> 守卫
+        // 会误拦截本路径），直接调用 USkeletalMeshComponent::PlayAnimation。
+        RiderMesh->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+        RiderMesh->PlayAnimation(DeathAnimation, false);
+        if (StartOffsetSeconds > 0.0f)
+        {
+            RiderMesh->SetPosition(FMath::Max(StartOffsetSeconds, 0.0f), false);
+        }
         PlayAnimationOnMesh_(HorseMesh, CachedVisualConfig.HorseDeathAnimation, false, 0.0f);
     }
     else
@@ -490,6 +518,20 @@ void ATerraPieceActor::ApplyVisualConfig_(const FTerraPieceVisualConfig& VisualC
         if (RiderMesh)
         {
             RiderMesh->SetSkeletalMesh(VisualConfig.ResolveMesh(PieceType));
+            if (VisualConfig.RiderAnimInstanceClass)
+            {
+                RiderMesh->SetAnimationMode(EAnimationMode::AnimationBlueprint);
+                RiderMesh->SetAnimInstanceClass(VisualConfig.RiderAnimInstanceClass);
+                if (UTerraMountedRiderAnimInstance* RiderAnimInstance = GetMountedRiderAnimInstance_())
+                {
+                    RiderAnimInstance->SetSittingAnimation(VisualConfig.RiderSittingAnimation);
+                }
+            }
+            else
+            {
+                RiderMesh->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+                RiderMesh->SetAnimInstanceClass(nullptr);
+            }
             RiderMesh->SetRelativeLocation(FVector::ZeroVector);
             RiderMesh->SetRelativeRotation(VisualConfig.MeshRelativeRotation);
             RiderMesh->SetRelativeScale3D(FVector(FMath::Max(VisualConfig.UniformScale, 0.001f)));
@@ -558,6 +600,14 @@ void ATerraPieceActor::PlayAnimationOnMesh_(USkeletalMeshComponent* MeshComponen
         return;
     }
 
+    // 防御性守卫：若 Mesh 上正在使用 UTerraMountedRiderAnimInstance（骑手上半身分层 AnimBP），
+    // 直接调用 PlayAnimation 会强制切成 AnimationSingleNode 模式并把 AnimBP 踢掉。
+    // 这里拒绝该调用，坐姿等 Base Pose 应通过 UTerraMountedRiderAnimInstance::EnterSitting 内部驱动。
+    if (Cast<UTerraMountedRiderAnimInstance>(MeshComponent->GetAnimInstance()))
+    {
+        return;
+    }
+
     MeshComponent->PlayAnimation(AnimationAsset, bLooping);
     MeshComponent->SetPlayRate(FMath::Max(PlayRate, 0.001f));
     if (StartOffsetSeconds > 0.0f)
@@ -587,14 +637,53 @@ void ATerraPieceActor::PlayMountedMoveAnimation_(ETerraPiecePresentationMoveType
         PlayAnimationOnMesh_(HorseMesh, CachedVisualConfig.HorseMoveAnimation, true, 0.0f);
     }
 
-    PlayAnimationOnMesh_(RiderMesh, CachedVisualConfig.RiderSittingAnimation, true, 0.0f);
+    if (UTerraMountedRiderAnimInstance* RiderAnimInstance = GetMountedRiderAnimInstance_())
+    {
+        RiderAnimInstance->SetSittingAnimation(CachedVisualConfig.RiderSittingAnimation);
+        RiderAnimInstance->EnterSitting();
+    }
+    else
+    {
+        PlayAnimationOnMesh_(RiderMesh, CachedVisualConfig.RiderSittingAnimation, true, 0.0f);
+    }
 }
 
 void ATerraPieceActor::PlayMountedIdleAnimations_()
 {
     ApplyMountedRiderSaddleTransform_();
     PlayAnimationOnMesh_(HorseMesh, CachedVisualConfig.HorseIdleAnimation, true, 0.0f);
-    PlayAnimationOnMesh_(RiderMesh, CachedVisualConfig.RiderSittingAnimation, true, 0.0f);
+    if (UTerraMountedRiderAnimInstance* RiderAnimInstance = GetMountedRiderAnimInstance_())
+    {
+        RiderAnimInstance->SetSittingAnimation(CachedVisualConfig.RiderSittingAnimation);
+        RiderAnimInstance->EnterSitting();
+    }
+    else
+    {
+        PlayAnimationOnMesh_(RiderMesh, CachedVisualConfig.RiderSittingAnimation, true, 0.0f);
+    }
+}
+
+bool ATerraPieceActor::PlayMountedRiderUpperBodyMontage_(UAnimMontage* Montage, float StartOffsetSeconds)
+{
+    UTerraMountedRiderAnimInstance* RiderAnimInstance = GetMountedRiderAnimInstance_();
+    if (!RiderAnimInstance || !Montage)
+    {
+        return false;
+    }
+
+    RiderAnimInstance->SetSittingAnimation(CachedVisualConfig.RiderSittingAnimation);
+    return RiderAnimInstance->PlayUpperBodyMontage(Montage, StartOffsetSeconds) > 0.0f;
+}
+
+UTerraMountedRiderAnimInstance* ATerraPieceActor::GetMountedRiderAnimInstance_() const
+{
+    if (!RiderMesh)
+    {
+        return nullptr;
+    }
+    UAnimInstance* RawAnimInstance = RiderMesh->GetAnimInstance();
+    UTerraMountedRiderAnimInstance* CastResult = Cast<UTerraMountedRiderAnimInstance>(RawAnimInstance);
+    return CastResult;
 }
 
 void ATerraPieceActor::ApplyMountedRiderSaddleTransform_()

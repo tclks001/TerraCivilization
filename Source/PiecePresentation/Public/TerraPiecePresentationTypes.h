@@ -5,6 +5,8 @@
 #include "TerraPiecePresentationTypes.generated.h"
 
 class USkeletalMesh;
+class UAnimInstance;
+class UAnimMontage;
 class UAnimationAsset;
 
 UENUM(BlueprintType)
@@ -101,6 +103,15 @@ struct PIECEPRESENTATION_API FTerraPieceVisualConfig
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P4.1")
     TObjectPtr<UAnimationAsset> RiderSittingAnimation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P4.4")
+    TSubclassOf<UAnimInstance> RiderAnimInstanceClass;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P4.4")
+    TObjectPtr<UAnimMontage> RiderUpperBodyAttackMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P4.4")
+    TObjectPtr<UAnimMontage> RiderUpperBodyHitMontage;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P4.1")
     FVector HorseRelativeLocation = FVector::ZeroVector;

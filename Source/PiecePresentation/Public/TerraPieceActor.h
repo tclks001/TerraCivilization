@@ -7,6 +7,8 @@
 
 class USceneComponent;
 class USkeletalMeshComponent;
+class UAnimMontage;
+class UTerraMountedRiderAnimInstance;
 
 UCLASS()
 class PIECEPRESENTATION_API ATerraPieceActor : public AActor
@@ -74,6 +76,8 @@ private:
     void PlayAnimationOnMesh_(USkeletalMeshComponent* MeshComponent, UAnimationAsset* AnimationAsset, bool bLooping, float StartOffsetSeconds, float PlayRate = 1.0f);
     void PlayMountedMoveAnimation_(ETerraPiecePresentationMoveType MoveType);
     void PlayMountedIdleAnimations_();
+    bool PlayMountedRiderUpperBodyMontage_(UAnimMontage* Montage, float StartOffsetSeconds);
+    UTerraMountedRiderAnimInstance* GetMountedRiderAnimInstance_() const;
     void ApplyMountedRiderSaddleTransform_();
     void ApplyMountedRiderDeathTransform_();
     void FinishActiveMove_();

@@ -16,6 +16,8 @@ class UMaterialInstanceDynamic;
 class UTexture2D;
 class UTexture2DArray;
 class UAnimationAsset;
+class UAnimInstance;
+class UAnimMontage;
 class FSphereTopology;
 class FMeshDisplacementBuilder;
 class FWorldGenerator;   // T4：TUniquePtr<FWorldGenerator>，避免在头文件 include "WorldGenerator.h"
@@ -492,6 +494,18 @@ public:
     /** P4.1 骑手坐姿 Idle。推荐 Rig_Medium_GeneralSitting。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
     TObjectPtr<UAnimationAsset> P4RiderSittingAnimation;
+
+    /** P4.4 Rider 专用 AnimBP 类。父类必须是 TerraMountedRiderAnimInstance。为空时回退到 P4.3 直接 PlayAnimation。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TSubclassOf<UAnimInstance> P4RiderAnimInstanceClass;
+
+    /** P4.4 Rider 上半身攻击 Montage。Slot 名建议 MountedUpperBody。为空时回退到 P3CavalryMeleeAttackAnimation 整身播放。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UAnimMontage> P4RiderUpperBodyAttackMontage;
+
+    /** P4.4 Rider 上半身受击 Montage。Slot 名建议 MountedUpperBody。为空时回退到 P3HitAnimation 整身播放。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UAnimMontage> P4RiderUpperBodyHitMontage;
 
     /** P4.1 马相对骑兵 Actor 根节点的位置修正。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")

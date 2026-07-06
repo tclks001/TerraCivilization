@@ -2553,6 +2553,9 @@ FTerraPieceVisualConfig APlanetTessellatedMesh::BuildP1PieceVisualConfig_() cons
     VisualConfig.HorseJumpPlayRateScale = FMath::Max(P4HorseJumpPlayRateScale, 0.001f);
     VisualConfig.HorseDeathAnimation = P4HorseDeathAnimation.Get() ? P4HorseDeathAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Horse/HorseDeath.HorseDeath"));
     VisualConfig.RiderSittingAnimation = P4RiderSittingAnimation.Get() ? P4RiderSittingAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Adventurers/Animations/Rig_Medium_GeneralSitting.Rig_Medium_GeneralSitting"));
+    VisualConfig.RiderAnimInstanceClass = P4RiderAnimInstanceClass;
+    VisualConfig.RiderUpperBodyAttackMontage = P4RiderUpperBodyAttackMontage;
+    VisualConfig.RiderUpperBodyHitMontage = P4RiderUpperBodyHitMontage;
     VisualConfig.HorseRelativeLocation = P4HorseRelativeLocation;
     VisualConfig.HorseRelativeRotation = P4HorseRelativeRotation;
     VisualConfig.HorseUniformScale = FMath::Max(P4HorseUniformScale, 0.001f);
