@@ -966,6 +966,8 @@ P4.3 骑兵攻击 / 受击 / 死亡阶段设计见：[P4_3MountedCavalryAttackHi
 
 P4.4 Rider 上半身 Slot Montage 阶段设计见：[P4_4MountedRiderUpperBodySlotDesign.md](P4_4MountedRiderUpperBodySlotDesign.md)。
 
+P4.5 Rider 马背 Socket / 骨骼跟随阶段设计见：[P4_5MountedRiderSaddleAttachDesign.md](P4_5MountedRiderSaddleAttachDesign.md)。
+
 目标：
 
 - 马体独立 locomotion

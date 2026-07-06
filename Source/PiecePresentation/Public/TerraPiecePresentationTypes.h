@@ -113,6 +113,9 @@ struct PIECEPRESENTATION_API FTerraPieceVisualConfig
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P4.4")
     TObjectPtr<UAnimMontage> RiderUpperBodyHitMontage;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P4.5")
+    FName RiderSaddleAttachName = TEXT("Torso");
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P4.1")
     FVector HorseRelativeLocation = FVector::ZeroVector;
 

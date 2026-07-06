@@ -78,6 +78,8 @@ private:
     void PlayMountedIdleAnimations_();
     bool PlayMountedRiderUpperBodyMontage_(UAnimMontage* Montage, float StartOffsetSeconds);
     UTerraMountedRiderAnimInstance* GetMountedRiderAnimInstance_() const;
+    void AttachMountedRiderToSaddle_();
+    void AttachMountedRiderToRootForDeath_();
     void ApplyMountedRiderSaddleTransform_();
     void ApplyMountedRiderDeathTransform_();
     void FinishActiveMove_();
@@ -136,5 +138,8 @@ private:
 
     UPROPERTY(Transient)
     FVector DeathFadeStartScale = FVector::OneVector;
+
+    UPROPERTY(Transient)
+    FName LastMissingRiderSaddleAttachName;
 
 };

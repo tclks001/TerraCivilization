@@ -507,6 +507,10 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
     TObjectPtr<UAnimMontage> P4RiderUpperBodyHitMontage;
 
+    /** P4.5 RiderAnchor 挂到 HorseMesh 的骨骼或 Socket 名。默认 Torso；若你在 Torso 上创建 SaddleSocket，可改成 SaddleSocket。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FName P4SaddleAttachName = TEXT("Torso");
+
     /** P4.1 马相对骑兵 Actor 根节点的位置修正。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
     FVector P4HorseRelativeLocation = FVector::ZeroVector;

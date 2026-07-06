@@ -7,6 +7,8 @@
 #include "TerraMountedRiderAnimInstance.h"
 #include "TerraPieceAnimInstance.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogTerraPieceActor, Log, All);
+
 namespace
 {
     FVector GetPiecePresentationCenter(const AActor* PieceActor)
@@ -393,9 +395,8 @@ void ATerraPieceActor::PlayDeathAnimation(UAnimationAsset* DeathAnimation, float
         {
             RiderAnimInstance->EnterDeath();
         }
-        // Æï±øËÀÍö£ºRiderMesh ´Ó AnimBP Ä£Ê½ÇĞ»Ø AnimationSingleNode£¬ÕûÉí²¥·ÅËÀÍö¶¯»­¡£
-        // ±ØĞëÈÆ¹ı PlayAnimationOnMesh_£¨ÆäÄÚ²¿ Cast<UTerraMountedRiderAnimInstance> ÊØÎÀ
-        // »áÎóÀ¹½Ø±¾Â·¾¶£©£¬Ö±½Óµ÷ÓÃ USkeletalMeshComponent::PlayAnimation¡£
+        // Mounted death uses SingleNode so the rider can play a full-body death animation on the ground.
+        // Bypass PlayAnimationOnMesh_, which intentionally ignores MountedRider AnimBP instances.
         RiderMesh->SetAnimationMode(EAnimationMode::AnimationSingleNode);
         RiderMesh->PlayAnimation(DeathAnimation, false);
         if (StartOffsetSeconds > 0.0f)
@@ -491,6 +492,7 @@ void ATerraPieceActor::ApplyVisualConfig_(const FTerraPieceVisualConfig& VisualC
         return;
     }
 
+    CachedVisualConfig = VisualConfig;
     HumanMesh->SetSkeletalMesh(VisualConfig.ResolveMesh(PieceType));
 
     if (IsMountedCavalry_())
@@ -510,9 +512,7 @@ void ATerraPieceActor::ApplyVisualConfig_(const FTerraPieceVisualConfig& VisualC
 
         if (RiderAnchor)
         {
-            RiderAnchor->SetRelativeLocation(VisualConfig.RiderRelativeLocation);
-            RiderAnchor->SetRelativeRotation(VisualConfig.RiderRelativeRotation);
-            RiderAnchor->SetRelativeScale3D(FVector(FMath::Max(VisualConfig.RiderUniformScale, 0.001f)));
+            ApplyMountedRiderSaddleTransform_();
         }
 
         if (RiderMesh)
@@ -600,9 +600,9 @@ void ATerraPieceActor::PlayAnimationOnMesh_(USkeletalMeshComponent* MeshComponen
         return;
     }
 
-    // ·ÀÓùĞÔÊØÎÀ£ºÈô Mesh ÉÏÕıÔÚÊ¹ÓÃ UTerraMountedRiderAnimInstance£¨ÆïÊÖÉÏ°ëÉí·Ö²ã AnimBP£©£¬
-    // Ö±½Óµ÷ÓÃ PlayAnimation »áÇ¿ÖÆÇĞ³É AnimationSingleNode Ä£Ê½²¢°Ñ AnimBP Ìßµô¡£
-    // ÕâÀï¾Ü¾ø¸Ãµ÷ÓÃ£¬×ø×ËµÈ Base Pose Ó¦Í¨¹ı UTerraMountedRiderAnimInstance::EnterSitting ÄÚ²¿Çı¶¯¡£
+    // é˜²å¾¡æ€§å®ˆå«ï¼šè‹¥ Mesh ä¸Šæ­£åœ¨ä½¿ç”¨ UTerraMountedRiderAnimInstanceï¼ˆéª‘æ‰‹ä¸ŠåŠèº«åˆ†å±‚ AnimBPï¼‰ï¼Œ
+    // ç›´æ¥è°ƒç”¨ PlayAnimation ä¼šå¼ºåˆ¶åˆ‡æˆ AnimationSingleNode æ¨¡å¼å¹¶æŠŠ AnimBP è¸¢æ‰ã€‚
+    // è¿™é‡Œæ‹’ç»è¯¥è°ƒç”¨ï¼Œåå§¿ç­‰ Base Pose åº”é€šè¿‡ UTerraMountedRiderAnimInstance::EnterSitting å†…éƒ¨é©±åŠ¨ã€‚
     if (Cast<UTerraMountedRiderAnimInstance>(MeshComponent->GetAnimInstance()))
     {
         return;
@@ -686,6 +686,60 @@ UTerraMountedRiderAnimInstance* ATerraPieceActor::GetMountedRiderAnimInstance_()
     return CastResult;
 }
 
+void ATerraPieceActor::AttachMountedRiderToSaddle_()
+{
+    if (!RiderAnchor || !HorseMesh)
+    {
+        return;
+    }
+
+    FName AttachName = CachedVisualConfig.RiderSaddleAttachName;
+    if (AttachName.IsNone())
+    {
+        AttachName = TEXT("Torso");
+    }
+
+    const bool bHasSocket = HorseMesh->DoesSocketExist(AttachName);
+    const bool bHasBone = HorseMesh->GetBoneIndex(AttachName) != INDEX_NONE;
+    const FName SocketOrBoneName = (bHasSocket || bHasBone) ? AttachName : NAME_None;
+    if (SocketOrBoneName.IsNone() && !AttachName.IsNone() && LastMissingRiderSaddleAttachName != AttachName)
+    {
+        LastMissingRiderSaddleAttachName = AttachName;
+        UE_LOG(LogTerraPieceActor, Warning,
+            TEXT("[PiecePresentation][P4.5] Rider saddle attach target not found. PieceId=%d AttachName=%s HorseMesh=%s"),
+            PieceId,
+            *AttachName.ToString(),
+            *GetNameSafe(HorseMesh->GetSkeletalMeshAsset()));
+    }
+    else if (!SocketOrBoneName.IsNone())
+    {
+        LastMissingRiderSaddleAttachName = NAME_None;
+    }
+
+    if (RiderAnchor->GetAttachParent() != HorseMesh || RiderAnchor->GetAttachSocketName() != SocketOrBoneName)
+    {
+        RiderAnchor->AttachToComponent(
+            HorseMesh,
+            FAttachmentTransformRules::KeepRelativeTransform,
+            SocketOrBoneName);
+    }
+}
+
+void ATerraPieceActor::AttachMountedRiderToRootForDeath_()
+{
+    if (!RiderAnchor || !RootScene)
+    {
+        return;
+    }
+
+    if (RiderAnchor->GetAttachParent() != RootScene)
+    {
+        RiderAnchor->AttachToComponent(
+            RootScene,
+            FAttachmentTransformRules::KeepRelativeTransform);
+    }
+}
+
 void ATerraPieceActor::ApplyMountedRiderSaddleTransform_()
 {
     if (!RiderAnchor)
@@ -693,6 +747,7 @@ void ATerraPieceActor::ApplyMountedRiderSaddleTransform_()
         return;
     }
 
+    AttachMountedRiderToSaddle_();
     RiderAnchor->SetRelativeLocation(CachedVisualConfig.RiderRelativeLocation);
     RiderAnchor->SetRelativeRotation(CachedVisualConfig.RiderRelativeRotation);
     RiderAnchor->SetRelativeScale3D(FVector(FMath::Max(CachedVisualConfig.RiderUniformScale, 0.001f)));
@@ -705,6 +760,7 @@ void ATerraPieceActor::ApplyMountedRiderDeathTransform_()
         return;
     }
 
+    AttachMountedRiderToRootForDeath_();
     RiderAnchor->SetRelativeLocation(CachedVisualConfig.RiderDeathRelativeLocation);
     RiderAnchor->SetRelativeRotation(CachedVisualConfig.RiderDeathRelativeRotation);
     RiderAnchor->SetRelativeScale3D(FVector(FMath::Max(CachedVisualConfig.RiderUniformScale, 0.001f)));

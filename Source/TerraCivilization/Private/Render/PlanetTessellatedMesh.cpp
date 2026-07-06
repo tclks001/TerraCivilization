@@ -2556,6 +2556,7 @@ FTerraPieceVisualConfig APlanetTessellatedMesh::BuildP1PieceVisualConfig_() cons
     VisualConfig.RiderAnimInstanceClass = P4RiderAnimInstanceClass;
     VisualConfig.RiderUpperBodyAttackMontage = P4RiderUpperBodyAttackMontage;
     VisualConfig.RiderUpperBodyHitMontage = P4RiderUpperBodyHitMontage;
+    VisualConfig.RiderSaddleAttachName = P4SaddleAttachName.IsNone() ? FName(TEXT("Torso")) : P4SaddleAttachName;
     VisualConfig.HorseRelativeLocation = P4HorseRelativeLocation;
     VisualConfig.HorseRelativeRotation = P4HorseRelativeRotation;
     VisualConfig.HorseUniformScale = FMath::Max(P4HorseUniformScale, 0.001f);
