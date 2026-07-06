@@ -962,6 +962,8 @@ P4.1 静态骑乘 Idle 阶段设计见：[P4_1MountedCavalryIdleDesign.md](P4_1M
 
 P4.2 骑兵移动 / 跳跃阶段设计见：[P4_2MountedCavalryMoveJumpDesign.md](P4_2MountedCavalryMoveJumpDesign.md)。
 
+P4.3 骑兵攻击 / 受击 / 死亡阶段设计见：[P4_3MountedCavalryAttackHitDeathDesign.md](P4_3MountedCavalryAttackHitDeathDesign.md)。
+
 目标：
 
 - 马体独立 locomotion

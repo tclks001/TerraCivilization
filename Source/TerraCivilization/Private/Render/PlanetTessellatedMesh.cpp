@@ -2551,6 +2551,7 @@ FTerraPieceVisualConfig APlanetTessellatedMesh::BuildP1PieceVisualConfig_() cons
     VisualConfig.HorseMoveAnimation = P4HorseMoveAnimation.Get() ? P4HorseMoveAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Horse/HorseWalk.HorseWalk"));
     VisualConfig.HorseJumpAnimation = P4HorseJumpAnimation.Get() ? P4HorseJumpAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Horse/HorseGallop_Jump.HorseGallop_Jump"));
     VisualConfig.HorseJumpPlayRateScale = FMath::Max(P4HorseJumpPlayRateScale, 0.001f);
+    VisualConfig.HorseDeathAnimation = P4HorseDeathAnimation.Get() ? P4HorseDeathAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Horse/HorseDeath.HorseDeath"));
     VisualConfig.RiderSittingAnimation = P4RiderSittingAnimation.Get() ? P4RiderSittingAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Adventurers/Animations/Rig_Medium_GeneralSitting.Rig_Medium_GeneralSitting"));
     VisualConfig.HorseRelativeLocation = P4HorseRelativeLocation;
     VisualConfig.HorseRelativeRotation = P4HorseRelativeRotation;
@@ -2558,6 +2559,8 @@ FTerraPieceVisualConfig APlanetTessellatedMesh::BuildP1PieceVisualConfig_() cons
     VisualConfig.RiderRelativeLocation = P4RiderRelativeLocation;
     VisualConfig.RiderRelativeRotation = P4RiderRelativeRotation;
     VisualConfig.RiderUniformScale = FMath::Max(P4RiderUniformScale, 0.001f);
+    VisualConfig.RiderDeathRelativeLocation = P4RiderDeathRelativeLocation;
+    VisualConfig.RiderDeathRelativeRotation = P4RiderDeathRelativeRotation;
     VisualConfig.IdleAnimation = P2IdleAnimation.Get() ? P2IdleAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Adventurers/Animations/Rig_Medium_GeneralIdle_A.Rig_Medium_GeneralIdle_A"));
     VisualConfig.MoveAnimation = P2MoveAnimation.Get() ? P2MoveAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Adventurers/Animations/Rig_Medium_MovementBasicWalking_A.Rig_Medium_MovementBasicWalking_A"));
     VisualConfig.JumpAnimation = P2JumpAnimation.Get() ? P2JumpAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Adventurers/Animations/Rig_Medium_MovementBasicJump_Full_Short.Rig_Medium_MovementBasicJump_Full_Short"));

@@ -96,6 +96,9 @@ struct PIECEPRESENTATION_API FTerraPieceVisualConfig
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P4.2", meta = (ClampMin = "0.001"))
     float HorseJumpPlayRateScale = 1.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P4.3")
+    TObjectPtr<UAnimationAsset> HorseDeathAnimation;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P4.1")
     TObjectPtr<UAnimationAsset> RiderSittingAnimation;
 
@@ -116,6 +119,12 @@ struct PIECEPRESENTATION_API FTerraPieceVisualConfig
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P4.1", meta = (ClampMin = "0.001"))
     float RiderUniformScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P4.3")
+    FVector RiderDeathRelativeLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P4.3")
+    FRotator RiderDeathRelativeRotation = FRotator::ZeroRotator;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P2")
     TObjectPtr<UAnimationAsset> IdleAnimation;

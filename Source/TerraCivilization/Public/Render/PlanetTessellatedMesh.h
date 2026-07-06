@@ -485,6 +485,10 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "10.0"))
     float P4HorseJumpPlayRateScale = 1.0f;
 
+    /** P4.3 马死亡动画。推荐 HorseDeath。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UAnimationAsset> P4HorseDeathAnimation;
+
     /** P4.1 骑手坐姿 Idle。推荐 Rig_Medium_GeneralSitting。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
     TObjectPtr<UAnimationAsset> P4RiderSittingAnimation;
@@ -512,6 +516,14 @@ public:
     /** P4.1 骑手相对缩放。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
     float P4RiderUniformScale = 1.0f;
+
+    /** P4.3 骑兵死亡时 RiderAnchor 的落地相对位置。用于让 Rider 从马背落到地面再播放死亡动画。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FVector P4RiderDeathRelativeLocation = FVector::ZeroVector;
+
+    /** P4.3 骑兵死亡时 RiderAnchor 的落地相对旋转。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FRotator P4RiderDeathRelativeRotation = FRotator::ZeroRotator;
 
     /** P3 主将施法攻击动画。推荐 Rig_Medium_GeneralMagic_Spell_Casting。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")

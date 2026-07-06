@@ -21,6 +21,7 @@ public:
     void CancelPresentationMove(const FTerraPiecePresentationSnapshot& Snapshot, const FTerraPieceVisualConfig& VisualConfig);
     void FaceTowards(const FVector& TargetWorldLocation, float BlendSeconds);
     void PlayPresentationOnlyMoveTo(const FTransform& TargetTransform, float DurationSeconds, UAnimationAsset* MoveAnimation);
+    void PlayPresentationOnlyMoveTo(const FTransform& TargetTransform, float DurationSeconds, UAnimationAsset* MoveAnimation, bool bUseTargetRotationOnFinish);
     void PlayAttackAnimation(UAnimationAsset* AttackAnimation, float StartOffsetSeconds);
     void PlayHitAnimation(UAnimationAsset* HitAnimation, float StartOffsetSeconds);
     void PlayDeathAnimation(UAnimationAsset* DeathAnimation, float StartOffsetSeconds);
@@ -73,6 +74,8 @@ private:
     void PlayAnimationOnMesh_(USkeletalMeshComponent* MeshComponent, UAnimationAsset* AnimationAsset, bool bLooping, float StartOffsetSeconds, float PlayRate = 1.0f);
     void PlayMountedMoveAnimation_(ETerraPiecePresentationMoveType MoveType);
     void PlayMountedIdleAnimations_();
+    void ApplyMountedRiderSaddleTransform_();
+    void ApplyMountedRiderDeathTransform_();
     void FinishActiveMove_();
     FVector EvaluateActiveMovePosition_(float Alpha, const FTerraPieceVisualConfig& VisualConfig) const;
     FQuat BuildRotationFromFacing_(const FVector& WorldPosition, const FVector& DesiredFacingDirection, const FQuat& FallbackRotation) const;
@@ -99,6 +102,9 @@ private:
 
     UPROPERTY(Transient)
     bool bPresentationOnlyMove = false;
+
+    UPROPERTY(Transient)
+    bool bUseTargetRotationOnPresentationOnlyMoveFinish = false;
 
     UPROPERTY(Transient)
     bool bHasActiveFacingBlend = false;

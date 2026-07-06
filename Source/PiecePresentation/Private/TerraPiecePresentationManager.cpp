@@ -451,7 +451,8 @@ void UTerraPiecePresentationManager::FinishP3CaptureEvent_(FTerraPiecePresentati
         PieceActor->PlayPresentationOnlyMoveTo(
             ReturnTransform,
             FMath::Max(CachedVisualConfig.P3MeleeReturnSeconds, 0.001f),
-            CachedVisualConfig.MoveAnimation);
+            CachedVisualConfig.MoveAnimation,
+            true);
     };
 
     ReturnIfMelee(AttackerActor, CaptureEvent.Attacker);
