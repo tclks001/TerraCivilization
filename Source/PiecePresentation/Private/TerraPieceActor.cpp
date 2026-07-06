@@ -3,7 +3,9 @@
 #include "Animation/AnimationAsset.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
 #include "TerraMountedRiderAnimInstance.h"
 #include "TerraPieceAnimInstance.h"
 
@@ -93,6 +95,22 @@ ATerraPieceActor::ATerraPieceActor()
     RiderMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
     RiderMesh->SetHiddenInGame(true);
     RiderMesh->SetVisibility(false);
+
+    WeaponPrimaryMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponPrimaryMesh"));
+    WeaponPrimaryMesh->SetupAttachment(RootScene);
+    WeaponPrimaryMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    WeaponPrimaryMesh->SetGenerateOverlapEvents(false);
+    WeaponPrimaryMesh->SetCanEverAffectNavigation(false);
+    WeaponPrimaryMesh->SetHiddenInGame(true);
+    WeaponPrimaryMesh->SetVisibility(false);
+
+    WeaponSecondaryMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponSecondaryMesh"));
+    WeaponSecondaryMesh->SetupAttachment(RootScene);
+    WeaponSecondaryMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    WeaponSecondaryMesh->SetGenerateOverlapEvents(false);
+    WeaponSecondaryMesh->SetCanEverAffectNavigation(false);
+    WeaponSecondaryMesh->SetHiddenInGame(true);
+    WeaponSecondaryMesh->SetVisibility(false);
 }
 
 void ATerraPieceActor::ApplyPresentationSnapshot(const FTerraPiecePresentationSnapshot& Snapshot, const FTerraPieceVisualConfig& VisualConfig)
@@ -576,6 +594,7 @@ void ATerraPieceActor::ApplyVisualConfig_(const FTerraPieceVisualConfig& VisualC
         }
     }
 
+    ApplyWeaponAttachments_();
     SetActorHiddenInGame(false);
     SetActorScale3D(FVector::OneVector);
 }
@@ -781,6 +800,140 @@ void ATerraPieceActor::ApplyMountedRiderDeathTransform_()
     RiderAnchor->SetRelativeLocation(CachedVisualConfig.RiderDeathRelativeLocation);
     RiderAnchor->SetRelativeRotation(CachedVisualConfig.RiderDeathRelativeRotation);
     RiderAnchor->SetRelativeScale3D(FVector(FMath::Max(CachedVisualConfig.RiderUniformScale, 0.001f)));
+}
+
+void ATerraPieceActor::ApplyWeaponAttachments_()
+{
+    if (!WeaponPrimaryMesh || !WeaponSecondaryMesh)
+    {
+        return;
+    }
+
+    HideWeaponComponent_(WeaponPrimaryMesh);
+    HideWeaponComponent_(WeaponSecondaryMesh);
+
+    switch (PieceType)
+    {
+    case ETerraGameplayPieceType::Commander:
+        break;
+    case ETerraGameplayPieceType::Archer:
+        ConfigureWeaponComponent_(
+            WeaponPrimaryMesh,
+            HumanMesh,
+            CachedVisualConfig.ArcherBowMesh,
+            CachedVisualConfig.ArcherBowAttachName,
+            CachedVisualConfig.ArcherBowRelativeLocation,
+            CachedVisualConfig.ArcherBowRelativeRotation,
+            CachedVisualConfig.ArcherBowUniformScale);
+        break;
+    case ETerraGameplayPieceType::Infantry:
+        ConfigureWeaponComponent_(
+            WeaponPrimaryMesh,
+            HumanMesh,
+            CachedVisualConfig.InfantrySwordMesh,
+            CachedVisualConfig.InfantrySwordAttachName,
+            CachedVisualConfig.InfantrySwordRelativeLocation,
+            CachedVisualConfig.InfantrySwordRelativeRotation,
+            CachedVisualConfig.InfantrySwordUniformScale);
+        ConfigureWeaponComponent_(
+            WeaponSecondaryMesh,
+            HumanMesh,
+            CachedVisualConfig.InfantryShieldMesh,
+            CachedVisualConfig.InfantryShieldAttachName,
+            CachedVisualConfig.InfantryShieldRelativeLocation,
+            CachedVisualConfig.InfantryShieldRelativeRotation,
+            CachedVisualConfig.InfantryShieldUniformScale);
+        break;
+    case ETerraGameplayPieceType::Cavalry:
+        ConfigureWeaponComponent_(
+            WeaponPrimaryMesh,
+            RiderMesh,
+            CachedVisualConfig.CavalryAxeMesh,
+            CachedVisualConfig.CavalryAxeAttachName,
+            CachedVisualConfig.CavalryAxeRelativeLocation,
+            CachedVisualConfig.CavalryAxeRelativeRotation,
+            CachedVisualConfig.CavalryAxeUniformScale);
+        break;
+    default:
+        break;
+    }
+}
+
+void ATerraPieceActor::HideWeaponComponent_(UStaticMeshComponent* WeaponComponent)
+{
+    if (!WeaponComponent)
+    {
+        return;
+    }
+
+    WeaponComponent->SetStaticMesh(nullptr);
+    if (WeaponComponent->GetAttachParent() != RootScene)
+    {
+        WeaponComponent->AttachToComponent(RootScene, FAttachmentTransformRules::KeepRelativeTransform);
+    }
+    WeaponComponent->SetRelativeTransform(FTransform::Identity);
+    WeaponComponent->SetHiddenInGame(true);
+    WeaponComponent->SetVisibility(false);
+}
+
+void ATerraPieceActor::ConfigureWeaponComponent_(
+    UStaticMeshComponent* WeaponComponent,
+    USkeletalMeshComponent* ParentMesh,
+    UStaticMesh* StaticMesh,
+    FName AttachName,
+    const FVector& RelativeLocation,
+    const FRotator& RelativeRotation,
+    float UniformScale)
+{
+    if (!WeaponComponent || !ParentMesh || !StaticMesh)
+    {
+        return;
+    }
+
+    const FName SocketOrBoneName = ResolveWeaponAttachName_(ParentMesh, AttachName);
+    if (WeaponComponent->GetAttachParent() != ParentMesh || WeaponComponent->GetAttachSocketName() != SocketOrBoneName)
+    {
+        WeaponComponent->AttachToComponent(
+            ParentMesh,
+            FAttachmentTransformRules::KeepRelativeTransform,
+            SocketOrBoneName);
+    }
+
+    WeaponComponent->SetStaticMesh(StaticMesh);
+    WeaponComponent->SetRelativeLocation(RelativeLocation);
+    WeaponComponent->SetRelativeRotation(RelativeRotation);
+    WeaponComponent->SetRelativeScale3D(FVector(FMath::Max(UniformScale, 0.001f)));
+    WeaponComponent->SetHiddenInGame(false);
+    WeaponComponent->SetVisibility(true);
+}
+
+FName ATerraPieceActor::ResolveWeaponAttachName_(USkeletalMeshComponent* ParentMesh, FName AttachName)
+{
+    if (!ParentMesh || AttachName.IsNone())
+    {
+        return NAME_None;
+    }
+
+    const bool bHasSocket = ParentMesh->DoesSocketExist(AttachName);
+    const bool bHasBone = ParentMesh->GetBoneIndex(AttachName) != INDEX_NONE;
+    if (bHasSocket || bHasBone)
+    {
+        LastMissingWeaponAttachName = NAME_None;
+        return AttachName;
+    }
+
+    if (LastMissingWeaponAttachName != AttachName)
+    {
+        LastMissingWeaponAttachName = AttachName;
+        UE_LOG(LogTerraPieceActor, Warning,
+            TEXT("[PiecePresentation][P5] Weapon attach target not found. PieceId=%d PieceType=%d AttachName=%s ParentMesh=%s"),
+            PieceId,
+            static_cast<int32>(PieceType),
+            *AttachName.ToString(),
+            *GetNameSafe(ParentMesh->GetSkeletalMeshAsset()));
+    }
+
+    return NAME_None;
 }
 
 void ATerraPieceActor::FinishActiveMove_()

@@ -7,6 +7,8 @@
 
 class USceneComponent;
 class USkeletalMeshComponent;
+class UStaticMesh;
+class UStaticMeshComponent;
 class UAnimMontage;
 class UTerraMountedRiderAnimInstance;
 
@@ -53,6 +55,12 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Terra|Piece Presentation|P4.1")
     TObjectPtr<USkeletalMeshComponent> RiderMesh;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Terra|Piece Presentation|P5")
+    TObjectPtr<UStaticMeshComponent> WeaponPrimaryMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Terra|Piece Presentation|P5")
+    TObjectPtr<UStaticMeshComponent> WeaponSecondaryMesh;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Terra|Piece Presentation")
     int32 PieceId = INDEX_NONE;
 
@@ -82,6 +90,10 @@ private:
     void AttachMountedRiderToRootForDeath_();
     void ApplyMountedRiderSaddleTransform_();
     void ApplyMountedRiderDeathTransform_();
+    void ApplyWeaponAttachments_();
+    void HideWeaponComponent_(UStaticMeshComponent* WeaponComponent);
+    void ConfigureWeaponComponent_(UStaticMeshComponent* WeaponComponent, USkeletalMeshComponent* ParentMesh, UStaticMesh* StaticMesh, FName AttachName, const FVector& RelativeLocation, const FRotator& RelativeRotation, float UniformScale);
+    FName ResolveWeaponAttachName_(USkeletalMeshComponent* ParentMesh, FName AttachName);
     void FinishActiveMove_();
     FVector EvaluateActiveMovePosition_(float Alpha, const FTerraPieceVisualConfig& VisualConfig) const;
     FQuat BuildRotationFromFacing_(const FVector& WorldPosition, const FVector& DesiredFacingDirection, const FQuat& FallbackRotation) const;
@@ -145,5 +157,8 @@ private:
 
     UPROPERTY(Transient)
     FName LastMissingRiderSaddleAttachName;
+
+    UPROPERTY(Transient)
+    FName LastMissingWeaponAttachName;
 
 };

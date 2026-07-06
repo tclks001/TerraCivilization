@@ -543,6 +543,86 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
     FRotator P4RiderDeathRelativeRotation = FRotator::ZeroRotator;
 
+    /** P5 弓兵弓 StaticMesh。推荐 Content/Animations/Adventurers/Assets/bow。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UStaticMesh> P5ArcherBowMesh;
+
+    /** P5 步兵剑 StaticMesh。推荐 Content/Animations/Adventurers/Assets/sword_1handed。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UStaticMesh> P5InfantrySwordMesh;
+
+    /** P5 步兵盾 StaticMesh。推荐 Content/Animations/Adventurers/Assets/shield_round。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UStaticMesh> P5InfantryShieldMesh;
+
+    /** P5 骑兵斧 StaticMesh。推荐 Content/Animations/Adventurers/Assets/axe_1handed。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UStaticMesh> P5CavalryAxeMesh;
+
+    /** P5 弓兵弓挂载 Socket / Bone 名。默认 handslot_l；为空时挂到 HumanMesh 根。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FName P5ArcherBowAttachName = TEXT("handslot_l");
+
+    /** P5 步兵剑挂载 Socket / Bone 名。默认 handslot_r；为空时挂到 HumanMesh 根。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FName P5InfantrySwordAttachName = TEXT("handslot_r");
+
+    /** P5 步兵盾挂载 Socket / Bone 名。默认 handslot_l；为空时挂到 HumanMesh 根。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FName P5InfantryShieldAttachName = TEXT("handslot_l");
+
+    /** P5 骑兵斧挂载 Socket / Bone 名。默认 handslot_r；为空时挂到 RiderMesh 根。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FName P5CavalryAxeAttachName = TEXT("handslot_r");
+
+    /** P5 弓兵弓相对挂点位置。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FVector P5ArcherBowRelativeLocation = FVector::ZeroVector;
+
+    /** P5 弓兵弓相对挂点旋转。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FRotator P5ArcherBowRelativeRotation = FRotator::ZeroRotator;
+
+    /** P5 弓兵弓相对缩放。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
+    float P5ArcherBowUniformScale = 1.0f;
+
+    /** P5 步兵剑相对挂点位置。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FVector P5InfantrySwordRelativeLocation = FVector::ZeroVector;
+
+    /** P5 步兵剑相对挂点旋转。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FRotator P5InfantrySwordRelativeRotation = FRotator::ZeroRotator;
+
+    /** P5 步兵剑相对缩放。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
+    float P5InfantrySwordUniformScale = 1.0f;
+
+    /** P5 步兵盾相对挂点位置。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FVector P5InfantryShieldRelativeLocation = FVector::ZeroVector;
+
+    /** P5 步兵盾相对挂点旋转。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FRotator P5InfantryShieldRelativeRotation = FRotator::ZeroRotator;
+
+    /** P5 步兵盾相对缩放。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
+    float P5InfantryShieldUniformScale = 1.0f;
+
+    /** P5 骑兵斧相对挂点位置。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FVector P5CavalryAxeRelativeLocation = FVector::ZeroVector;
+
+    /** P5 骑兵斧相对挂点旋转。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FRotator P5CavalryAxeRelativeRotation = FRotator::ZeroRotator;
+
+    /** P5 骑兵斧相对缩放。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
+    float P5CavalryAxeUniformScale = 1.0f;
+
     /** P3 主将施法攻击动画。推荐 Rig_Medium_GeneralMagic_Spell_Casting。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
     TObjectPtr<UAnimationAsset> P3CommanderMagicAttackAnimation;

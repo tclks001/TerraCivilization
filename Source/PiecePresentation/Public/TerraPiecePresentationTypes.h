@@ -8,6 +8,7 @@ class USkeletalMesh;
 class UAnimInstance;
 class UAnimMontage;
 class UAnimationAsset;
+class UStaticMesh;
 
 UENUM(BlueprintType)
 enum class ETerraPieceAnimActionState : uint8
@@ -147,6 +148,66 @@ struct PIECEPRESENTATION_API FTerraPieceVisualConfig
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P4.3")
     FRotator RiderDeathRelativeRotation = FRotator::ZeroRotator;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P5")
+    TObjectPtr<UStaticMesh> ArcherBowMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P5")
+    TObjectPtr<UStaticMesh> InfantrySwordMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P5")
+    TObjectPtr<UStaticMesh> InfantryShieldMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P5")
+    TObjectPtr<UStaticMesh> CavalryAxeMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P5")
+    FName ArcherBowAttachName = TEXT("handslot_l");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P5")
+    FName InfantrySwordAttachName = TEXT("handslot_r");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P5")
+    FName InfantryShieldAttachName = TEXT("handslot_l");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P5")
+    FName CavalryAxeAttachName = TEXT("handslot_r");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P5")
+    FVector ArcherBowRelativeLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P5")
+    FRotator ArcherBowRelativeRotation = FRotator::ZeroRotator;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P5", meta = (ClampMin = "0.001"))
+    float ArcherBowUniformScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P5")
+    FVector InfantrySwordRelativeLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P5")
+    FRotator InfantrySwordRelativeRotation = FRotator::ZeroRotator;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P5", meta = (ClampMin = "0.001"))
+    float InfantrySwordUniformScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P5")
+    FVector InfantryShieldRelativeLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P5")
+    FRotator InfantryShieldRelativeRotation = FRotator::ZeroRotator;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P5", meta = (ClampMin = "0.001"))
+    float InfantryShieldUniformScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P5")
+    FVector CavalryAxeRelativeLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P5")
+    FRotator CavalryAxeRelativeRotation = FRotator::ZeroRotator;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P5", meta = (ClampMin = "0.001"))
+    float CavalryAxeUniformScale = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P2")
     TObjectPtr<UAnimationAsset> IdleAnimation;
