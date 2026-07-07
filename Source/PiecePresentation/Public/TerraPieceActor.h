@@ -27,15 +27,19 @@ public:
     void PlayPresentationOnlyMoveTo(const FTransform& TargetTransform, float DurationSeconds, UAnimationAsset* MoveAnimation);
     void PlayPresentationOnlyMoveTo(const FTransform& TargetTransform, float DurationSeconds, UAnimationAsset* MoveAnimation, ETerraPiecePresentationForwardMode ForwardMode, const FVector& ForwardTarget = FVector::ZeroVector);
     void PlayAttackAnimation(UAnimationAsset* AttackAnimation, float StartOffsetSeconds);
+    void PlayAttackAnimation(UAnimationAsset* AttackAnimation, float StartOffsetSeconds, float PlayRate);
     void PlayHitAnimation(UAnimationAsset* HitAnimation, float StartOffsetSeconds);
     void PlayDeathAnimation(UAnimationAsset* DeathAnimation, float StartOffsetSeconds);
     void StartDeathFade(float FadeSeconds);
+    void ReturnToIdlePresentation();
 
     int32 GetPieceId() const { return PieceId; }
     int32 GetCellId() const { return CellId; }
     ETerraGameplayPieceType GetPieceType() const { return PieceType; }
     const FTerraPieceAnimDriveState& GetAnimDriveState() const { return AnimDriveState; }
     bool IsPresentationMoveActive() const { return bHasActiveMove; }
+    FTransform ResolveAttachmentWorldTransform(FName AttachName) const;
+    FVector ResolveAttachmentWorldLocation(FName AttachName, const FVector& RelativeLocation) const;
 
 protected:
     virtual void Tick(float DeltaSeconds) override;

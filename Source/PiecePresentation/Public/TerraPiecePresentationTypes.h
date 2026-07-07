@@ -5,10 +5,18 @@
 #include "TerraPiecePresentationTypes.generated.h"
 
 class USkeletalMesh;
+class AActor;
 class UAnimInstance;
 class UAnimMontage;
 class UAnimationAsset;
 class UStaticMesh;
+
+UENUM(BlueprintType)
+enum class ETerraPieceProjectileVisualType : uint8
+{
+    Arrow UMETA(DisplayName = "Arrow"),
+    Spell UMETA(DisplayName = "Spell"),
+};
 
 UENUM(BlueprintType)
 enum class ETerraPieceAnimActionState : uint8
@@ -208,6 +216,66 @@ struct PIECEPRESENTATION_API FTerraPieceVisualConfig
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P5", meta = (ClampMin = "0.001"))
     float CavalryAxeUniformScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P6")
+    TObjectPtr<UStaticMesh> P6ArrowProjectileMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P6")
+    TSubclassOf<AActor> P6SpellProjectileActorClass;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P6")
+    FName P6ArrowAttachName = TEXT("handslot_r");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P6")
+    FName P6SpellAttachName = TEXT("handslot_r");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P6")
+    FVector P6ArrowRelativeLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P6")
+    FRotator P6ArrowRelativeRotation = FRotator::ZeroRotator;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P6", meta = (ClampMin = "0.001"))
+    float P6ArrowUniformScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P6")
+    FVector P6ArrowTargetRelativeLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P6")
+    FVector P6SpellRelativeLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P6")
+    FRotator P6SpellRelativeRotation = FRotator::ZeroRotator;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P6", meta = (ClampMin = "0.001"))
+    float P6SpellUniformScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P6", meta = (ClampMin = "0.0"))
+    float P6ArrowReleaseDelaySeconds = 0.18f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P6", meta = (ClampMin = "0.0"))
+    float P6SpellReleaseDelaySeconds = 0.18f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P6", meta = (ClampMin = "0.001"))
+    float P6ArrowFlightSeconds = 0.28f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P6", meta = (ClampMin = "0.001"))
+    float P6SpellFlightSeconds = 0.35f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P6", meta = (ClampMin = "0.0"))
+    float P6ArrowArcHeightCM = 350.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3.5", meta = (ClampMin = "0.001"))
+    float P35CommanderAttackDurationSeconds = 0.35f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3.5", meta = (ClampMin = "0.001"))
+    float P35CommanderAttackPlayRateScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3.5", meta = (ClampMin = "0.001"))
+    float P35ArcherAttackDurationSeconds = 0.35f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3.5", meta = (ClampMin = "0.001"))
+    float P35ArcherAttackPlayRateScale = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P2")
     TObjectPtr<UAnimationAsset> IdleAnimation;

@@ -982,6 +982,8 @@ Content/PiecePresentation/
 
 详细阶段设计见：[P3AttackHitDeathPresentationDesign.md](P3AttackHitDeathPresentationDesign.md)。
 
+P3.5 远程攻击动画播放速率补充设计见：[P3_5RangedAttackAnimationTimingDesign.md](P3_5RangedAttackAnimationTimingDesign.md)。
+
 目标：
 
 - 消费 Gameplay 层已经产出的吃子归因，不在表现层重新推规则。
@@ -1046,12 +1048,16 @@ P4.5 Rider 马背 Socket / 骨骼跟随阶段设计见：[P4_5MountedRiderSaddle
 
 ### P6：远程投射物、法术特效
 
+详细阶段设计见：[P6ProjectileAndSpellVfxDesign.md](P6ProjectileAndSpellVfxDesign.md)。
+
 目标：
 
-- 弓兵攻击时生成箭矢投射物表现。
-- 主将攻击时生成法术特效表现。
-- 投射物 / 法术特效只作为表现层 Actor / Component，不改变 Gameplay 吃子判定。
-- 投射物命中时机与 P3 攻击 / 受击同步参数对齐。
+- 弓兵攻击时生成箭矢临时 Actor，内部用 `StaticMeshComponent` 显示 `arrow_bow`。
+- 主将攻击时生成法术临时 Actor，内部用 `ChildActorComponent` 承载 `BP_ky_fireBall`。
+- 箭矢 / 法术只作为表现层 Actor，不改变 Gameplay 吃子判定。
+- 箭矢 / 法术在攻击动画开始时生成，先跟随挂点停留，再通过初始停留时间参数对齐弓弦 / 施法释放帧。
+- 箭矢走抛物线到目标身上；法术走球面测地线到目标身上。
+- 到达时直接销毁，暂不处理命中特效。
 
 验收：
 

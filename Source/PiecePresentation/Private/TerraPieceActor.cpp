@@ -345,6 +345,11 @@ void ATerraPieceActor::PlayPresentationOnlyMoveTo(
 
 void ATerraPieceActor::PlayAttackAnimation(UAnimationAsset* AttackAnimation, float StartOffsetSeconds)
 {
+    PlayAttackAnimation(AttackAnimation, StartOffsetSeconds, 1.0f);
+}
+
+void ATerraPieceActor::PlayAttackAnimation(UAnimationAsset* AttackAnimation, float StartOffsetSeconds, float PlayRate)
+{
     bHasActiveMove = false;
     bPresentationOnlyMove = false;
     PresentationOnlyMoveForwardMode = ETerraPiecePresentationForwardMode::MoveDirection;
@@ -362,13 +367,13 @@ void ATerraPieceActor::PlayAttackAnimation(UAnimationAsset* AttackAnimation, flo
         const bool bMontagePlayed = PlayMountedRiderUpperBodyMontage_(CachedVisualConfig.RiderUpperBodyAttackMontage, StartOffsetSeconds);
         if (!bMontagePlayed)
         {
-            PlayAnimationOnMesh_(RiderMesh, AttackAnimation, false, StartOffsetSeconds);
+            PlayAnimationOnMesh_(RiderMesh, AttackAnimation, false, StartOffsetSeconds, PlayRate);
         }
         PlayAnimationOnMesh_(HorseMesh, CachedVisualConfig.HorseIdleAnimation, true, 0.0f);
     }
     else
     {
-        PlayConfiguredAnimation_(AttackAnimation, false, StartOffsetSeconds);
+        PlayAnimationOnMesh_(HumanMesh, AttackAnimation, false, StartOffsetSeconds, PlayRate);
     }
     SetActorTickEnabled(bHasActiveFacingBlend || bHasActiveDeathFade);
 }
@@ -446,6 +451,60 @@ void ATerraPieceActor::StartDeathFade(float FadeSeconds)
     DeathFadeStartScale = GetActorScale3D();
     bHasActiveDeathFade = true;
     SetActorTickEnabled(true);
+}
+
+void ATerraPieceActor::ReturnToIdlePresentation()
+{
+    bHasActiveMove = false;
+    bPresentationOnlyMove = false;
+    PresentationOnlyMoveForwardMode = ETerraPiecePresentationForwardMode::MoveDirection;
+    PresentationOnlyMoveForwardTarget = FVector::ZeroVector;
+
+    FTerraPieceAnimDriveState NewDriveState = AnimDriveState;
+    NewDriveState.ActionState = ETerraPieceAnimActionState::Idle;
+    NewDriveState.MoveSpeed = 0.0f;
+    NewDriveState.NormalizedPhase = 0.0f;
+    NewDriveState.FacingDirection = GetActorForwardVector();
+    NewDriveState.bDead = false;
+    SetDriveState_(NewDriveState);
+
+    if (IsMountedCavalry_())
+    {
+        PlayMountedIdleAnimations_();
+    }
+    else
+    {
+        PlayConfiguredAnimation_(CachedVisualConfig.IdleAnimation, true);
+    }
+
+    SetActorTickEnabled(bHasActiveFacingBlend || bHasActiveDeathFade);
+}
+
+FTransform ATerraPieceActor::ResolveAttachmentWorldTransform(FName AttachName) const
+{
+    USkeletalMeshComponent* SourceMesh = IsMountedCavalry_() ? RiderMesh.Get() : HumanMesh.Get();
+    if (!SourceMesh)
+    {
+        return GetActorTransform();
+    }
+
+    FTransform AttachTransform = SourceMesh->GetComponentTransform();
+    if (!AttachName.IsNone())
+    {
+        const bool bHasSocket = SourceMesh->DoesSocketExist(AttachName);
+        const bool bHasBone = SourceMesh->GetBoneIndex(AttachName) != INDEX_NONE;
+        if (bHasSocket || bHasBone)
+        {
+            AttachTransform = SourceMesh->GetSocketTransform(AttachName, RTS_World);
+        }
+    }
+
+    return AttachTransform;
+}
+
+FVector ATerraPieceActor::ResolveAttachmentWorldLocation(FName AttachName, const FVector& RelativeLocation) const
+{
+    return ResolveAttachmentWorldTransform(AttachName).TransformPosition(RelativeLocation);
 }
 
 void ATerraPieceActor::Tick(float DeltaSeconds)

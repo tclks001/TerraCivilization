@@ -2585,6 +2585,31 @@ FTerraPieceVisualConfig APlanetTessellatedMesh::BuildP1PieceVisualConfig_() cons
     VisualConfig.CavalryAxeRelativeLocation = P5CavalryAxeRelativeLocation;
     VisualConfig.CavalryAxeRelativeRotation = P5CavalryAxeRelativeRotation;
     VisualConfig.CavalryAxeUniformScale = FMath::Max(P5CavalryAxeUniformScale, 0.001f);
+    VisualConfig.P6ArrowProjectileMesh = P6ArrowProjectileMesh.Get() ? P6ArrowProjectileMesh.Get() : LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Animations/Adventurers/Assets/arrow_bow.arrow_bow"));
+    UClass* DefaultP6SpellProjectileClass = P6SpellProjectileActorClass.Get();
+    if (!DefaultP6SpellProjectileClass)
+    {
+        DefaultP6SpellProjectileClass = LoadClass<AActor>(nullptr, TEXT("/Game/FXVarietyPack/Blueprints/BP_ky_fireBall.BP_ky_fireBall_C"));
+    }
+    VisualConfig.P6SpellProjectileActorClass = DefaultP6SpellProjectileClass;
+    VisualConfig.P6ArrowAttachName = P6ArrowAttachName;
+    VisualConfig.P6SpellAttachName = P6SpellAttachName;
+    VisualConfig.P6ArrowRelativeLocation = P6ArrowRelativeLocation;
+    VisualConfig.P6ArrowRelativeRotation = P6ArrowRelativeRotation;
+    VisualConfig.P6ArrowUniformScale = FMath::Max(P6ArrowUniformScale, 0.001f);
+    VisualConfig.P6ArrowTargetRelativeLocation = P6ArrowTargetRelativeLocation;
+    VisualConfig.P6SpellRelativeLocation = P6SpellRelativeLocation;
+    VisualConfig.P6SpellRelativeRotation = P6SpellRelativeRotation;
+    VisualConfig.P6SpellUniformScale = FMath::Max(P6SpellUniformScale, 0.001f);
+    VisualConfig.P6ArrowReleaseDelaySeconds = FMath::Max(P6ArrowReleaseDelaySeconds, 0.0f);
+    VisualConfig.P6SpellReleaseDelaySeconds = FMath::Max(P6SpellReleaseDelaySeconds, 0.0f);
+    VisualConfig.P6ArrowFlightSeconds = FMath::Max(P6ArrowFlightSeconds, 0.001f);
+    VisualConfig.P6SpellFlightSeconds = FMath::Max(P6SpellFlightSeconds, 0.001f);
+    VisualConfig.P6ArrowArcHeightCM = FMath::Max(P6ArrowArcHeightCM, 0.0f);
+    VisualConfig.P35CommanderAttackDurationSeconds = FMath::Max(P35CommanderAttackDurationSeconds, 0.001f);
+    VisualConfig.P35CommanderAttackPlayRateScale = FMath::Max(P35CommanderAttackPlayRateScale, 0.001f);
+    VisualConfig.P35ArcherAttackDurationSeconds = FMath::Max(P35ArcherAttackDurationSeconds, 0.001f);
+    VisualConfig.P35ArcherAttackPlayRateScale = FMath::Max(P35ArcherAttackPlayRateScale, 0.001f);
     VisualConfig.IdleAnimation = P2IdleAnimation.Get() ? P2IdleAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Adventurers/Animations/Rig_Medium_GeneralIdle_A.Rig_Medium_GeneralIdle_A"));
     VisualConfig.MoveAnimation = P2MoveAnimation.Get() ? P2MoveAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Adventurers/Animations/Rig_Medium_MovementBasicWalking_A.Rig_Medium_MovementBasicWalking_A"));
     VisualConfig.JumpAnimation = P2JumpAnimation.Get() ? P2JumpAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Adventurers/Animations/Rig_Medium_MovementBasicJump_Full_Short.Rig_Medium_MovementBasicJump_Full_Short"));

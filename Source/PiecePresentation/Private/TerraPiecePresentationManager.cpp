@@ -4,6 +4,7 @@
 #include "Engine/World.h"
 #include "Logging/LogMacros.h"
 #include "TerraPieceActor.h"
+#include "TerraPieceProjectileActor.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogTerraPiecePresentation, Log, All);
 
@@ -175,6 +176,15 @@ void UTerraPiecePresentationManager::ClearPieces()
         }
     }
     PieceActors.Reset();
+
+    for (TObjectPtr<ATerraPieceProjectileActor>& Projectile : ActiveP6Projectiles)
+    {
+        if (IsValid(Projectile))
+        {
+            Projectile->Destroy();
+        }
+    }
+    ActiveP6Projectiles.Reset();
 }
 
 void UTerraPiecePresentationManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -346,7 +356,9 @@ void UTerraPiecePresentationManager::RunP3ReturnAndFadeStep_(FTerraPiecePresenta
     ATerraPieceActor* VanguardActor = FindPieceActor_(CaptureEvent.Vanguard.PieceId);
     const float SynchronizedHitDelaySeconds = GetP3SynchronizedHitDelaySeconds_(CaptureEvent);
 
-    auto ScheduleAttackIfValid = [this, World, SynchronizedHitDelaySeconds](ATerraPieceActor* PieceActor, const FTerraPiecePresentationCaptureParticipant& Participant)
+    auto ScheduleAttackIfValid = [this, World, SynchronizedHitDelaySeconds, CapturedLocation = CaptureEvent.Captured.WorldTransform.GetLocation()](
+        ATerraPieceActor* PieceActor,
+        const FTerraPiecePresentationCaptureParticipant& Participant)
     {
         if (!IsValid(PieceActor) || !Participant.IsValid())
         {
@@ -357,13 +369,43 @@ void UTerraPiecePresentationManager::RunP3ReturnAndFadeStep_(FTerraPiecePresenta
         const float AttackStartDelaySeconds = FMath::Max(SynchronizedHitDelaySeconds - AttackToHitSeconds, 0.0f);
         const int32 PieceId = Participant.PieceId;
         const ETerraGameplayPieceType PieceType = Participant.PieceType;
+        auto ScheduleRemoteRefacing = [this, World, PieceId, PieceType, AttackStartDelaySeconds, CapturedLocation]()
+        {
+            if (!IsP35RemoteAttackPiece_(PieceType))
+            {
+                return;
+            }
+
+            UAnimationAsset* AttackAnimation = CachedVisualConfig.ResolveAttackAnimation(PieceType);
+            const float AttackDurationSeconds = ResolveAttackAnimationDurationSeconds_(PieceType, AttackAnimation, 0.5f);
+            const FTimerDelegate RefacingDelegate = FTimerDelegate::CreateWeakLambda(this, [this, PieceId, CapturedLocation]()
+            {
+                if (ATerraPieceActor* Actor = FindPieceActor_(PieceId))
+                {
+                    Actor->ReturnToIdlePresentation();
+                    Actor->FaceTowards(CapturedLocation, 0.0f);
+                }
+            });
+
+            FTimerHandle RefacingTimerHandle;
+            World->GetTimerManager().SetTimer(
+                RefacingTimerHandle,
+                RefacingDelegate,
+                FMath::Max(AttackStartDelaySeconds + AttackDurationSeconds, 0.0f),
+                false);
+        };
+
+        ScheduleRemoteRefacing();
+
         const FTimerDelegate AttackDelegate = FTimerDelegate::CreateWeakLambda(this, [this, PieceId, PieceType]()
         {
             if (ATerraPieceActor* Actor = FindPieceActor_(PieceId))
             {
+                UAnimationAsset* AttackAnimation = CachedVisualConfig.ResolveAttackAnimation(PieceType);
                 Actor->PlayAttackAnimation(
-                    CachedVisualConfig.ResolveAttackAnimation(PieceType),
-                    CachedVisualConfig.P3AttackAnimationStartOffsetSeconds);
+                    AttackAnimation,
+                    CachedVisualConfig.P3AttackAnimationStartOffsetSeconds,
+                    ResolveAttackAnimationPlayRate_(PieceType, AttackAnimation));
             }
         });
 
@@ -377,10 +419,41 @@ void UTerraPiecePresentationManager::RunP3ReturnAndFadeStep_(FTerraPiecePresenta
         World->GetTimerManager().SetTimer(AttackTimerHandle, AttackDelegate, AttackStartDelaySeconds, false);
     };
 
+    auto ScheduleProjectileIfValid = [this, World, SynchronizedHitDelaySeconds, &CaptureEvent](const FTerraPiecePresentationCaptureParticipant& Participant)
+    {
+        if (!Participant.IsValid() || !IsP6ProjectilePiece_(Participant.PieceType))
+        {
+            return;
+        }
+
+        const float AttackToHitSeconds = FMath::Max(CachedVisualConfig.ResolveAttackToHitSeconds(Participant.PieceType), 0.0f);
+        const float AttackStartDelaySeconds = FMath::Max(SynchronizedHitDelaySeconds - AttackToHitSeconds, 0.0f);
+        const FTimerDelegate ProjectileDelegate = FTimerDelegate::CreateWeakLambda(this, [this, Participant, Captured = CaptureEvent.Captured]()
+        {
+            SpawnP6Projectile_(Participant, Captured);
+        });
+
+        const float ProjectileStartDelaySeconds = FMath::Max(AttackStartDelaySeconds, 0.0f);
+        if (ProjectileStartDelaySeconds <= KINDA_SMALL_NUMBER)
+        {
+            ProjectileDelegate.ExecuteIfBound();
+            return;
+        }
+
+        FTimerHandle ProjectileTimerHandle;
+        World->GetTimerManager().SetTimer(ProjectileTimerHandle, ProjectileDelegate, ProjectileStartDelaySeconds, false);
+    };
+
     ScheduleAttackIfValid(AttackerActor, CaptureEvent.Attacker);
     if (CaptureEvent.Vanguard.PieceId != CaptureEvent.Attacker.PieceId)
     {
         ScheduleAttackIfValid(VanguardActor, CaptureEvent.Vanguard);
+    }
+
+    ScheduleProjectileIfValid(CaptureEvent.Attacker);
+    if (CaptureEvent.Vanguard.PieceId != CaptureEvent.Attacker.PieceId)
+    {
+        ScheduleProjectileIfValid(CaptureEvent.Vanguard);
     }
 
     if (IsValid(CapturedActor))
@@ -513,9 +586,178 @@ bool UTerraPiecePresentationManager::IsMeleePiece_(ETerraGameplayPieceType Piece
         || PieceType == ETerraGameplayPieceType::Cavalry;
 }
 
+bool UTerraPiecePresentationManager::IsP6ProjectilePiece_(ETerraGameplayPieceType PieceType) const
+{
+    return PieceType == ETerraGameplayPieceType::Archer
+        || PieceType == ETerraGameplayPieceType::Commander;
+}
+
+void UTerraPiecePresentationManager::SpawnP6Projectile_(
+    const FTerraPiecePresentationCaptureParticipant& Source,
+    const FTerraPiecePresentationCaptureParticipant& Target)
+{
+    UWorld* World = GetWorld();
+    AActor* Owner = GetOwner();
+    ATerraPieceActor* SourceActor = FindPieceActor_(Source.PieceId);
+    ATerraPieceActor* TargetActor = FindPieceActor_(Target.PieceId);
+    if (!World || !Owner || !IsValid(SourceActor))
+    {
+        return;
+    }
+
+    CleanupInactiveP6Projectiles_();
+
+    const bool bSpell = Source.PieceType == ETerraGameplayPieceType::Commander;
+    const FName AttachName = bSpell ? CachedVisualConfig.P6SpellAttachName : CachedVisualConfig.P6ArrowAttachName;
+    const FVector RelativeLocation = bSpell ? CachedVisualConfig.P6SpellRelativeLocation : CachedVisualConfig.P6ArrowRelativeLocation;
+    const FRotator RelativeRotation = bSpell ? CachedVisualConfig.P6SpellRelativeRotation : CachedVisualConfig.P6ArrowRelativeRotation;
+    const float UniformScale = bSpell ? CachedVisualConfig.P6SpellUniformScale : CachedVisualConfig.P6ArrowUniformScale;
+    const FVector StartLocation = ResolveP6LaunchLocation_(SourceActor, AttachName, RelativeLocation);
+    const FVector TargetLocation = IsValid(TargetActor)
+        ? (bSpell
+            ? TargetActor->GetActorLocation()
+            : TargetActor->GetActorTransform().TransformPosition(CachedVisualConfig.P6ArrowTargetRelativeLocation))
+        : Target.WorldTransform.TransformPosition(bSpell ? FVector::ZeroVector : CachedVisualConfig.P6ArrowTargetRelativeLocation);
+
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.Owner = Owner;
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    SpawnParams.Name = FName(*FString::Printf(TEXT("TerraP6Projectile_%d_%d"), Source.PieceId, Target.PieceId));
+
+    ATerraPieceProjectileActor* Projectile = World->SpawnActor<ATerraPieceProjectileActor>(
+        ATerraPieceProjectileActor::StaticClass(),
+        FTransform(FQuat::Identity, StartLocation),
+        SpawnParams);
+    if (!Projectile)
+    {
+        UE_LOG(LogTerraPiecePresentation, Warning,
+            TEXT("[PiecePresentation][P6] Failed to spawn projectile. Source=%d Target=%d Type=%d"),
+            Source.PieceId,
+            Target.PieceId,
+            static_cast<int32>(Source.PieceType));
+        return;
+    }
+
+    FTerraPieceProjectileLaunchParams LaunchParams;
+    LaunchParams.VisualType = bSpell ? ETerraPieceProjectileVisualType::Spell : ETerraPieceProjectileVisualType::Arrow;
+    LaunchParams.StartWorldLocation = StartLocation;
+    LaunchParams.TargetWorldLocation = TargetLocation;
+    LaunchParams.PlanetCenterWorldLocation = Owner->GetActorLocation();
+    LaunchParams.SourceActor = SourceActor;
+    LaunchParams.AttachName = AttachName;
+    LaunchParams.AttachRelativeLocation = RelativeLocation;
+    LaunchParams.ArrowMesh = CachedVisualConfig.P6ArrowProjectileMesh;
+    LaunchParams.SpellActorClass = CachedVisualConfig.P6SpellProjectileActorClass;
+    LaunchParams.RelativeRotation = RelativeRotation;
+    LaunchParams.UniformScale = FMath::Max(UniformScale, 0.001f);
+    LaunchParams.ReleaseDelaySeconds = bSpell
+        ? FMath::Max(CachedVisualConfig.P6SpellReleaseDelaySeconds, 0.0f)
+        : FMath::Max(CachedVisualConfig.P6ArrowReleaseDelaySeconds, 0.0f);
+    LaunchParams.FlightSeconds = bSpell
+        ? FMath::Max(CachedVisualConfig.P6SpellFlightSeconds, 0.001f)
+        : FMath::Max(CachedVisualConfig.P6ArrowFlightSeconds, 0.001f);
+    LaunchParams.ArcHeightCM = bSpell ? 0.0f : FMath::Max(CachedVisualConfig.P6ArrowArcHeightCM, 0.0f);
+    Projectile->Launch(LaunchParams);
+    ActiveP6Projectiles.Add(Projectile);
+
+    UE_LOG(LogTerraPiecePresentation, Verbose,
+        TEXT("[PiecePresentation][P6] Spawn projectile. Source=%d Target=%d Type=%s Flight=%.3f"),
+        Source.PieceId,
+        Target.PieceId,
+        bSpell ? TEXT("Spell") : TEXT("Arrow"),
+        LaunchParams.FlightSeconds);
+}
+
+FVector UTerraPiecePresentationManager::ResolveP6LaunchLocation_(
+    ATerraPieceActor* SourceActor,
+    FName AttachName,
+    const FVector& RelativeLocation) const
+{
+    if (!IsValid(SourceActor))
+    {
+        return FVector::ZeroVector;
+    }
+
+    return SourceActor->ResolveAttachmentWorldLocation(AttachName, RelativeLocation);
+}
+
+void UTerraPiecePresentationManager::CleanupInactiveP6Projectiles_()
+{
+    ActiveP6Projectiles.RemoveAll([](const TObjectPtr<ATerraPieceProjectileActor>& Projectile)
+    {
+        return !IsValid(Projectile);
+    });
+}
+
 float UTerraPiecePresentationManager::GetAnimationLength_(UAnimationAsset* AnimationAsset, float FallbackSeconds) const
 {
     return AnimationAsset ? FMath::Max(AnimationAsset->GetPlayLength(), 0.001f) : FMath::Max(FallbackSeconds, 0.001f);
+}
+
+bool UTerraPiecePresentationManager::IsP35RemoteAttackPiece_(ETerraGameplayPieceType PieceType) const
+{
+    return PieceType == ETerraGameplayPieceType::Commander
+        || PieceType == ETerraGameplayPieceType::Archer;
+}
+
+float UTerraPiecePresentationManager::GetP35RemoteAttackDurationSeconds_(ETerraGameplayPieceType PieceType) const
+{
+    if (PieceType == ETerraGameplayPieceType::Commander)
+    {
+        return FMath::Max(CachedVisualConfig.P35CommanderAttackDurationSeconds, 0.001f);
+    }
+
+    if (PieceType == ETerraGameplayPieceType::Archer)
+    {
+        return FMath::Max(CachedVisualConfig.P35ArcherAttackDurationSeconds, 0.001f);
+    }
+
+    return 0.0f;
+}
+
+float UTerraPiecePresentationManager::GetP35RemoteAttackPlayRateScale_(ETerraGameplayPieceType PieceType) const
+{
+    if (PieceType == ETerraGameplayPieceType::Commander)
+    {
+        return FMath::Max(CachedVisualConfig.P35CommanderAttackPlayRateScale, 0.001f);
+    }
+
+    if (PieceType == ETerraGameplayPieceType::Archer)
+    {
+        return FMath::Max(CachedVisualConfig.P35ArcherAttackPlayRateScale, 0.001f);
+    }
+
+    return 1.0f;
+}
+
+float UTerraPiecePresentationManager::ResolveAttackAnimationPlayRate_(ETerraGameplayPieceType PieceType, UAnimationAsset* AttackAnimation) const
+{
+    if (!IsP35RemoteAttackPiece_(PieceType) || !AttackAnimation)
+    {
+        return 1.0f;
+    }
+
+    const float SourceSeconds = FMath::Max(
+        AttackAnimation->GetPlayLength() - CachedVisualConfig.P3AttackAnimationStartOffsetSeconds,
+        0.001f);
+    return SourceSeconds
+        / GetP35RemoteAttackDurationSeconds_(PieceType)
+        * GetP35RemoteAttackPlayRateScale_(PieceType);
+}
+
+float UTerraPiecePresentationManager::ResolveAttackAnimationDurationSeconds_(
+    ETerraGameplayPieceType PieceType,
+    UAnimationAsset* AttackAnimation,
+    float FallbackSeconds) const
+{
+    if (IsP35RemoteAttackPiece_(PieceType))
+    {
+        return GetP35RemoteAttackDurationSeconds_(PieceType)
+            / GetP35RemoteAttackPlayRateScale_(PieceType);
+    }
+
+    return CachedVisualConfig.P3AttackAnimationStartOffsetSeconds
+        + GetAnimationLength_(AttackAnimation, FallbackSeconds);
 }
 
 float UTerraPiecePresentationManager::GetP3AttackStepSeconds_(const FTerraPiecePresentationCaptureEvent& CaptureEvent) const
@@ -532,11 +774,11 @@ float UTerraPiecePresentationManager::GetP3AttackStepSeconds_(const FTerraPieceP
 
         const float AttackToHitSeconds = FMath::Max(CachedVisualConfig.ResolveAttackToHitSeconds(Participant.PieceType), 0.0f);
         const float AttackStartDelaySeconds = FMath::Max(SynchronizedHitDelaySeconds - AttackToHitSeconds, 0.0f);
+        UAnimationAsset* AttackAnimation = CachedVisualConfig.ResolveAttackAnimation(Participant.PieceType);
         MaxSeconds = FMath::Max(
             MaxSeconds,
             AttackStartDelaySeconds
-                + CachedVisualConfig.P3AttackAnimationStartOffsetSeconds
-                + GetAnimationLength_(CachedVisualConfig.ResolveAttackAnimation(Participant.PieceType), 0.5f));
+                + ResolveAttackAnimationDurationSeconds_(Participant.PieceType, AttackAnimation, 0.5f));
     };
 
     IncludeAttackLength(CaptureEvent.Attacker);

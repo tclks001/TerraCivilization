@@ -623,6 +623,86 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
     float P5CavalryAxeUniformScale = 1.0f;
 
+    /** P6 弓兵远程投射物 StaticMesh。默认 Content/Animations/Adventurers/Assets/arrow_bow。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TObjectPtr<UStaticMesh> P6ArrowProjectileMesh;
+
+    /** P6 主将法术临时 Actor 类。默认 Content/FXVarietyPack/Blueprints/BP_ky_fireBall。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    TSubclassOf<AActor> P6SpellProjectileActorClass;
+
+    /** P6 箭矢释放挂点 Socket / Bone 名。默认 handslot_r；找不到时从棋子 Actor 当前位置释放。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FName P6ArrowAttachName = TEXT("handslot_r");
+
+    /** P6 法术释放挂点 Socket / Bone 名。默认 handslot_r；找不到时从棋子 Actor 当前位置释放。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FName P6SpellAttachName = TEXT("handslot_r");
+
+    /** P6 箭矢相对挂点位置。用于校准从弓弦 / 手部释放的位置。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FVector P6ArrowRelativeLocation = FVector::ZeroVector;
+
+    /** P6 箭矢相对飞行朝向的旋转。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FRotator P6ArrowRelativeRotation = FRotator::ZeroRotator;
+
+    /** P6 箭矢相对缩放。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
+    float P6ArrowUniformScale = 1.0f;
+
+    /** P6 箭矢落点相对被吃 Actor 坐标系的位置偏移。用于校准箭矢落在身体中心、上身或脚下。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FVector P6ArrowTargetRelativeLocation = FVector::ZeroVector;
+
+    /** P6 法术 Actor 相对挂点位置。用于校准从手部释放的位置。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FVector P6SpellRelativeLocation = FVector::ZeroVector;
+
+    /** P6 法术 Actor 相对飞行朝向的旋转。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    FRotator P6SpellRelativeRotation = FRotator::ZeroRotator;
+
+    /** P6 法术 Actor 相对缩放。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
+    float P6SpellUniformScale = 1.0f;
+
+    /** P6 箭矢释放延迟（秒）。从弓兵攻击动画起播算起，用于对齐松弦帧。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "10.0"))
+    float P6ArrowReleaseDelaySeconds = 0.18f;
+
+    /** P6 法术释放延迟（秒）。从主将施法动画起播算起，用于对齐释放帧。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "10.0"))
+    float P6SpellReleaseDelaySeconds = 0.18f;
+
+    /** P6 箭矢飞行时长（秒）。箭矢按测地线基础叠加抛物线高度飞向目标。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "10.0"))
+    float P6ArrowFlightSeconds = 0.28f;
+
+    /** P6 法术飞行时长（秒）。法术按球面测地线飞向目标。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "10.0"))
+    float P6SpellFlightSeconds = 0.35f;
+
+    /** P6 箭矢抛物线最大额外高度（cm）。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "10000.0"))
+    float P6ArrowArcHeightCM = 350.0f;
+
+    /** P3.5 主将远程攻击动画目标播放时长（秒）。最终速率 = 动画剩余长度 / 本时长 * P35CommanderAttackPlayRateScale。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "10.0"))
+    float P35CommanderAttackDurationSeconds = 0.35f;
+
+    /** P3.5 主将远程攻击动画播放速率缩放，用于微调施法动作和法术释放/飞行/受击同步。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "10.0"))
+    float P35CommanderAttackPlayRateScale = 1.0f;
+
+    /** P3.5 弓兵远程攻击动画目标播放时长（秒）。最终速率 = 动画剩余长度 / 本时长 * P35ArcherAttackPlayRateScale。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "10.0"))
+    float P35ArcherAttackDurationSeconds = 0.35f;
+
+    /** P3.5 弓兵远程攻击动画播放速率缩放，用于微调射箭动作和箭矢释放/飞行/受击同步。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "10.0"))
+    float P35ArcherAttackPlayRateScale = 1.0f;
+
     /** P3 主将施法攻击动画。推荐 Rig_Medium_GeneralMagic_Spell_Casting。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
     TObjectPtr<UAnimationAsset> P3CommanderMagicAttackAnimation;

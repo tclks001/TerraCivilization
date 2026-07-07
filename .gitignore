@@ -79,4 +79,9 @@ DerivedDataCache/*
 .codebuddy/*
 .codex/*
 .claude/*
-unreal-asset-reader/*
+
+Scripts.agents/*
+.codex-manual-cache/*
+codex-plugin-bundle/*
+.agents/*
+Scripts/*

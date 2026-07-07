@@ -8,6 +8,7 @@
 #include "TerraPiecePresentationManager.generated.h"
 
 class ATerraPieceActor;
+class ATerraPieceProjectileActor;
 
 UCLASS(ClassGroup = (Terra), meta = (BlueprintSpawnableComponent))
 class PIECEPRESENTATION_API UTerraPiecePresentationManager : public UActorComponent
@@ -34,6 +35,9 @@ private:
     TMap<int32, TObjectPtr<ATerraPieceActor>> PieceActors;
 
     UPROPERTY(Transient)
+    TArray<TObjectPtr<ATerraPieceProjectileActor>> ActiveP6Projectiles;
+
+    UPROPERTY(Transient)
     TArray<FTerraPiecePresentationCaptureEvent> PendingCaptureEvents;
 
     UPROPERTY(Transient)
@@ -53,7 +57,16 @@ private:
     void FinishP3CaptureEvent_(FTerraPiecePresentationCaptureEvent CaptureEvent);
     ATerraPieceActor* FindPieceActor_(int32 PieceId) const;
     bool IsMeleePiece_(ETerraGameplayPieceType PieceType) const;
+    bool IsP6ProjectilePiece_(ETerraGameplayPieceType PieceType) const;
+    void SpawnP6Projectile_(const FTerraPiecePresentationCaptureParticipant& Source, const FTerraPiecePresentationCaptureParticipant& Target);
+    FVector ResolveP6LaunchLocation_(ATerraPieceActor* SourceActor, FName AttachName, const FVector& RelativeLocation) const;
+    void CleanupInactiveP6Projectiles_();
     float GetAnimationLength_(UAnimationAsset* AnimationAsset, float FallbackSeconds) const;
+    bool IsP35RemoteAttackPiece_(ETerraGameplayPieceType PieceType) const;
+    float GetP35RemoteAttackDurationSeconds_(ETerraGameplayPieceType PieceType) const;
+    float GetP35RemoteAttackPlayRateScale_(ETerraGameplayPieceType PieceType) const;
+    float ResolveAttackAnimationPlayRate_(ETerraGameplayPieceType PieceType, UAnimationAsset* AttackAnimation) const;
+    float ResolveAttackAnimationDurationSeconds_(ETerraGameplayPieceType PieceType, UAnimationAsset* AttackAnimation, float FallbackSeconds) const;
     float GetP3AttackStepSeconds_(const FTerraPiecePresentationCaptureEvent& CaptureEvent) const;
     float GetP3SynchronizedHitDelaySeconds_(const FTerraPiecePresentationCaptureEvent& CaptureEvent) const;
 };

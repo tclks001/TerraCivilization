@@ -177,7 +177,27 @@ AttackStartDelay(piece) = SynchronizedHitDelay - ResolveAttackToHitSeconds(piece
 - 所有攻击动画的"有效命中点"对齐到同一个受击动画开始时刻。
 - `P3HitReactDelaySeconds` 保留为最小受击延迟 / 兼容旧参数。
 
-### 5.4 近战棋子返回
+### 5.4 远程攻击回正
+
+主将 `Commander` 和弓兵 `Archer` 的远程攻击动画可能会在播放过程中偏转模型朝向。由于远程棋子不跑入 / 返回，动画结束后若不处理，棋子可能停留在攻击动画末尾的偏转朝向。
+
+因此 P3 在远程攻击动画结束后，会再次调用：
+
+```text
+ReturnToIdlePresentation()
+FaceTowards(被吃棋子位置, 0.0)
+```
+
+规则：
+
+- 只作用于 `Commander` 和 `Archer`。
+- 回正时机为该棋子的攻击动画起播时间 + 远程攻击动画表现时长。
+- 若 P3.5 已启用远程攻击动画目标时长，则回正使用 P3.5 的实际表现时长：`P35*AttackDurationSeconds / P35*AttackPlayRateScale`。
+- 回正时先切回 Idle 动画，避免非循环攻击动画停在最后一帧继续让身体保持偏转姿态。
+- 回正目标是被吃棋子的世界位置，保持“远程攻击者最终朝向被吃棋子”的表现约束。
+- 近战棋子不使用该步骤；近战棋子的最终朝向由返回阶段结束时处理。
+
+### 5.5 近战棋子返回
 
 攻击结束后，步兵 / 骑兵攻击者跑回各自原来的 Cell。
 
@@ -206,7 +226,7 @@ P3MeleeReturnSeconds
 
 这一设计将 Up 和 Forward 解耦：Up 总是正确的脚下法线，Forward 由模式独立决定，从根源上消除了跨 Cell 移动时的旋转歪斜问题。
 
-### 5.5 被吃棋子淡出
+### 5.6 被吃棋子淡出
 
 被吃棋子死亡动画结束后，保持死亡末尾姿态，随后用 `P3CapturedFadeSeconds` 淡出。
 
@@ -230,6 +250,10 @@ P3 在 `APlanetTessellatedMesh` 上暴露：
 | `P3MeleeRunInSeconds` | `0.25` | 近战跑入时长 |
 | `P3MeleeReturnSeconds` | `0.25` | 近战返回时长 |
 | `P3AttackAnimationStartOffsetSeconds` | `0.0` | 攻击动画起播偏移，用于跳过动画开头空帧 |
+| `P35CommanderAttackDurationSeconds` | `0.35` | P3.5 主将施法攻击动画目标播放时长 |
+| `P35CommanderAttackPlayRateScale` | `1.0` | P3.5 主将施法攻击动画播放速率缩放 |
+| `P35ArcherAttackDurationSeconds` | `0.35` | P3.5 弓兵射箭攻击动画目标播放时长 |
+| `P35ArcherAttackPlayRateScale` | `1.0` | P3.5 弓兵射箭攻击动画播放速率缩放 |
 | `P3CommanderAttackToHitSeconds` | `0.35` | 主将攻击动画从起播到受击开始的校准时间 |
 | `P3ArcherAttackToHitSeconds` | `0.35` | 弓兵攻击动画从起播到受击开始的校准时间 |
 | `P3InfantryAttackToHitSeconds` | `0.25` | 步兵攻击动画从起播到受击开始的校准时间 |
@@ -282,6 +306,7 @@ P3 不处理：
 - 被吃棋子会面向先锋棋子。
 - 弓兵原地播放射箭动画。
 - 主将原地播放施法动画。
+- 弓兵 / 主将远程攻击动画结束后，会回正到朝向被吃棋子的方向。
 - 步兵 / 骑兵跑入被吃棋子 Cell，攻击后跑回原位，并恢复攻击时面向被吃棋子的朝向。
 - 被吃棋子播放受击和死亡动画，随后淡出并移除。
 - P3 不影响 Gameplay 行动日志输出。
