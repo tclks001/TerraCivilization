@@ -11,5 +11,6 @@ public class TerraCivilizationTarget : TargetRules
 		DefaultBuildSettings = BuildSettingsVersion.V7;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_8;
 		ExtraModuleNames.Add("TerraCivilization");
+		ExtraModuleNames.Add("NpcMcp");
 	}
 }

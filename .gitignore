@@ -82,6 +82,6 @@ DerivedDataCache/*
 
 Scripts.agents/*
 .codex-manual-cache/*
-codex-plugin-bundle/*
+# codex-plugin-bundle/*
 .agents/*
 Scripts/*

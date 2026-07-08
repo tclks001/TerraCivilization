@@ -1,0 +1,21 @@
+{
+  "name": "unreal-project-maker",
+  "version": "0.1.0",
+  "description": "Plan, implement, document, and validate Unreal Engine 5 project features from Codex.",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Unreal Project Maker",
+    "shortDescription": "Build and validate UE5 project features.",
+    "longDescription": "Adds the unreal-project-maker skill for UE5 feature planning, C++ implementation, material and HLSL workflows, procedural mesh work, GameplayTags, editor integration, validation, and debugging.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [
+      "Write",
+      "Analyze"
+    ],
+    "defaultPrompt": "Plan a UE5 feature implementation."
+  }
+}

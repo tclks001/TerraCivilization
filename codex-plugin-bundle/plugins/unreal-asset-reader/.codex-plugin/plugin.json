@@ -1,0 +1,21 @@
+{
+  "name": "unreal-asset-reader",
+  "version": "0.1.0",
+  "description": "Read Unreal Engine project metadata, content paths, asset references, and .uasset data from Codex.",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Unreal Asset Reader",
+    "shortDescription": "Read Unreal Engine assets and project metadata.",
+    "longDescription": "Adds the unreal-asset-reader skill, including helpers for listing Content paths, reading .uproject metadata, inspecting .uasset references, querying DataTables, and falling back to Unreal commandlets for batch asset analysis.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Analyze"
+    ],
+    "defaultPrompt": "Inspect Unreal asset references."
+  }
+}

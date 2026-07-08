@@ -1,0 +1,4 @@
+interface:
+  display_name: "Unreal Project Maker"
+  short_description: "Help build UE5 project systems and workflows"
+  default_prompt: "Use $unreal-project-maker to plan and implement a UE5 feature with docs, editor setup, and validation."

@@ -1,0 +1,32 @@
+{
+  "name": "terra-local",
+  "interface": {
+    "displayName": "Terra Local"
+  },
+  "plugins": [
+    {
+      "name": "unreal-asset-reader",
+      "source": {
+        "source": "local",
+        "path": "./plugins/unreal-asset-reader"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
+      "name": "unreal-project-maker",
+      "source": {
+        "source": "local",
+        "path": "./plugins/unreal-project-maker"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
