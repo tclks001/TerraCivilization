@@ -467,6 +467,11 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
     bool bDebugP2_5HISMPieceHeightTrace = true;
 
+    /** P2.6：骑兵高度射线相对 Cell 中心外法线的角度偏移（度）。0 表示沿用 P2.5 中心采样。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation",
+              meta = (ClampMin = "0.0", ClampMax = "15.0", UIMin = "0.0", UIMax = "5.0"))
+    float P2_6CavalryHeightTraceAngularOffsetDeg = 1.0f;
+
     /** P4.1 骑兵马模型。推荐 Content/Animations/Horse/Horse。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
     TObjectPtr<USkeletalMesh> P4HorseMesh;
@@ -686,6 +691,34 @@ public:
     /** P6 箭矢抛物线最大额外高度（cm）。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "10000.0"))
     float P6ArrowArcHeightCM = 350.0f;
+
+    /** P7 阵营换色母材质。为空时尝试加载 /Game/PiecePresentation/Materials/M_TerraPiece_PaletteReplace。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P7 Faction Palette")
+    TObjectPtr<UMaterialInterface> P7PaletteReplaceMaterial;
+
+    /** P7 阵营颜色表。为空时 BuildP1PieceVisualConfig_ 使用内置 12 阵营默认色。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P7 Faction Palette")
+    TArray<FTerraPieceFactionPalette> P7FactionPalettes;
+
+    /** P7 主将基础贴图。默认 mage_texture。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P7 Faction Palette")
+    TObjectPtr<UTexture2D> P7CommanderBaseTexture;
+
+    /** P7 步兵基础贴图。默认 knight_texture。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P7 Faction Palette")
+    TObjectPtr<UTexture2D> P7InfantryBaseTexture;
+
+    /** P7 骑兵 Rider 基础贴图。默认 knight_texture；马本体首版不换色。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P7 Faction Palette")
+    TObjectPtr<UTexture2D> P7CavalryRiderBaseTexture;
+
+    /** P7 弓兵基础贴图。默认 ranger_texture。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P7 Faction Palette")
+    TObjectPtr<UTexture2D> P7ArcherBaseTexture;
+
+    /** P7 各兵种 UV 色块 mask。为空时使用已验证首版：Mage R1C2/R1C1，Knight R1C0/R1C1，Ranger R1C0/R1C6。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P7 Faction Palette")
+    TArray<FTerraPiecePaletteMask> P7PaletteMasksByPieceType;
 
     /** P3.5 主将远程攻击动画目标播放时长（秒）。最终速率 = 动画剩余长度 / 本时长 * P35CommanderAttackPlayRateScale。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "10.0"))
@@ -1086,9 +1119,10 @@ private:
 
     /** SimpleGameplay P1：把 CellId 转为棋子 Actor 的球面世界 Transform。 */
     bool BuildP1PieceWorldTransform_(int32 CellId, FTransform& OutWorldTransform) const;
+    bool BuildP1PieceWorldTransform_(int32 CellId, ETerraGameplayPieceType PieceType, FTransform& OutWorldTransform) const;
 
-    /** SimpleGameplay P2.5：从 Cell 外侧向球心方向射线命中 HISM，以命中点修正棋子高度。 */
-    bool TryResolveP2_5PieceHeightFromHISM_(int32 CellId, const FVector& WorldUp, FVector& OutWorldPosition) const;
+    /** SimpleGameplay P2.5/P2.6：从采样方向向球心射线命中 HISM，以命中半径修正棋子中心高度。 */
+    bool TryResolveP2_5PieceHeightFromHISM_(int32 CellId, const FVector& TraceWorldUp, const FVector& PlacementWorldUp, float TraceAngularOffsetDeg, FVector& OutWorldPosition) const;
 
     /** SimpleGameplay P1/P2：按"背向本阵营主将"规则计算初始棋子朝向。 */
     bool BuildP1PieceWorldTransformForPiece_(const FTerraGameplayPieceState& Piece, const TArray<FTerraGameplayPieceState>& Pieces, FTransform& OutWorldTransform) const;

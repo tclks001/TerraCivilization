@@ -9,7 +9,9 @@ class AActor;
 class UAnimInstance;
 class UAnimMontage;
 class UAnimationAsset;
+class UMaterialInterface;
 class UStaticMesh;
+class UTexture2D;
 
 UENUM(BlueprintType)
 enum class ETerraPieceProjectileVisualType : uint8
@@ -51,6 +53,51 @@ enum class ETerraPiecePresentationForwardMode : uint8
     MoveDirection   UMETA(DisplayName = "Move Direction"),
     FaceTarget      UMETA(DisplayName = "Face Target"),
     LockSource      UMETA(DisplayName = "Lock Source Forward"),
+};
+
+USTRUCT(BlueprintType)
+struct PIECEPRESENTATION_API FTerraPiecePaletteTile
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P7", meta = (ClampMin = "0", ClampMax = "3"))
+    int32 Row = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P7", meta = (ClampMin = "0", ClampMax = "7"))
+    int32 Col = 0;
+};
+
+USTRUCT(BlueprintType)
+struct PIECEPRESENTATION_API FTerraPiecePaletteMask
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P7")
+    ETerraGameplayPieceType PieceType = ETerraGameplayPieceType::Infantry;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P7")
+    TArray<FTerraPiecePaletteTile> PrimaryTiles;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P7")
+    TArray<FTerraPiecePaletteTile> SecondaryTiles;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P7", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinSaturationToReplace = 0.05f;
+};
+
+USTRUCT(BlueprintType)
+struct PIECEPRESENTATION_API FTerraPieceFactionPalette
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P7")
+    FLinearColor PrimaryColor = FLinearColor(0.85f, 0.10f, 0.08f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P7")
+    FLinearColor SecondaryColor = FLinearColor(1.0f, 0.78f, 0.18f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P7", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+    float ColorStrength = 1.0f;
 };
 
 USTRUCT(BlueprintType)
@@ -265,6 +312,27 @@ struct PIECEPRESENTATION_API FTerraPieceVisualConfig
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P6", meta = (ClampMin = "0.0"))
     float P6ArrowArcHeightCM = 350.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P7")
+    TObjectPtr<UMaterialInterface> P7PaletteReplaceMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P7")
+    TArray<FTerraPieceFactionPalette> P7FactionPalettes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P7")
+    TObjectPtr<UTexture2D> P7CommanderBaseTexture;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P7")
+    TObjectPtr<UTexture2D> P7InfantryBaseTexture;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P7")
+    TObjectPtr<UTexture2D> P7CavalryRiderBaseTexture;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P7")
+    TObjectPtr<UTexture2D> P7ArcherBaseTexture;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P7")
+    TArray<FTerraPiecePaletteMask> P7PaletteMasksByPieceType;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P3.5", meta = (ClampMin = "0.001"))
     float P35CommanderAttackDurationSeconds = 0.35f;
 
@@ -355,6 +423,9 @@ struct PIECEPRESENTATION_API FTerraPieceVisualConfig
     USkeletalMesh* ResolveMesh(ETerraGameplayPieceType PieceType) const;
     UAnimationAsset* ResolveAttackAnimation(ETerraGameplayPieceType PieceType) const;
     float ResolveAttackToHitSeconds(ETerraGameplayPieceType PieceType) const;
+    UTexture2D* ResolveP7BaseTexture(ETerraGameplayPieceType PieceType) const;
+    const FTerraPiecePaletteMask* ResolveP7PaletteMask(ETerraGameplayPieceType PieceType) const;
+    const FTerraPieceFactionPalette* ResolveP7FactionPalette(int32 FactionId) const;
 };
 
 USTRUCT(BlueprintType)

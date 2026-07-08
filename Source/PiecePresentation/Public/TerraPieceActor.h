@@ -10,6 +10,9 @@ class USkeletalMeshComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
 class UAnimMontage;
+class UMaterialInterface;
+class UMaterialInstanceDynamic;
+class UTexture2D;
 class UTerraMountedRiderAnimInstance;
 
 UCLASS()
@@ -95,6 +98,8 @@ private:
     void ApplyMountedRiderSaddleTransform_();
     void ApplyMountedRiderDeathTransform_();
     void ApplyWeaponAttachments_();
+    void ApplyP7FactionMaterials_(const FTerraPieceVisualConfig& VisualConfig);
+    void ApplyP7MaterialToMesh_(USkeletalMeshComponent* MeshComponent, UTexture2D* BaseTexture, const FTerraPiecePaletteMask& Mask, const FTerraPieceFactionPalette& Palette, UMaterialInterface* ParentMaterial, TObjectPtr<UMaterialInstanceDynamic>& InOutMID);
     void HideWeaponComponent_(UStaticMeshComponent* WeaponComponent);
     void ConfigureWeaponComponent_(UStaticMeshComponent* WeaponComponent, USkeletalMeshComponent* ParentMesh, UStaticMesh* StaticMesh, FName AttachName, const FVector& RelativeLocation, const FRotator& RelativeRotation, float UniformScale);
     FName ResolveWeaponAttachName_(USkeletalMeshComponent* ParentMesh, FName AttachName);
@@ -164,5 +169,11 @@ private:
 
     UPROPERTY(Transient)
     FName LastMissingWeaponAttachName;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UMaterialInstanceDynamic> P7HumanMID;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UMaterialInstanceDynamic> P7RiderMID;
 
 };

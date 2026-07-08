@@ -48,6 +48,59 @@ namespace
 {
     /** Knuth 整数哈希常数（黄金分割比 × 2^32），用于 VertexColor 预查时的 layer 哈希。 */
     constexpr uint32 GKnuthHashConst = 2654435761u;
+
+    FTerraPiecePaletteTile MakeP7Tile(int32 Row, int32 Col)
+    {
+        FTerraPiecePaletteTile Tile;
+        Tile.Row = Row;
+        Tile.Col = Col;
+        return Tile;
+    }
+
+    FTerraPiecePaletteMask MakeP7Mask(ETerraGameplayPieceType PieceType, int32 PrimaryRow, int32 PrimaryCol, int32 SecondaryRow, int32 SecondaryCol)
+    {
+        FTerraPiecePaletteMask Mask;
+        Mask.PieceType = PieceType;
+        Mask.PrimaryTiles.Add(MakeP7Tile(PrimaryRow, PrimaryCol));
+        Mask.SecondaryTiles.Add(MakeP7Tile(SecondaryRow, SecondaryCol));
+        Mask.MinSaturationToReplace = 0.05f;
+        return Mask;
+    }
+
+    FTerraPieceFactionPalette MakeP7Palette(const FLinearColor& Primary, const FLinearColor& Secondary)
+    {
+        FTerraPieceFactionPalette Palette;
+        Palette.PrimaryColor = Primary;
+        Palette.SecondaryColor = Secondary;
+        Palette.ColorStrength = 1.0f;
+        return Palette;
+    }
+
+    void BuildDefaultP7FactionPalettes(TArray<FTerraPieceFactionPalette>& OutPalettes)
+    {
+        OutPalettes.Reset();
+        OutPalettes.Add(MakeP7Palette(FLinearColor(0.85f, 0.08f, 0.06f, 1.0f), FLinearColor(1.00f, 0.72f, 0.18f, 1.0f)));
+        OutPalettes.Add(MakeP7Palette(FLinearColor(0.08f, 0.30f, 0.90f, 1.0f), FLinearColor(0.92f, 0.95f, 1.00f, 1.0f)));
+        OutPalettes.Add(MakeP7Palette(FLinearColor(0.08f, 0.58f, 0.20f, 1.0f), FLinearColor(0.68f, 0.50f, 0.32f, 1.0f)));
+        OutPalettes.Add(MakeP7Palette(FLinearColor(0.48f, 0.18f, 0.78f, 1.0f), FLinearColor(0.72f, 0.72f, 0.78f, 1.0f)));
+        OutPalettes.Add(MakeP7Palette(FLinearColor(0.95f, 0.38f, 0.08f, 1.0f), FLinearColor(0.06f, 0.06f, 0.06f, 1.0f)));
+        OutPalettes.Add(MakeP7Palette(FLinearColor(0.05f, 0.78f, 0.92f, 1.0f), FLinearColor(0.02f, 0.10f, 0.32f, 1.0f)));
+        OutPalettes.Add(MakeP7Palette(FLinearColor(0.95f, 0.82f, 0.10f, 1.0f), FLinearColor(0.38f, 0.22f, 0.10f, 1.0f)));
+        OutPalettes.Add(MakeP7Palette(FLinearColor(0.92f, 0.12f, 0.58f, 1.0f), FLinearColor(0.18f, 0.18f, 0.20f, 1.0f)));
+        OutPalettes.Add(MakeP7Palette(FLinearColor(0.02f, 0.55f, 0.50f, 1.0f), FLinearColor(0.74f, 0.42f, 0.20f, 1.0f)));
+        OutPalettes.Add(MakeP7Palette(FLinearColor(0.88f, 0.88f, 0.82f, 1.0f), FLinearColor(0.72f, 0.04f, 0.04f, 1.0f)));
+        OutPalettes.Add(MakeP7Palette(FLinearColor(0.03f, 0.03f, 0.035f, 1.0f), FLinearColor(0.02f, 0.62f, 0.34f, 1.0f)));
+        OutPalettes.Add(MakeP7Palette(FLinearColor(0.55f, 0.85f, 0.08f, 1.0f), FLinearColor(0.46f, 0.16f, 0.72f, 1.0f)));
+    }
+
+    void BuildDefaultP7PaletteMasks(TArray<FTerraPiecePaletteMask>& OutMasks)
+    {
+        OutMasks.Reset();
+        OutMasks.Add(MakeP7Mask(ETerraGameplayPieceType::Commander, 1, 2, 1, 1));
+        OutMasks.Add(MakeP7Mask(ETerraGameplayPieceType::Infantry, 1, 0, 1, 1));
+        OutMasks.Add(MakeP7Mask(ETerraGameplayPieceType::Cavalry, 1, 0, 1, 1));
+        OutMasks.Add(MakeP7Mask(ETerraGameplayPieceType::Archer, 1, 0, 1, 6));
+    }
 }
 
 // ===================================================================
@@ -2193,6 +2246,11 @@ void APlanetTessellatedMesh::ClearP1PiecePresentation_()
 
 bool APlanetTessellatedMesh::BuildP1PieceWorldTransform_(int32 CellId, FTransform& OutWorldTransform) const
 {
+    return BuildP1PieceWorldTransform_(CellId, ETerraGameplayPieceType::Infantry, OutWorldTransform);
+}
+
+bool APlanetTessellatedMesh::BuildP1PieceWorldTransform_(int32 CellId, ETerraGameplayPieceType PieceType, FTransform& OutWorldTransform) const
+{
     if (!CellTopology.IsValid() || !CellTopology->Cells.IsValidIndex(CellId))
     {
         return false;
@@ -2222,8 +2280,25 @@ bool APlanetTessellatedMesh::BuildP1PieceWorldTransform_(int32 CellId, FTransfor
         return false;
     }
 
+    FVector TraceWorldUp = WorldUp;
+    float TraceAngularOffsetDeg = 0.0f;
+    if (PieceType == ETerraGameplayPieceType::Cavalry)
+    {
+        const float RequestedOffsetDeg = FMath::Clamp(P2_6CavalryHeightTraceAngularOffsetDeg, 0.0f, 15.0f);
+        if (RequestedOffsetDeg > KINDA_SMALL_NUMBER)
+        {
+            const FVector TraceTangent = WorldForward;
+            const FVector RotationAxis = FVector::CrossProduct(WorldUp, TraceTangent).GetSafeNormal();
+            if (!RotationAxis.IsNearlyZero())
+            {
+                TraceWorldUp = WorldUp.RotateAngleAxis(RequestedOffsetDeg, RotationAxis).GetSafeNormal();
+                TraceAngularOffsetDeg = RequestedOffsetDeg;
+            }
+        }
+    }
+
     FVector WorldPosition = FVector::ZeroVector;
-    if (!TryResolveP2_5PieceHeightFromHISM_(CellId, WorldUp, WorldPosition))
+    if (!TryResolveP2_5PieceHeightFromHISM_(CellId, TraceWorldUp, WorldUp, TraceAngularOffsetDeg, WorldPosition))
     {
         const FVector LocalPosition = LocalUp * (GlobeRadiusCM + FMath::Max(0.0f, P1PieceRadiusOffsetCM));
         WorldPosition = ActorTransform.TransformPosition(LocalPosition);
@@ -2231,11 +2306,13 @@ bool APlanetTessellatedMesh::BuildP1PieceWorldTransform_(int32 CellId, FTransfor
         {
             const FVector PlanetCenterWorld = GetPlanetCenterWorld_();
             UE_LOG(LogPlanetTess, Warning,
-                TEXT("[Tess][P2.5] Cell=%d FallbackFixedRadius WorldRadius=%.1f GlobeRadius=%.1f PieceOffset=%.1f"),
+                TEXT("[Tess][P2.5/P2.6] Cell=%d PieceType=%d FallbackFixedRadius WorldRadius=%.1f GlobeRadius=%.1f PieceOffset=%.1f TraceOffsetDeg=%.2f"),
                 CellId,
+                static_cast<int32>(PieceType),
                 FVector::Distance(WorldPosition, PlanetCenterWorld),
                 GlobeRadiusCM,
-                P1PieceRadiusOffsetCM);
+                P1PieceRadiusOffsetCM,
+                TraceAngularOffsetDeg);
         }
     }
 
@@ -2245,14 +2322,23 @@ bool APlanetTessellatedMesh::BuildP1PieceWorldTransform_(int32 CellId, FTransfor
     return true;
 }
 
-bool APlanetTessellatedMesh::TryResolveP2_5PieceHeightFromHISM_(int32 CellId, const FVector& WorldUp, FVector& OutWorldPosition) const
+bool APlanetTessellatedMesh::TryResolveP2_5PieceHeightFromHISM_(
+    int32 CellId,
+    const FVector& TraceWorldUp,
+    const FVector& PlacementWorldUp,
+    float TraceAngularOffsetDeg,
+    FVector& OutWorldPosition) const
 {
     UWorld* World = GetWorld();
-    auto LogReject = [this, CellId](const TCHAR* Reason)
+    auto LogReject = [this, CellId, TraceAngularOffsetDeg](const TCHAR* Reason)
     {
         if (bDebugP2_5HISMPieceHeightTrace)
         {
-            UE_LOG(LogPlanetTess, Warning, TEXT("[Tess][P2.5] Cell=%d Reject Reason=%s"), CellId, Reason);
+            UE_LOG(LogPlanetTess, Warning,
+                TEXT("[Tess][P2.5/P2.6] Cell=%d Reject Reason=%s TraceOffsetDeg=%.2f"),
+                CellId,
+                Reason,
+                TraceAngularOffsetDeg);
         }
     };
 
@@ -2286,9 +2372,14 @@ bool APlanetTessellatedMesh::TryResolveP2_5PieceHeightFromHISM_(int32 CellId, co
         LogReject(TEXT("InvalidCellId"));
         return false;
     }
-    if (WorldUp.IsNearlyZero())
+    if (TraceWorldUp.IsNearlyZero())
     {
-        LogReject(TEXT("ZeroWorldUp"));
+        LogReject(TEXT("ZeroTraceWorldUp"));
+        return false;
+    }
+    if (PlacementWorldUp.IsNearlyZero())
+    {
+        LogReject(TEXT("ZeroPlacementWorldUp"));
         return false;
     }
 
@@ -2299,7 +2390,8 @@ bool APlanetTessellatedMesh::TryResolveP2_5PieceHeightFromHISM_(int32 CellId, co
     }
 
     const FVector PlanetCenterWorld = GetPlanetCenterWorld_();
-    const FVector TraceDirection = WorldUp.GetSafeNormal();
+    const FVector TraceDirection = TraceWorldUp.GetSafeNormal();
+    const FVector PlacementDirection = PlacementWorldUp.GetSafeNormal();
     const FVector TraceStart = PlanetCenterWorld + TraceDirection * (GlobeRadiusCM + FMath::Max(P2_5PieceHeightTraceStartOffsetCM, 0.0f));
     const FVector TraceEnd = PlanetCenterWorld - TraceDirection * FMath::Max(P2_5PieceHeightTracePastCenterOffsetCM, 0.0f);
 
@@ -2313,12 +2405,13 @@ bool APlanetTessellatedMesh::TryResolveP2_5PieceHeightFromHISM_(int32 CellId, co
         if (bDebugP2_5HISMPieceHeightTrace)
         {
             UE_LOG(LogPlanetTess, Warning,
-                TEXT("[Tess][P2.5] Cell=%d NoTraceHit Start=(%.1f,%.1f,%.1f) End=(%.1f,%.1f,%.1f) StartRadius=%.1f EndRadius=%.1f"),
+                TEXT("[Tess][P2.5/P2.6] Cell=%d NoTraceHit Start=(%.1f,%.1f,%.1f) End=(%.1f,%.1f,%.1f) StartRadius=%.1f EndRadius=%.1f TraceOffsetDeg=%.2f"),
                 CellId,
                 TraceStart.X, TraceStart.Y, TraceStart.Z,
                 TraceEnd.X, TraceEnd.Y, TraceEnd.Z,
                 FVector::Distance(TraceStart, PlanetCenterWorld),
-                FVector::Distance(TraceEnd, PlanetCenterWorld));
+                FVector::Distance(TraceEnd, PlanetCenterWorld),
+                TraceAngularOffsetDeg);
         }
         return false;
     }
@@ -2338,14 +2431,15 @@ bool APlanetTessellatedMesh::TryResolveP2_5PieceHeightFromHISM_(int32 CellId, co
             if (bDebugP2_5HISMPieceHeightTrace)
             {
                 UE_LOG(LogPlanetTess, Log,
-                    TEXT("[Tess][P2.5] Cell=%d Hit[%d/%d] NonHISM Component=%s Item=%d Distance=%.1f ImpactRadius=%.1f"),
+                    TEXT("[Tess][P2.5/P2.6] Cell=%d Hit[%d/%d] NonHISM Component=%s Item=%d Distance=%.1f ImpactRadius=%.1f TraceOffsetDeg=%.2f"),
                     CellId,
                     HitIndex,
                     Hits.Num(),
                     *GetNameSafe(HitComp),
                     Hit.Item,
                     Hit.Distance,
-                    FVector::Distance(Hit.ImpactPoint, PlanetCenterWorld));
+                    FVector::Distance(Hit.ImpactPoint, PlanetCenterWorld),
+                    TraceAngularOffsetDeg);
             }
             continue;
         }
@@ -2361,7 +2455,7 @@ bool APlanetTessellatedMesh::TryResolveP2_5PieceHeightFromHISM_(int32 CellId, co
         if (bDebugP2_5HISMPieceHeightTrace)
         {
             UE_LOG(LogPlanetTess, Warning,
-                TEXT("[Tess][P2.5] Cell=%d Hit[%d/%d] HISM Component=%s Item=%d Resolved=%d HitCell=%d WantedCell=%d Distance=%.1f ImpactRadius=%.1f Impact=(%.1f,%.1f,%.1f)"),
+                TEXT("[Tess][P2.5/P2.6] Cell=%d Hit[%d/%d] HISM Component=%s Item=%d Resolved=%d HitCell=%d WantedCell=%d Distance=%.1f ImpactRadius=%.1f Impact=(%.1f,%.1f,%.1f) TraceOffsetDeg=%.2f"),
                 CellId,
                 HitIndex,
                 Hits.Num(),
@@ -2374,7 +2468,8 @@ bool APlanetTessellatedMesh::TryResolveP2_5PieceHeightFromHISM_(int32 CellId, co
                 FVector::Distance(Hit.ImpactPoint, PlanetCenterWorld),
                 Hit.ImpactPoint.X,
                 Hit.ImpactPoint.Y,
-                Hit.ImpactPoint.Z);
+                Hit.ImpactPoint.Z,
+                TraceAngularOffsetDeg);
         }
 
         if (bResolvedCellId && HitCellId == CellId)
@@ -2390,30 +2485,34 @@ bool APlanetTessellatedMesh::TryResolveP2_5PieceHeightFromHISM_(int32 CellId, co
         if (bDebugP2_5HISMPieceHeightTrace)
         {
             UE_LOG(LogPlanetTess, Warning,
-                TEXT("[Tess][P2.5] Cell=%d NoHISMHit TotalHits=%d HISMHits=%d StartRadius=%.1f EndRadius=%.1f"),
+                TEXT("[Tess][P2.5/P2.6] Cell=%d NoHISMHit TotalHits=%d HISMHits=%d StartRadius=%.1f EndRadius=%.1f TraceOffsetDeg=%.2f"),
                 CellId,
                 Hits.Num(),
                 HISMHitCount,
                 FVector::Distance(TraceStart, PlanetCenterWorld),
-                FVector::Distance(TraceEnd, PlanetCenterWorld));
+                FVector::Distance(TraceEnd, PlanetCenterWorld),
+                TraceAngularOffsetDeg);
         }
         return false;
     }
 
-    OutWorldPosition = SelectedHit->ImpactPoint + TraceDirection * FMath::Max(P1PieceRadiusOffsetCM, 0.0f);
+    const float ImpactRadius = FVector::Distance(SelectedHit->ImpactPoint, PlanetCenterWorld);
+    const float FinalRadius = ImpactRadius + FMath::Max(P1PieceRadiusOffsetCM, 0.0f);
+    OutWorldPosition = PlanetCenterWorld + PlacementDirection * FinalRadius;
     if (bDebugP2_5HISMPieceHeightTrace)
     {
         UE_LOG(LogPlanetTess, Warning,
-            TEXT("[Tess][P2.5] Cell=%d UseHit Mode=%s Component=%s Item=%d ImpactRadius=%.1f FinalRadius=%.1f PieceOffset=%.1f TotalHits=%d HISMHits=%d"),
+            TEXT("[Tess][P2.5/P2.6] Cell=%d UseHit Mode=%s Component=%s Item=%d ImpactRadius=%.1f FinalRadius=%.1f PieceOffset=%.1f TotalHits=%d HISMHits=%d TraceOffsetDeg=%.2f"),
             CellId,
             CurrentCellHit ? TEXT("CurrentCell") : TEXT("FirstHISMFallback"),
             *GetNameSafe(SelectedHit->GetComponent()),
             SelectedHit->Item,
-            FVector::Distance(SelectedHit->ImpactPoint, PlanetCenterWorld),
-            FVector::Distance(OutWorldPosition, PlanetCenterWorld),
+            ImpactRadius,
+            FinalRadius,
             P1PieceRadiusOffsetCM,
             Hits.Num(),
-            HISMHitCount);
+            HISMHitCount,
+            TraceAngularOffsetDeg);
     }
     return true;
 }
@@ -2423,7 +2522,7 @@ bool APlanetTessellatedMesh::BuildP1PieceWorldTransformForPiece_(
     const TArray<FTerraGameplayPieceState>& Pieces,
     FTransform& OutWorldTransform) const
 {
-    if (!BuildP1PieceWorldTransform_(Piece.CellId, OutWorldTransform))
+    if (!BuildP1PieceWorldTransform_(Piece.CellId, Piece.PieceType, OutWorldTransform))
     {
         return false;
     }
@@ -2606,6 +2705,31 @@ FTerraPieceVisualConfig APlanetTessellatedMesh::BuildP1PieceVisualConfig_() cons
     VisualConfig.P6ArrowFlightSeconds = FMath::Max(P6ArrowFlightSeconds, 0.001f);
     VisualConfig.P6SpellFlightSeconds = FMath::Max(P6SpellFlightSeconds, 0.001f);
     VisualConfig.P6ArrowArcHeightCM = FMath::Max(P6ArrowArcHeightCM, 0.0f);
+    VisualConfig.P7PaletteReplaceMaterial = P7PaletteReplaceMaterial.Get()
+        ? P7PaletteReplaceMaterial.Get()
+        : LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/PiecePresentation/Materials/M_TerraPiece_PaletteReplace.M_TerraPiece_PaletteReplace"));
+    VisualConfig.P7CommanderBaseTexture = P7CommanderBaseTexture.Get()
+        ? P7CommanderBaseTexture.Get()
+        : LoadObject<UTexture2D>(nullptr, TEXT("/Game/Animations/Adventurers/Assets/mage_texture.mage_texture"));
+    VisualConfig.P7InfantryBaseTexture = P7InfantryBaseTexture.Get()
+        ? P7InfantryBaseTexture.Get()
+        : LoadObject<UTexture2D>(nullptr, TEXT("/Game/Animations/Adventurers/Assets/knight_texture.knight_texture"));
+    VisualConfig.P7CavalryRiderBaseTexture = P7CavalryRiderBaseTexture.Get()
+        ? P7CavalryRiderBaseTexture.Get()
+        : LoadObject<UTexture2D>(nullptr, TEXT("/Game/Animations/Adventurers/Assets/knight_texture.knight_texture"));
+    VisualConfig.P7ArcherBaseTexture = P7ArcherBaseTexture.Get()
+        ? P7ArcherBaseTexture.Get()
+        : LoadObject<UTexture2D>(nullptr, TEXT("/Game/Animations/Adventurers/Assets/ranger_texture.ranger_texture"));
+    VisualConfig.P7FactionPalettes = P7FactionPalettes;
+    if (VisualConfig.P7FactionPalettes.Num() == 0)
+    {
+        BuildDefaultP7FactionPalettes(VisualConfig.P7FactionPalettes);
+    }
+    VisualConfig.P7PaletteMasksByPieceType = P7PaletteMasksByPieceType;
+    if (VisualConfig.P7PaletteMasksByPieceType.Num() == 0)
+    {
+        BuildDefaultP7PaletteMasks(VisualConfig.P7PaletteMasksByPieceType);
+    }
     VisualConfig.P35CommanderAttackDurationSeconds = FMath::Max(P35CommanderAttackDurationSeconds, 0.001f);
     VisualConfig.P35CommanderAttackPlayRateScale = FMath::Max(P35CommanderAttackPlayRateScale, 0.001f);
     VisualConfig.P35ArcherAttackDurationSeconds = FMath::Max(P35ArcherAttackDurationSeconds, 0.001f);
@@ -3253,10 +3377,13 @@ bool APlanetTessellatedMesh::HandleGameplayCellClick_(int32 CellId, const TCHAR*
 
         if (MoveType != ETerraPiecePresentationMoveType::None)
         {
+            const ETerraGameplayPieceType MovingPieceType = PrevPieces.IsValidIndex(PrevSelectedPieceId)
+                ? PrevPieces[PrevSelectedPieceId].PieceType
+                : ETerraGameplayPieceType::Infantry;
             FTransform FromWorldTransform = FTransform::Identity;
             FTransform ToWorldTransform = FTransform::Identity;
-            if (BuildP1PieceWorldTransform_(PrevSelectedPieceCellId, FromWorldTransform)
-                && BuildP1PieceWorldTransform_(NewSelectedPieceCellId, ToWorldTransform))
+            if (BuildP1PieceWorldTransform_(PrevSelectedPieceCellId, MovingPieceType, FromWorldTransform)
+                && BuildP1PieceWorldTransform_(NewSelectedPieceCellId, MovingPieceType, ToWorldTransform))
             {
                 FTerraPiecePresentationMoveEvent& MoveEvent = P2MoveEvents.AddDefaulted_GetRef();
                 MoveEvent.PieceId = NewSelectedPieceId;
@@ -3356,8 +3483,8 @@ bool APlanetTessellatedMesh::HandleHISMUndo()
 
         FTransform FromWorldTransform = FTransform::Identity;
         FTransform ToWorldTransform = FTransform::Identity;
-        if (BuildP1PieceWorldTransform_(PrevPiece.CellId, FromWorldTransform)
-            && BuildP1PieceWorldTransform_(NewPiece.CellId, ToWorldTransform))
+        if (BuildP1PieceWorldTransform_(PrevPiece.CellId, NewPiece.PieceType, FromWorldTransform)
+            && BuildP1PieceWorldTransform_(NewPiece.CellId, NewPiece.PieceType, ToWorldTransform))
         {
             FTerraPiecePresentationMoveEvent& MoveEvent = UndoMoveEvents.AddDefaulted_GetRef();
             MoveEvent.PieceId = NewPiece.PieceId;

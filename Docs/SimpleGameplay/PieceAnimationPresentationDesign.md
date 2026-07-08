@@ -978,6 +978,23 @@ Content/PiecePresentation/
 - 调整 `Piece Radius Offset CM` 可在碰撞高度基础上微调模型高度。
 - HISM 未命中或关闭时回退到 P1 固定半径站位。
 
+### P2.6：骑兵马蹄高度偏移采样
+
+详细阶段设计见：[P2_6CavalryHorseHoofHeightTraceDesign.md](P2_6CavalryHorseHoofHeightTraceDesign.md)。
+
+目标：
+
+- 骑兵高度射线不再只采样马腹中心方向。
+- 通过 `P2_6CavalryHeightTraceAngularOffsetDeg` 暴露骑兵专用采样角度偏移。
+- 偏移射线只用于取得 HISM 命中半径，骑兵 Actor 仍摆放在原 Cell 中心方向上。
+- 非骑兵继续沿用 P2.5 的中心采样。
+
+验收：
+
+- 骑兵在弧面 HISM 地块上马蹄不再明显悬空。
+- 将偏移角设为 `0` 时，骑兵回到 P2.5 中心采样表现。
+- 骑兵移动、跳跃、Undo 的起点和终点都使用偏移后的高度。
+
 ### P3：攻击、受击与死亡表现
 
 详细阶段设计见：[P3AttackHitDeathPresentationDesign.md](P3AttackHitDeathPresentationDesign.md)。
@@ -1066,6 +1083,8 @@ P4.5 Rider 马背 Socket / 骨骼跟随阶段设计见：[P4_5MountedRiderSaddle
 - 投射物 / 法术到达或命中时，被吃棋子的受击 / 死亡表现同步可信。
 
 ### P7：终局演出与职业差异化细化
+
+阵营调色板换色专项设计见：[P7FactionPaletteRecolorDesign.md](P7FactionPaletteRecolorDesign.md)。
 
 目标：
 

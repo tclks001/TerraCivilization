@@ -1,6 +1,7 @@
 #include "TerraPiecePresentationTypes.h"
 
 #include "Engine/SkeletalMesh.h"
+#include "Engine/Texture2D.h"
 
 USkeletalMesh* FTerraPieceVisualConfig::ResolveMesh(ETerraGameplayPieceType PieceType) const
 {
@@ -48,4 +49,43 @@ float FTerraPieceVisualConfig::ResolveAttackToHitSeconds(ETerraGameplayPieceType
     default:
         return P3InfantryAttackToHitSeconds;
     }
+}
+
+UTexture2D* FTerraPieceVisualConfig::ResolveP7BaseTexture(ETerraGameplayPieceType PieceType) const
+{
+    switch (PieceType)
+    {
+    case ETerraGameplayPieceType::Commander:
+        return P7CommanderBaseTexture.Get();
+    case ETerraGameplayPieceType::Archer:
+        return P7ArcherBaseTexture.Get();
+    case ETerraGameplayPieceType::Cavalry:
+        return P7CavalryRiderBaseTexture.Get();
+    case ETerraGameplayPieceType::Infantry:
+    default:
+        return P7InfantryBaseTexture.Get();
+    }
+}
+
+const FTerraPiecePaletteMask* FTerraPieceVisualConfig::ResolveP7PaletteMask(ETerraGameplayPieceType PieceType) const
+{
+    for (const FTerraPiecePaletteMask& Mask : P7PaletteMasksByPieceType)
+    {
+        if (Mask.PieceType == PieceType)
+        {
+            return &Mask;
+        }
+    }
+
+    return nullptr;
+}
+
+const FTerraPieceFactionPalette* FTerraPieceVisualConfig::ResolveP7FactionPalette(int32 FactionId) const
+{
+    if (P7FactionPalettes.IsValidIndex(FactionId))
+    {
+        return &P7FactionPalettes[FactionId];
+    }
+
+    return P7FactionPalettes.Num() > 0 ? &P7FactionPalettes[0] : nullptr;
 }

@@ -6,6 +6,9 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/Texture2D.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 #include "TerraMountedRiderAnimInstance.h"
 #include "TerraPieceAnimInstance.h"
 
@@ -58,6 +61,40 @@ namespace
         const float Radius = FMath::Lerp(FromRadius, ToRadius, Alpha) + ExtraHeightCM;
         return Center + Direction * Radius;
     }
+
+    uint32 PackP7TileMaskBits(const TArray<FTerraPiecePaletteTile>& Tiles)
+    {
+        uint32 Bits = 0;
+        for (const FTerraPiecePaletteTile& Tile : Tiles)
+        {
+            if (Tile.Row >= 0 && Tile.Row < 4 && Tile.Col >= 0 && Tile.Col < 8)
+            {
+                const int32 MaterialRow = 3 - Tile.Row;
+                Bits |= 1u << static_cast<uint32>(MaterialRow * 8 + Tile.Col);
+            }
+        }
+        return Bits;
+    }
+
+    FColor PackP7TileMaskRGBA8(const TArray<FTerraPiecePaletteTile>& Tiles)
+    {
+        const uint32 Mask = PackP7TileMaskBits(Tiles);
+        return FColor(
+            static_cast<uint8>(Mask & 255u),
+            static_cast<uint8>((Mask >> 8) & 255u),
+            static_cast<uint8>((Mask >> 16) & 255u),
+            static_cast<uint8>((Mask >> 24) & 255u));
+    }
+
+    FLinearColor NormalizeP7TileMaskColor(const FColor& Color)
+    {
+        return FLinearColor(
+            static_cast<float>(Color.R) / 255.0f,
+            static_cast<float>(Color.G) / 255.0f,
+            static_cast<float>(Color.B) / 255.0f,
+            static_cast<float>(Color.A) / 255.0f);
+    }
+
 }
 
 ATerraPieceActor::ATerraPieceActor()
@@ -653,6 +690,7 @@ void ATerraPieceActor::ApplyVisualConfig_(const FTerraPieceVisualConfig& VisualC
         }
     }
 
+    ApplyP7FactionMaterials_(VisualConfig);
     ApplyWeaponAttachments_();
     SetActorHiddenInGame(false);
     SetActorScale3D(FVector::OneVector);
@@ -916,6 +954,101 @@ void ATerraPieceActor::ApplyWeaponAttachments_()
     default:
         break;
     }
+}
+
+void ATerraPieceActor::ApplyP7FactionMaterials_(const FTerraPieceVisualConfig& VisualConfig)
+{
+    UMaterialInterface* ParentMaterial = VisualConfig.P7PaletteReplaceMaterial;
+    const FTerraPieceFactionPalette* Palette = VisualConfig.ResolveP7FactionPalette(OwnerFactionId);
+    const FTerraPiecePaletteMask* Mask = VisualConfig.ResolveP7PaletteMask(PieceType);
+
+    if (!ParentMaterial || !Palette || !Mask)
+    {
+        P7HumanMID = nullptr;
+        P7RiderMID = nullptr;
+        if (HumanMesh)
+        {
+            HumanMesh->SetMaterial(0, nullptr);
+        }
+        if (RiderMesh)
+        {
+            RiderMesh->SetMaterial(0, nullptr);
+        }
+        return;
+    }
+
+    if (OwnerFactionId != INDEX_NONE && !VisualConfig.P7FactionPalettes.IsValidIndex(OwnerFactionId))
+    {
+        UE_LOG(LogTerraPieceActor, Warning,
+            TEXT("[PiecePresentation][P7] OwnerFactionId out of range; using fallback palette. PieceId=%d OwnerFactionId=%d PaletteCount=%d"),
+            PieceId,
+            OwnerFactionId,
+            VisualConfig.P7FactionPalettes.Num());
+    }
+
+    if (IsMountedCavalry_())
+    {
+        P7HumanMID = nullptr;
+        ApplyP7MaterialToMesh_(
+            RiderMesh,
+            VisualConfig.ResolveP7BaseTexture(PieceType),
+            *Mask,
+            *Palette,
+            ParentMaterial,
+            P7RiderMID);
+    }
+    else
+    {
+        P7RiderMID = nullptr;
+        ApplyP7MaterialToMesh_(
+            HumanMesh,
+            VisualConfig.ResolveP7BaseTexture(PieceType),
+            *Mask,
+            *Palette,
+            ParentMaterial,
+            P7HumanMID);
+    }
+}
+
+void ATerraPieceActor::ApplyP7MaterialToMesh_(
+    USkeletalMeshComponent* MeshComponent,
+    UTexture2D* BaseTexture,
+    const FTerraPiecePaletteMask& Mask,
+    const FTerraPieceFactionPalette& Palette,
+    UMaterialInterface* ParentMaterial,
+    TObjectPtr<UMaterialInstanceDynamic>& InOutMID)
+{
+    if (!MeshComponent || !ParentMaterial || !BaseTexture)
+    {
+        InOutMID = nullptr;
+        if (MeshComponent)
+        {
+            MeshComponent->SetMaterial(0, nullptr);
+        }
+        return;
+    }
+
+    InOutMID = UMaterialInstanceDynamic::Create(ParentMaterial, this);
+    if (!InOutMID)
+    {
+        return;
+    }
+
+    InOutMID->SetTextureParameterValue(TEXT("BaseColorTexture"), BaseTexture);
+    InOutMID->SetScalarParameterValue(TEXT("PaletteGridColumns"), 8.0f);
+    InOutMID->SetScalarParameterValue(TEXT("PaletteGridRows"), 4.0f);
+    InOutMID->SetVectorParameterValue(TEXT("FactionPrimaryColor"), Palette.PrimaryColor);
+    InOutMID->SetVectorParameterValue(TEXT("FactionSecondaryColor"), Palette.SecondaryColor);
+    InOutMID->SetScalarParameterValue(TEXT("FactionColorStrength"), FMath::Max(Palette.ColorStrength, 0.0f));
+    InOutMID->SetScalarParameterValue(TEXT("PreserveValueStrength"), 1.0f);
+    InOutMID->SetScalarParameterValue(TEXT("MinSaturationToReplace"), FMath::Clamp(Mask.MinSaturationToReplace, 0.0f, 1.0f));
+
+    const FColor PrimaryMaskColor = PackP7TileMaskRGBA8(Mask.PrimaryTiles);
+    const FColor SecondaryMaskColor = PackP7TileMaskRGBA8(Mask.SecondaryTiles);
+    InOutMID->SetVectorParameterValue(TEXT("PrimaryTileMaskRGBA8"), NormalizeP7TileMaskColor(PrimaryMaskColor));
+    InOutMID->SetVectorParameterValue(TEXT("SecondaryTileMaskRGBA8"), NormalizeP7TileMaskColor(SecondaryMaskColor));
+
+    MeshComponent->SetMaterial(0, InOutMID);
 }
 
 void ATerraPieceActor::HideWeaponComponent_(UStaticMeshComponent* WeaponComponent)
