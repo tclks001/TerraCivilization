@@ -979,6 +979,12 @@ P7.2 优化：必要时烘焙贴图
    Description = P7PaletteReplace_RGBA8Mask
    Output Type = CMOT Float3
    ```
+   然后在 `Additional Outputs` 增加 1 个输出：
+   ```text
+   Output Name = PrimaryEmissiveOut
+   Output Type = CMOT Float3
+   ```
+   说明：`Custom` 节点主输出仍然作为换色后的 Base Color；`PrimaryEmissiveOut` 只在 Primary tile 命中且通过饱和度保护时输出 Primary 自发光颜色，其余区域输出黑色。
 9. 给 `Custom` 节点添加以下 Inputs，名字必须完全一致：
    ```text
    UV                       Float2
@@ -1006,7 +1012,8 @@ P7.2 优化：必要时烘焙贴图
     FactionColorStrength -> Custom.FactionColorStrength
     PreserveValueStrength -> Custom.PreserveValueStrength
     MinSaturationToReplace -> Custom.MinSaturationToReplace
-    Custom 输出 -> Material Base Color
+    Custom 主输出 -> Material Base Color
+    Custom.PrimaryEmissiveOut -> Material Emissive Color
     ```
 11. 其余材质输出建议首版先固定：
     ```text
@@ -1014,6 +1021,7 @@ P7.2 优化：必要时烘焙贴图
     Specular = Constant 0.35
     Metallic = Constant 0
     ```
+    `Emissive Color` 不再固定为 0，而是使用 `Custom.PrimaryEmissiveOut`。当前不新增 C++ 参数；自发光强度直接由 `FactionPrimaryColor.rgb` 决定，后续如果需要更强或更弱，再加 `PrimaryEmissiveStrength` 标量参数。
 12. `Custom` 节点 Code 粘贴以下 HLSL：
     ```hlsl
     float GridColumns = max(PaletteGridColumns, 1.0);
@@ -1054,7 +1062,10 @@ P7.2 优化：必要时烘焙贴图
     float3 Recolored = saturate(TargetColor * ValueScale);
     float FinalMask = TileHit * SaturationGuard * saturate(FactionColorStrength);
 
-    return lerp(BaseColor, Recolored, FinalMask);
+    float3 BaseColorOut = lerp(BaseColor, Recolored, FinalMask);
+    PrimaryEmissiveOut = FactionPrimaryColor.rgb * PrimaryHit * SaturationGuard * saturate(FactionColorStrength);
+
+    return BaseColorOut;
     ```
 13. Apply / Save。保存后 PIE 中若 `APlanetTessellatedMesh.P7PaletteReplaceMaterial` 为空，C++ 会自动尝试加载这个路径；如果路径或资产名不同，必须手动把材质拖到该字段。
 
@@ -1095,7 +1106,7 @@ P7.2 优化：必要时烘焙贴图
 | 骑兵没颜色 | 只给 `HumanMesh` 设置材质，但骑兵显示的是 `RiderMesh` | 对 `RiderMesh` 应用 P7 MID |
 | 主将贴图错成 Knight | `P7CommanderBaseTexture` 配错 | Commander 使用 `mage_texture` |
 | 弓兵贴图错成 Knight | `P7ArcherBaseTexture` 配错 | Archer 使用 `ranger_texture` |
-| 颜色过亮发光 | 材质输出接到了 Emissive 或阵营色值 > 1 | 确认输出到 BaseColor，颜色使用 0..1 |
+| Primary 区域发光过强 | `FactionPrimaryColor` 太亮，或后续新增的自发光强度参数过高 | 当前设计中 Primary tile 会输出同色自发光；先降低阵营 Primary 颜色亮度，后续可增加 `PrimaryEmissiveStrength` 单独控制 |
 | 灰色金属也被染色 | `MinSaturationToReplace` 太低，或该 tile 本身被列入 mask | 提高阈值或移除该 tile |
 | 阵营色看不清 | `FactionColorStrength` 太低，或目标 tile 面积太小 | 提高强度，换更大面积 tile |
 
