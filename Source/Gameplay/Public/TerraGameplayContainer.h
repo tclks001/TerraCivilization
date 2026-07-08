@@ -6,6 +6,41 @@
 class GAMEPLAY_API FTerraGameplayContainer
 {
 public:
+    struct FLegalActionQuery
+    {
+        int32 PieceId = INDEX_NONE;
+        int32 FromCellId = INDEX_NONE;
+        int32 ToCellId = INDEX_NONE;
+        bool bIsJump = false;
+        TArray<FTerraGameplayCaptureEntry> CaptureEntries;
+    };
+
+    struct FActionRiskQuery
+    {
+        bool bValidAction = false;
+        bool bDestinationThreatened = false;
+        int32 ThreatCount = 0;
+        TArray<int32> ThreateningPieceIds;
+        TArray<int32> ThreateningFactionIds;
+    };
+
+    struct FValidatedActionExecutionResult
+    {
+        bool bAccepted = false;
+        bool bExecuted = false;
+        FString RejectReason;
+        int32 TurnIndexBefore = INDEX_NONE;
+        int32 TurnIndexAfter = INDEX_NONE;
+        int32 FactionIdBefore = INDEX_NONE;
+        int32 FactionIdAfter = INDEX_NONE;
+        int32 PieceId = INDEX_NONE;
+        int32 FromCellId = INDEX_NONE;
+        int32 ToCellId = INDEX_NONE;
+        bool bWasJump = false;
+        TArray<FTerraGameplayCaptureEntry> CaptureEntries;
+        TArray<int32> DirtyCellIds;
+    };
+
     struct FInteractionUndoSnapshot
     {
         TArray<FTerraGameplayPieceState> Pieces;
@@ -47,6 +82,10 @@ public:
     bool CollectCurrentFactionPieceCellIds(TArray<int32>& OutCellIds) const;
     bool CollectCurrentFactionSelectablePieceIds(TArray<int32>& OutPieceIds) const;
     bool CollectPendingCaptureEntries(TArray<FTerraGameplayCaptureEntry>& OutCaptureEntries) const;
+    bool CollectCurrentFactionLegalActions(TArray<FLegalActionQuery>& OutActions) const;
+    bool EvaluateCurrentFactionActionRisk(int32 PieceId, int32 ToCellId, FActionRiskQuery& OutRisk) const;
+    bool IsCurrentFactionLegalAction(int32 PieceId, int32 ToCellId, FLegalActionQuery& OutAction) const;
+    bool TryExecuteValidatedAction(int32 ExpectedTurnIndex, int32 ExpectedFactionId, int32 PieceId, int32 ToCellId, FValidatedActionExecutionResult& OutResult);
     bool TryGetPieceCellId(int32 PieceId, int32& OutCellId) const;
     const TArray<FTerraGameplayPieceState>& GetPieces() const { return Pieces; }
     const TArray<FTerraGameplayFactionState>& GetFactions() const { return Factions; }
@@ -67,12 +106,17 @@ private:
     const FTerraGameplayPieceState* GetPiece_(int32 PieceId) const;
     bool IsCurrentFactionPiece_(const FTerraGameplayPieceState& Piece) const;
     bool IsPieceSelectable_(const FTerraGameplayPieceState& Piece) const;
+    bool IsPieceSelectableForFaction_(const FTerraGameplayPieceState& Piece, int32 ActingFactionId) const;
     bool CanEnterTerrain_(const FTerraGameplayPieceState& Piece, int32 TargetCellId) const;
     bool CanOrdinaryMove_(const FTerraGameplayPieceState& Piece, int32 TargetCellId) const;
+    bool CanOrdinaryMoveForFaction_(const FTerraGameplayPieceState& Piece, int32 TargetCellId, int32 ActingFactionId) const;
     bool StepForwardBranches_(int32 PrevCellId, int32 CurCellId, TArray<int32>& OutNextCellIds) const;
     void CollectOrdinaryMoveTargets_(const FTerraGameplayPieceState& Piece, TSet<int32>& OutTargetCellIds) const;
+    void CollectOrdinaryMoveTargetsForFaction_(const FTerraGameplayPieceState& Piece, int32 ActingFactionId, TSet<int32>& OutTargetCellIds) const;
     void CollectJumpTargets_(const FTerraGameplayPieceState& Piece, TSet<int32>& OutTargetCellIds) const;
+    void CollectJumpTargetsForFaction_(const FTerraGameplayPieceState& Piece, int32 ActingFactionId, int32 BlockedReturnCellId, TSet<int32>& OutTargetCellIds) const;
     void CollectCaptureEntriesAfterHypotheticalMove_(const FTerraGameplayPieceState& Piece, int32 TargetCellId, TMap<int32, FTerraGameplayCaptureEntry>& OutCaptureEntriesByCellId) const;
+    void CollectCaptureEntriesAfterHypotheticalMoveForFaction_(const FTerraGameplayPieceState& Piece, int32 TargetCellId, int32 ActingFactionId, TMap<int32, FTerraGameplayCaptureEntry>& OutCaptureEntriesByCellId) const;
     void CollectCaptureCellsAfterHypotheticalMove_(const FTerraGameplayPieceState& Piece, int32 TargetCellId, TSet<int32>& OutCaptureCellIds) const;
     void RebuildActionTargetCapturePreviews_(TArray<int32>& OutDirtyCellIds);
     bool HasCapturePreviewForActionTarget_(int32 ActionTargetCellId) const;

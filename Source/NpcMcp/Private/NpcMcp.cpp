@@ -9,6 +9,10 @@
 DEFINE_LOG_CATEGORY_STATIC(LogTerraNpcMcp, Log, All);
 
 TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpPingGameplayTool();
+TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpGetTurnContextTool();
+TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpListLegalActionsTool();
+TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpEvaluateActionRiskTool();
+TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpSubmitActionProposalTool();
 
 IMPLEMENT_MODULE(FNpcMcpModule, NpcMcp)
 
@@ -41,6 +45,10 @@ void FNpcMcpModule::RegisterTools_()
     }
 
     RegisteredTools.Add(MakeTerraNpcMcpPingGameplayTool());
+    RegisteredTools.Add(MakeTerraNpcMcpGetTurnContextTool());
+    RegisteredTools.Add(MakeTerraNpcMcpListLegalActionsTool());
+    RegisteredTools.Add(MakeTerraNpcMcpEvaluateActionRiskTool());
+    RegisteredTools.Add(MakeTerraNpcMcpSubmitActionProposalTool());
 
     for (const TSharedRef<IModelContextProtocolTool>& Tool : RegisteredTools)
     {
