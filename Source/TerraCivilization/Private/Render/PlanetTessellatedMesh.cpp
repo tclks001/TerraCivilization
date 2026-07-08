@@ -5,6 +5,7 @@
 #include "Render/R8RecipeTable.h"
 
 #include "TerraGameplayContainer.h"
+#include "TerraNpcMcpGameplayBridge.h"
 #include "TerraPiecePresentationManager.h"
 
 #include "FSphereTopology.h"
@@ -179,6 +180,11 @@ APlanetTessellatedMesh::APlanetTessellatedMesh()
 
 APlanetTessellatedMesh::~APlanetTessellatedMesh()
 {
+    if (GameplayContainer.IsValid())
+    {
+        FTerraNpcMcpGameplayBridge::UnregisterGameplayContainer(GameplayContainer.Get());
+    }
+
     // PIE 钩子在析构中取消订阅。AddUObject 路径会在 UObject 销毁时自动撤销，
     // 但显式 Remove 避免多次触发 / dangling 风险。详见 AgentWorkflow §3.11。
 #if WITH_EDITOR
@@ -1524,6 +1530,10 @@ void APlanetTessellatedMesh::RebuildGameplay_()
 {
     if (!CellTopology.IsValid() || !Generator.IsValid())
     {
+        if (GameplayContainer.IsValid())
+        {
+            FTerraNpcMcpGameplayBridge::UnregisterGameplayContainer(GameplayContainer.Get());
+        }
         GameplayContainer.Reset();
         ClearP1PiecePresentation_();
         G2_5LastHighlightedFactionId = INDEX_NONE;
@@ -1540,6 +1550,10 @@ void APlanetTessellatedMesh::RebuildGameplay_()
             TEXT("[Tess][G2] Skip Gameplay rebuild: WorldGen cell count mismatch. Got=%d Expected=%d"),
             GeoCells.Num(),
             NumCells);
+        if (GameplayContainer.IsValid())
+        {
+            FTerraNpcMcpGameplayBridge::UnregisterGameplayContainer(GameplayContainer.Get());
+        }
         GameplayContainer.Reset();
         ClearP1PiecePresentation_();
         G2_5LastHighlightedFactionId = INDEX_NONE;
@@ -1574,9 +1588,14 @@ void APlanetTessellatedMesh::RebuildGameplay_()
         }
     }
 
+    if (GameplayContainer.IsValid())
+    {
+        FTerraNpcMcpGameplayBridge::UnregisterGameplayContainer(GameplayContainer.Get());
+    }
     GameplayContainer = MakeUnique<FTerraGameplayContainer>();
     GameplayContainer->Initialize(GameplayCells);
     GameplayContainer->SetDebugKeepSameFactionOnEndTurn(bG3DebugKeepSameFactionOnEndTurn);
+    FTerraNpcMcpGameplayBridge::RegisterGameplayContainer(GameplayContainer.Get());
 
     G2_5LastHighlightedFactionId = GameplayContainer->GetCurrentFactionId();
     G2_5LastCameraFocusedTurnIndex = INDEX_NONE;
@@ -2304,15 +2323,15 @@ bool APlanetTessellatedMesh::BuildP1PieceWorldTransform_(int32 CellId, ETerraGam
         WorldPosition = ActorTransform.TransformPosition(LocalPosition);
         if (bDebugP2_5HISMPieceHeightTrace)
         {
-            const FVector PlanetCenterWorld = GetPlanetCenterWorld_();
-            UE_LOG(LogPlanetTess, Warning,
-                TEXT("[Tess][P2.5/P2.6] Cell=%d PieceType=%d FallbackFixedRadius WorldRadius=%.1f GlobeRadius=%.1f PieceOffset=%.1f TraceOffsetDeg=%.2f"),
-                CellId,
-                static_cast<int32>(PieceType),
-                FVector::Distance(WorldPosition, PlanetCenterWorld),
-                GlobeRadiusCM,
-                P1PieceRadiusOffsetCM,
-                TraceAngularOffsetDeg);
+            //const FVector PlanetCenterWorld = GetPlanetCenterWorld_();
+            //UE_LOG(LogPlanetTess, Warning,
+            //    TEXT("[Tess][P2.5/P2.6] Cell=%d PieceType=%d FallbackFixedRadius WorldRadius=%.1f GlobeRadius=%.1f PieceOffset=%.1f TraceOffsetDeg=%.2f"),
+            //    CellId,
+            //    static_cast<int32>(PieceType),
+            //    FVector::Distance(WorldPosition, PlanetCenterWorld),
+            //    GlobeRadiusCM,
+            //    P1PieceRadiusOffsetCM,
+            //    TraceAngularOffsetDeg);
         }
     }
 
@@ -2334,11 +2353,11 @@ bool APlanetTessellatedMesh::TryResolveP2_5PieceHeightFromHISM_(
     {
         if (bDebugP2_5HISMPieceHeightTrace)
         {
-            UE_LOG(LogPlanetTess, Warning,
-                TEXT("[Tess][P2.5/P2.6] Cell=%d Reject Reason=%s TraceOffsetDeg=%.2f"),
-                CellId,
-                Reason,
-                TraceAngularOffsetDeg);
+            //UE_LOG(LogPlanetTess, Warning,
+            //    TEXT("[Tess][P2.5/P2.6] Cell=%d Reject Reason=%s TraceOffsetDeg=%.2f"),
+            //    CellId,
+            //    Reason,
+            //    TraceAngularOffsetDeg);
         }
     };
 
@@ -2404,14 +2423,14 @@ bool APlanetTessellatedMesh::TryResolveP2_5PieceHeightFromHISM_(
     {
         if (bDebugP2_5HISMPieceHeightTrace)
         {
-            UE_LOG(LogPlanetTess, Warning,
-                TEXT("[Tess][P2.5/P2.6] Cell=%d NoTraceHit Start=(%.1f,%.1f,%.1f) End=(%.1f,%.1f,%.1f) StartRadius=%.1f EndRadius=%.1f TraceOffsetDeg=%.2f"),
-                CellId,
-                TraceStart.X, TraceStart.Y, TraceStart.Z,
-                TraceEnd.X, TraceEnd.Y, TraceEnd.Z,
-                FVector::Distance(TraceStart, PlanetCenterWorld),
-                FVector::Distance(TraceEnd, PlanetCenterWorld),
-                TraceAngularOffsetDeg);
+            //UE_LOG(LogPlanetTess, Warning,
+            //    TEXT("[Tess][P2.5/P2.6] Cell=%d NoTraceHit Start=(%.1f,%.1f,%.1f) End=(%.1f,%.1f,%.1f) StartRadius=%.1f EndRadius=%.1f TraceOffsetDeg=%.2f"),
+            //    CellId,
+            //    TraceStart.X, TraceStart.Y, TraceStart.Z,
+            //    TraceEnd.X, TraceEnd.Y, TraceEnd.Z,
+            //    FVector::Distance(TraceStart, PlanetCenterWorld),
+            //    FVector::Distance(TraceEnd, PlanetCenterWorld),
+            //    TraceAngularOffsetDeg);
         }
         return false;
     }
@@ -2430,16 +2449,16 @@ bool APlanetTessellatedMesh::TryResolveP2_5PieceHeightFromHISM_(
         {
             if (bDebugP2_5HISMPieceHeightTrace)
             {
-                UE_LOG(LogPlanetTess, Log,
-                    TEXT("[Tess][P2.5/P2.6] Cell=%d Hit[%d/%d] NonHISM Component=%s Item=%d Distance=%.1f ImpactRadius=%.1f TraceOffsetDeg=%.2f"),
-                    CellId,
-                    HitIndex,
-                    Hits.Num(),
-                    *GetNameSafe(HitComp),
-                    Hit.Item,
-                    Hit.Distance,
-                    FVector::Distance(Hit.ImpactPoint, PlanetCenterWorld),
-                    TraceAngularOffsetDeg);
+                //UE_LOG(LogPlanetTess, Log,
+                //    TEXT("[Tess][P2.5/P2.6] Cell=%d Hit[%d/%d] NonHISM Component=%s Item=%d Distance=%.1f ImpactRadius=%.1f TraceOffsetDeg=%.2f"),
+                //    CellId,
+                //    HitIndex,
+                //    Hits.Num(),
+                //    *GetNameSafe(HitComp),
+                //    Hit.Item,
+                //    Hit.Distance,
+                //    FVector::Distance(Hit.ImpactPoint, PlanetCenterWorld),
+                //    TraceAngularOffsetDeg);
             }
             continue;
         }
@@ -2454,22 +2473,22 @@ bool APlanetTessellatedMesh::TryResolveP2_5PieceHeightFromHISM_(
         const bool bResolvedCellId = TryResolveHISMHitToCellId(Hit, HitCellId);
         if (bDebugP2_5HISMPieceHeightTrace)
         {
-            UE_LOG(LogPlanetTess, Warning,
-                TEXT("[Tess][P2.5/P2.6] Cell=%d Hit[%d/%d] HISM Component=%s Item=%d Resolved=%d HitCell=%d WantedCell=%d Distance=%.1f ImpactRadius=%.1f Impact=(%.1f,%.1f,%.1f) TraceOffsetDeg=%.2f"),
-                CellId,
-                HitIndex,
-                Hits.Num(),
-                *GetNameSafe(HitComp),
-                Hit.Item,
-                bResolvedCellId ? 1 : 0,
-                HitCellId,
-                CellId,
-                Hit.Distance,
-                FVector::Distance(Hit.ImpactPoint, PlanetCenterWorld),
-                Hit.ImpactPoint.X,
-                Hit.ImpactPoint.Y,
-                Hit.ImpactPoint.Z,
-                TraceAngularOffsetDeg);
+            //UE_LOG(LogPlanetTess, Warning,
+            //    TEXT("[Tess][P2.5/P2.6] Cell=%d Hit[%d/%d] HISM Component=%s Item=%d Resolved=%d HitCell=%d WantedCell=%d Distance=%.1f ImpactRadius=%.1f Impact=(%.1f,%.1f,%.1f) TraceOffsetDeg=%.2f"),
+            //    CellId,
+            //    HitIndex,
+            //    Hits.Num(),
+            //    *GetNameSafe(HitComp),
+            //    Hit.Item,
+            //    bResolvedCellId ? 1 : 0,
+            //    HitCellId,
+            //    CellId,
+            //    Hit.Distance,
+            //    FVector::Distance(Hit.ImpactPoint, PlanetCenterWorld),
+            //    Hit.ImpactPoint.X,
+            //    Hit.ImpactPoint.Y,
+            //    Hit.ImpactPoint.Z,
+            //    TraceAngularOffsetDeg);
         }
 
         if (bResolvedCellId && HitCellId == CellId)
@@ -2482,17 +2501,17 @@ bool APlanetTessellatedMesh::TryResolveP2_5PieceHeightFromHISM_(
     const FHitResult* SelectedHit = CurrentCellHit ? CurrentCellHit : FirstHISMHit;
     if (!SelectedHit)
     {
-        if (bDebugP2_5HISMPieceHeightTrace)
-        {
-            UE_LOG(LogPlanetTess, Warning,
-                TEXT("[Tess][P2.5/P2.6] Cell=%d NoHISMHit TotalHits=%d HISMHits=%d StartRadius=%.1f EndRadius=%.1f TraceOffsetDeg=%.2f"),
-                CellId,
-                Hits.Num(),
-                HISMHitCount,
-                FVector::Distance(TraceStart, PlanetCenterWorld),
-                FVector::Distance(TraceEnd, PlanetCenterWorld),
-                TraceAngularOffsetDeg);
-        }
+        //if (bDebugP2_5HISMPieceHeightTrace)
+        //{
+        //    UE_LOG(LogPlanetTess, Warning,
+        //        TEXT("[Tess][P2.5/P2.6] Cell=%d NoHISMHit TotalHits=%d HISMHits=%d StartRadius=%.1f EndRadius=%.1f TraceOffsetDeg=%.2f"),
+        //        CellId,
+        //        Hits.Num(),
+        //        HISMHitCount,
+        //        FVector::Distance(TraceStart, PlanetCenterWorld),
+        //        FVector::Distance(TraceEnd, PlanetCenterWorld),
+        //        TraceAngularOffsetDeg);
+        //}
         return false;
     }
 
@@ -2501,18 +2520,18 @@ bool APlanetTessellatedMesh::TryResolveP2_5PieceHeightFromHISM_(
     OutWorldPosition = PlanetCenterWorld + PlacementDirection * FinalRadius;
     if (bDebugP2_5HISMPieceHeightTrace)
     {
-        UE_LOG(LogPlanetTess, Warning,
-            TEXT("[Tess][P2.5/P2.6] Cell=%d UseHit Mode=%s Component=%s Item=%d ImpactRadius=%.1f FinalRadius=%.1f PieceOffset=%.1f TotalHits=%d HISMHits=%d TraceOffsetDeg=%.2f"),
-            CellId,
-            CurrentCellHit ? TEXT("CurrentCell") : TEXT("FirstHISMFallback"),
-            *GetNameSafe(SelectedHit->GetComponent()),
-            SelectedHit->Item,
-            ImpactRadius,
-            FinalRadius,
-            P1PieceRadiusOffsetCM,
-            Hits.Num(),
-            HISMHitCount,
-            TraceAngularOffsetDeg);
+        //UE_LOG(LogPlanetTess, Warning,
+        //    TEXT("[Tess][P2.5/P2.6] Cell=%d UseHit Mode=%s Component=%s Item=%d ImpactRadius=%.1f FinalRadius=%.1f PieceOffset=%.1f TotalHits=%d HISMHits=%d TraceOffsetDeg=%.2f"),
+        //    CellId,
+        //    CurrentCellHit ? TEXT("CurrentCell") : TEXT("FirstHISMFallback"),
+        //    *GetNameSafe(SelectedHit->GetComponent()),
+        //    SelectedHit->Item,
+        //    ImpactRadius,
+        //    FinalRadius,
+        //    P1PieceRadiusOffsetCM,
+        //    Hits.Num(),
+        //    HISMHitCount,
+        //    TraceAngularOffsetDeg);
     }
     return true;
 }
