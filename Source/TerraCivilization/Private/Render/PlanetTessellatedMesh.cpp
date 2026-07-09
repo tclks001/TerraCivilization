@@ -182,6 +182,7 @@ APlanetTessellatedMesh::~APlanetTessellatedMesh()
 {
     if (GameplayContainer.IsValid())
     {
+        FTerraNpcMcpGameplayBridge::UnregisterExecuteValidatedActionDelegate();
         FTerraNpcMcpGameplayBridge::UnregisterGameplayContainer(GameplayContainer.Get());
     }
 
@@ -1532,6 +1533,7 @@ void APlanetTessellatedMesh::RebuildGameplay_()
     {
         if (GameplayContainer.IsValid())
         {
+            FTerraNpcMcpGameplayBridge::UnregisterExecuteValidatedActionDelegate();
             FTerraNpcMcpGameplayBridge::UnregisterGameplayContainer(GameplayContainer.Get());
         }
         GameplayContainer.Reset();
@@ -1552,6 +1554,7 @@ void APlanetTessellatedMesh::RebuildGameplay_()
             NumCells);
         if (GameplayContainer.IsValid())
         {
+            FTerraNpcMcpGameplayBridge::UnregisterExecuteValidatedActionDelegate();
             FTerraNpcMcpGameplayBridge::UnregisterGameplayContainer(GameplayContainer.Get());
         }
         GameplayContainer.Reset();
@@ -1590,12 +1593,18 @@ void APlanetTessellatedMesh::RebuildGameplay_()
 
     if (GameplayContainer.IsValid())
     {
+        FTerraNpcMcpGameplayBridge::UnregisterExecuteValidatedActionDelegate();
         FTerraNpcMcpGameplayBridge::UnregisterGameplayContainer(GameplayContainer.Get());
     }
     GameplayContainer = MakeUnique<FTerraGameplayContainer>();
     GameplayContainer->Initialize(GameplayCells);
     GameplayContainer->SetDebugKeepSameFactionOnEndTurn(bG3DebugKeepSameFactionOnEndTurn);
     FTerraNpcMcpGameplayBridge::RegisterGameplayContainer(GameplayContainer.Get());
+    FTerraNpcMcpGameplayBridge::RegisterExecuteValidatedActionDelegate(
+        [this](int32 ExpectedTurnIndex, int32 ExpectedFactionId, int32 PieceId, int32 ToCellId, FTerraGameplayContainer::FValidatedActionExecutionResult& OutResult)
+        {
+            return TryExecuteNpcMcpValidatedAction_(ExpectedTurnIndex, ExpectedFactionId, PieceId, ToCellId, OutResult);
+        });
 
     G2_5LastHighlightedFactionId = GameplayContainer->GetCurrentFactionId();
     G2_5LastCameraFocusedTurnIndex = INDEX_NONE;
@@ -3457,6 +3466,106 @@ bool APlanetTessellatedMesh::HandleGameplayCellClick_(int32 CellId, const TCHAR*
         P2MoveEvents.Num(),
         P3CaptureEvents.Num());
 
+    return true;
+}
+
+bool APlanetTessellatedMesh::TryExecuteNpcMcpValidatedAction_(int32 ExpectedTurnIndex, int32 ExpectedFactionId, int32 PieceId, int32 ToCellId, FTerraGameplayContainer::FValidatedActionExecutionResult& OutResult)
+{
+    OutResult = FTerraGameplayContainer::FValidatedActionExecutionResult();
+    OutResult.TurnIndexBefore = GameplayContainer.IsValid() ? GameplayContainer->GetTurnIndex() : INDEX_NONE;
+    OutResult.TurnIndexAfter = OutResult.TurnIndexBefore;
+    OutResult.FactionIdBefore = GameplayContainer.IsValid() ? GameplayContainer->GetCurrentFactionId() : INDEX_NONE;
+    OutResult.FactionIdAfter = OutResult.FactionIdBefore;
+    OutResult.PieceId = PieceId;
+    OutResult.ToCellId = ToCellId;
+
+    auto Reject = [this, &OutResult](const TCHAR* Reason) -> bool
+    {
+        OutResult.bAccepted = false;
+        OutResult.bExecuted = false;
+        OutResult.RejectReason = Reason;
+        OutResult.TurnIndexAfter = GameplayContainer.IsValid() ? GameplayContainer->GetTurnIndex() : INDEX_NONE;
+        OutResult.FactionIdAfter = GameplayContainer.IsValid() ? GameplayContainer->GetCurrentFactionId() : INDEX_NONE;
+        return false;
+    };
+
+    if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
+    {
+        return Reject(TEXT("gameplay_unavailable"));
+    }
+    if (GameplayContainer->IsMatchEnded())
+    {
+        return Reject(TEXT("match_ended"));
+    }
+    if (GameplayContainer->GetInteractionPhase() != ETerraGameplayInteractionPhase::Idle)
+    {
+        return Reject(TEXT("not_idle"));
+    }
+    if (GameplayContainer->GetTurnIndex() != ExpectedTurnIndex || GameplayContainer->GetCurrentFactionId() != ExpectedFactionId)
+    {
+        return Reject(TEXT("snapshot_mismatch"));
+    }
+
+    FTerraGameplayContainer::FLegalActionQuery LegalAction;
+    if (!GameplayContainer->IsCurrentFactionLegalAction(PieceId, ToCellId, LegalAction))
+    {
+        return Reject(TEXT("not_current_faction_action"));
+    }
+
+    OutResult.bAccepted = true;
+    OutResult.PieceId = LegalAction.PieceId;
+    OutResult.FromCellId = LegalAction.FromCellId;
+    OutResult.ToCellId = LegalAction.ToCellId;
+    OutResult.bWasJump = LegalAction.bIsJump;
+    OutResult.CaptureEntries = LegalAction.CaptureEntries;
+
+    if (!HandleGameplayCellClick_(LegalAction.FromCellId, TEXT("NPC MCP Select"), INDEX_NONE, TEXT("NpcMcp")))
+    {
+        return Reject(TEXT("select_failed"));
+    }
+    if (GameplayContainer->GetSelectedPieceId() != LegalAction.PieceId)
+    {
+        return Reject(TEXT("select_failed"));
+    }
+
+    if (!HandleGameplayCellClick_(LegalAction.ToCellId, TEXT("NPC MCP Move"), INDEX_NONE, TEXT("NpcMcp")))
+    {
+        TArray<int32> UndoDirtyCellIds;
+        GameplayContainer->UndoCurrentInteraction(UndoDirtyCellIds);
+        RefreshGameplayHighlights_(UndoDirtyCellIds);
+        SyncP1PiecePresentation_();
+        return Reject(TEXT("move_failed"));
+    }
+
+    const ETerraGameplayInteractionPhase PostMovePhase = GameplayContainer->GetInteractionPhase();
+    if (PostMovePhase != ETerraGameplayInteractionPhase::PieceMovedCanEndTurn
+        && PostMovePhase != ETerraGameplayInteractionPhase::PieceJumpingCanContinue)
+    {
+        TArray<int32> UndoDirtyCellIds;
+        GameplayContainer->UndoCurrentInteraction(UndoDirtyCellIds);
+        RefreshGameplayHighlights_(UndoDirtyCellIds);
+        SyncP1PiecePresentation_();
+        return Reject(TEXT("move_failed"));
+    }
+
+    if (!HandleGameplayCellClick_(LegalAction.ToCellId, TEXT("NPC MCP EndTurn"), INDEX_NONE, TEXT("NpcMcp")))
+    {
+        TArray<int32> UndoDirtyCellIds;
+        GameplayContainer->UndoCurrentInteraction(UndoDirtyCellIds);
+        RefreshGameplayHighlights_(UndoDirtyCellIds);
+        SyncP1PiecePresentation_();
+        return Reject(TEXT("end_turn_failed"));
+    }
+
+    if (GameplayContainer->GetInteractionPhase() != ETerraGameplayInteractionPhase::Idle)
+    {
+        return Reject(TEXT("end_turn_failed"));
+    }
+
+    OutResult.bExecuted = true;
+    OutResult.RejectReason.Reset();
+    OutResult.TurnIndexAfter = GameplayContainer->GetTurnIndex();
+    OutResult.FactionIdAfter = GameplayContainer->GetCurrentFactionId();
     return true;
 }
 

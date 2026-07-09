@@ -49,6 +49,28 @@ namespace
         return Schema;
     }
 
+    TSharedPtr<FJsonObject> MakeExecuteActionInputSchema_()
+    {
+        TSharedRef<FJsonObject> Schema = MakeShared<FJsonObject>();
+        Schema->SetStringField(TEXT("type"), TEXT("object"));
+
+        TSharedRef<FJsonObject> Properties = MakeShared<FJsonObject>();
+        AddTypedProperty_(Properties, TEXT("expected_turn_index"), TEXT("integer"));
+        AddTypedProperty_(Properties, TEXT("expected_faction_id"), TEXT("integer"));
+        AddTypedProperty_(Properties, TEXT("piece_id"), TEXT("integer"));
+        AddTypedProperty_(Properties, TEXT("to_cell_id"), TEXT("integer"));
+        Schema->SetObjectField(TEXT("properties"), Properties);
+
+        TArray<TSharedPtr<FJsonValue>> Required;
+        Required.Add(MakeShared<FJsonValueString>(TEXT("expected_turn_index")));
+        Required.Add(MakeShared<FJsonValueString>(TEXT("expected_faction_id")));
+        Required.Add(MakeShared<FJsonValueString>(TEXT("piece_id")));
+        Required.Add(MakeShared<FJsonValueString>(TEXT("to_cell_id")));
+        Schema->SetArrayField(TEXT("required"), Required);
+        Schema->SetBoolField(TEXT("additionalProperties"), false);
+        return Schema;
+    }
+
     TSharedRef<FJsonObject> MakeCaptureObject_(const FTerraGameplayCaptureEntry& CaptureEntry)
     {
         TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
@@ -74,6 +96,38 @@ namespace
             Captures.Add(MakeShared<FJsonValueObject>(MakeCaptureObject_(CaptureEntry)));
         }
         Object->SetArrayField(TEXT("captures"), Captures);
+        return Object;
+    }
+
+    TSharedRef<FJsonObject> MakeExecutionResultObject_(const FTerraGameplayContainer::FValidatedActionExecutionResult& ExecutionResult)
+    {
+        TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
+        Object->SetBoolField(TEXT("accepted"), ExecutionResult.bAccepted);
+        Object->SetBoolField(TEXT("executed"), ExecutionResult.bExecuted);
+        Object->SetStringField(TEXT("reject_reason"), ExecutionResult.RejectReason);
+        Object->SetNumberField(TEXT("turn_index_before"), ExecutionResult.TurnIndexBefore);
+        Object->SetNumberField(TEXT("turn_index_after"), ExecutionResult.TurnIndexAfter);
+        Object->SetNumberField(TEXT("faction_id_before"), ExecutionResult.FactionIdBefore);
+        Object->SetNumberField(TEXT("faction_id_after"), ExecutionResult.FactionIdAfter);
+        Object->SetNumberField(TEXT("piece_id"), ExecutionResult.PieceId);
+        Object->SetNumberField(TEXT("from_cell_id"), ExecutionResult.FromCellId);
+        Object->SetNumberField(TEXT("to_cell_id"), ExecutionResult.ToCellId);
+        Object->SetBoolField(TEXT("was_jump"), ExecutionResult.bWasJump);
+        Object->SetNumberField(TEXT("capture_count"), ExecutionResult.CaptureEntries.Num());
+
+        TArray<TSharedPtr<FJsonValue>> Captures;
+        for (const FTerraGameplayCaptureEntry& CaptureEntry : ExecutionResult.CaptureEntries)
+        {
+            Captures.Add(MakeShared<FJsonValueObject>(MakeCaptureObject_(CaptureEntry)));
+        }
+        Object->SetArrayField(TEXT("captures"), Captures);
+
+        TArray<TSharedPtr<FJsonValue>> DirtyCellIds;
+        for (const int32 DirtyCellId : ExecutionResult.DirtyCellIds)
+        {
+            DirtyCellIds.Add(MakeShared<FJsonValueNumber>(DirtyCellId));
+        }
+        Object->SetArrayField(TEXT("dirty_cell_ids"), DirtyCellIds);
         return Object;
     }
 
@@ -267,6 +321,59 @@ namespace
             return MakeStructuredResult_(Result);
         }
     };
+
+    class FExecuteValidatedActionTool final : public IModelContextProtocolTool
+    {
+    public:
+        virtual FString GetName() const override { return TEXT("terra.execute_validated_action"); }
+        virtual FString GetDescription() const override { return TEXT("Executes a previously validated current-faction action after checking snapshot turn and faction ids."); }
+        virtual TSharedPtr<FJsonObject> GetInputJsonSchema() const override { return MakeExecuteActionInputSchema_(); }
+
+        virtual FModelContextProtocolToolResult Run(const TSharedPtr<FJsonObject>& Params) override
+        {
+            TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+            FTerraGameplayContainer* GameplayContainer = FTerraNpcMcpGameplayBridge::GetMutableGameplayContainer();
+            if (!GameplayContainer || !GameplayContainer->IsInitialized())
+            {
+                AddGameplayUnavailableFields_(Result);
+                return MakeStructuredResult_(Result);
+            }
+
+            int32 ExpectedTurnIndex = INDEX_NONE;
+            int32 ExpectedFactionId = INDEX_NONE;
+            int32 PieceId = INDEX_NONE;
+            int32 ToCellId = INDEX_NONE;
+            if (!Params
+                || !Params->TryGetNumberField(TEXT("expected_turn_index"), ExpectedTurnIndex)
+                || !Params->TryGetNumberField(TEXT("expected_faction_id"), ExpectedFactionId)
+                || !Params->TryGetNumberField(TEXT("piece_id"), PieceId)
+                || !Params->TryGetNumberField(TEXT("to_cell_id"), ToCellId))
+            {
+                Result->SetBoolField(TEXT("ok"), false);
+                Result->SetStringField(TEXT("error"), TEXT("invalid_params"));
+                return MakeStructuredResult_(Result);
+            }
+
+            FTerraGameplayContainer::FValidatedActionExecutionResult ExecutionResult;
+            FTerraNpcMcpGameplayBridge::TryExecuteValidatedAction(ExpectedTurnIndex, ExpectedFactionId, PieceId, ToCellId, ExecutionResult);
+
+            Result->SetBoolField(TEXT("ok"), true);
+            Result->SetObjectField(TEXT("execution"), MakeExecutionResultObject_(ExecutionResult));
+            Result->SetBoolField(TEXT("accepted"), ExecutionResult.bAccepted);
+            Result->SetBoolField(TEXT("executed"), ExecutionResult.bExecuted);
+            Result->SetStringField(TEXT("reject_reason"), ExecutionResult.RejectReason);
+            Result->SetNumberField(TEXT("turn_index_before"), ExecutionResult.TurnIndexBefore);
+            Result->SetNumberField(TEXT("turn_index_after"), ExecutionResult.TurnIndexAfter);
+            Result->SetNumberField(TEXT("faction_id_before"), ExecutionResult.FactionIdBefore);
+            Result->SetNumberField(TEXT("faction_id_after"), ExecutionResult.FactionIdAfter);
+            Result->SetNumberField(TEXT("piece_id"), ExecutionResult.PieceId);
+            Result->SetNumberField(TEXT("from_cell_id"), ExecutionResult.FromCellId);
+            Result->SetNumberField(TEXT("to_cell_id"), ExecutionResult.ToCellId);
+            Result->SetBoolField(TEXT("was_jump"), ExecutionResult.bWasJump);
+            Result->SetNumberField(TEXT("capture_count"), ExecutionResult.CaptureEntries.Num());
+            return MakeStructuredResult_(Result);
+        }
+    };
 }
 
 TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpGetTurnContextTool()
@@ -287,4 +394,9 @@ TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpEvaluateActionRiskTool()
 TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpSubmitActionProposalTool()
 {
     return MakeShared<FSubmitActionProposalTool>();
+}
+
+TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpExecuteValidatedActionTool()
+{
+    return MakeShared<FExecuteValidatedActionTool>();
 }

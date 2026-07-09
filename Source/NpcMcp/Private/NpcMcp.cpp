@@ -13,6 +13,7 @@ TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpGetTurnContextTool();
 TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpListLegalActionsTool();
 TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpEvaluateActionRiskTool();
 TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpSubmitActionProposalTool();
+TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpExecuteValidatedActionTool();
 
 IMPLEMENT_MODULE(FNpcMcpModule, NpcMcp)
 
@@ -49,6 +50,7 @@ void FNpcMcpModule::RegisterTools_()
     RegisteredTools.Add(MakeTerraNpcMcpListLegalActionsTool());
     RegisteredTools.Add(MakeTerraNpcMcpEvaluateActionRiskTool());
     RegisteredTools.Add(MakeTerraNpcMcpSubmitActionProposalTool());
+    RegisteredTools.Add(MakeTerraNpcMcpExecuteValidatedActionTool());
 
     for (const TSharedRef<IModelContextProtocolTool>& Tool : RegisteredTools)
     {

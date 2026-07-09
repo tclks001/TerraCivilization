@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Engine/EngineTypes.h"
 #include "GameFramework/Actor.h"
+#include "TerraGameplayContainer.h"
 #include "TerraPiecePresentationTypes.h"
 #include "Templates/UniquePtr.h"
 #include "WorldGenSettings.h"   // T4：UPROPERTY 直接持有 FWorldGenSettings → 完整类型可见
@@ -21,7 +22,6 @@ class UAnimMontage;
 class FSphereTopology;
 class FMeshDisplacementBuilder;
 class FWorldGenerator;   // T4：TUniquePtr<FWorldGenerator>，避免在头文件 include "WorldGenerator.h"
-class FTerraGameplayContainer;
 class UHierarchicalInstancedStaticMeshComponent;
 class UStaticMesh;
 class USkeletalMesh;
@@ -1066,6 +1066,9 @@ private:
 
     /** SimpleGameplay G2/C5：统一处理 Gameplay Cell 点击及其表现侧后处理。 */
     bool HandleGameplayCellClick_(int32 CellId, const TCHAR* SourceLabel, int32 InstanceIndex, const FString& ComponentName);
+
+    /** SimpleGameplay A3：NPC MCP 执行入口，复用真实点击路径以同步表现层。 */
+    bool TryExecuteNpcMcpValidatedAction_(int32 ExpectedTurnIndex, int32 ExpectedFactionId, int32 PieceId, int32 ToCellId, FTerraGameplayContainer::FValidatedActionExecutionResult& OutResult);
 
     /** SimpleGameplay G2.5：刷新指定阵营所有棋子所在 Cell 的 HISM 高亮。 */
     void RefreshFactionPieceHighlights_(int32 FactionId);
