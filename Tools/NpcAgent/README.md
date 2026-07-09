@@ -47,6 +47,45 @@ node .\src\run-once.js --url http://127.0.0.1:8765/terra-npc-mcp
 
 当前没有策略，也不接 LLM。
 
+## Step B：LLM 只做选择
+
+`run-llm-choice.js` 会继续由脚本调用 MCP tools，但把候选行动交给 LLM 选择。LLM 只返回 `piece_id`、`to_cell_id` 和 `reason`，最终的 `submit_action_proposal` 和 `execute_validated_action` 仍由 Agent 脚本执行。
+
+配置 API key：
+
+```powershell
+$env:TERRA_NPC_LLM_API_KEY="你的 API key"
+```
+
+可选配置：
+
+```powershell
+$env:TERRA_NPC_LLM_MODEL="gpt-4.1-mini"
+$env:TERRA_NPC_LLM_BASE_URL="https://api.openai.com/v1"
+$env:TERRA_NPC_CANDIDATE_LIMIT="5"
+```
+
+运行：
+
+```powershell
+cd C:\workspace\TerraCivilization\Tools\NpcAgent
+npm run run-llm-choice
+```
+
+也可以直接指定参数：
+
+```powershell
+node .\src\run-llm-choice.js --url http://127.0.0.1:8765/terra-npc-mcp --llm-model gpt-4.1-mini --candidate-limit 5
+```
+
+只检查发给 LLM 的 payload、不真正调用模型：
+
+```powershell
+node .\src\run-llm-choice.js --dry-run-llm
+```
+
+如果 LLM 调用失败、返回非法 JSON，或者选择了候选列表外的行动，脚本会 fallback 到确定性策略。
+
 ## 常见问题
 
 如果连接失败，检查 UE 是否带了：

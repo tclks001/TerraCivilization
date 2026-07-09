@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "run-once": "node src/run-once.js"
+    "run-once": "node src/run-once.js",
+    "run-llm-choice": "node src/run-llm-choice.js"
   },
   "engines": {
     "node": ">=18"

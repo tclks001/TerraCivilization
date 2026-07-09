@@ -135,6 +135,171 @@ Agent 要记录最近处理过的回合，避免重复执行：
 
 如果下一次 `get_turn_context` 返回同样的 `(turn_index, current_faction_id)`，不要重复执行。
 
+### 当前 `run-once.js` 是怎么工作的
+
+当前已实现的脚本位于：
+
+```text
+Tools/NpcAgent/src/run-once.js
+```
+
+它不是 AI，也没有策略。它只是把你在 MCP Inspector 里手动点工具的流程自动化。
+
+可以把它理解成一个很小的机器人：
+
+```text
+1. 找到 UE MCP server 地址。
+2. 和 UE MCP server 建立 MCP session。
+3. 确认可用工具存在。
+4. 读取当前回合。
+5. 读取当前合法行动列表。
+6. 取第一个合法行动。
+7. 先 submit proposal 校验。
+8. 再 execute validated action 执行。
+9. 打印执行结果。
+```
+
+源码里的主要部分：
+
+```text
+parseArgs
+```
+
+读取命令行参数，例如：
+
+```text
+--url http://127.0.0.1:8765/terra-npc-mcp
+```
+
+如果不传，默认使用：
+
+```text
+http://127.0.0.1:8765/terra-npc-mcp
+```
+
+```text
+McpHttpClient
+```
+
+这是脚本里的 MCP client。它负责：
+
+- `initialize()`：向 UE MCP server 发 `initialize`。
+- 保存 UE 返回的 `Mcp-Session-Id`。
+- 发送 `notifications/initialized`。
+- `listTools()`：调用 `tools/list`。
+- `callTool(name, args)`：调用 `tools/call`。
+
+UE 5.8 的 MCP server 在 `tools/call` 时可能返回 Streamable HTTP/SSE 格式：
+
+```text
+event: message
+data: {...}
+```
+
+所以脚本里有：
+
+```text
+parseJsonResponse
+parseSseJsonResponse
+```
+
+它们负责把 UE 返回的普通 JSON 或 SSE JSON 解出来。这个逻辑等价于 Inspector 帮你做的“解析 MCP 响应”。
+
+```text
+chooseFirstLegalAction
+```
+
+这是当前唯一的“决策”。
+
+它不评分、不思考、不调用 LLM，只做：
+
+```text
+return actions[0]
+```
+
+也就是取 `terra.list_legal_actions` 返回的第一个合法行动。
+
+```text
+main
+```
+
+这是主流程。它依次执行：
+
+```text
+initialize
+tools/list
+terra.get_turn_context
+terra.list_legal_actions
+chooseFirstLegalAction
+terra.submit_action_proposal
+terra.execute_validated_action
+```
+
+所以当前 Agent 的本质是：
+
+```text
+Inspector 手动流程的脚本版
+```
+
+### 后续如何扩展到 LLM
+
+后续接 LLM 时，不需要推翻这个脚本。
+
+只需要替换这一段：
+
+```text
+chooseFirstLegalAction(actionsResult)
+```
+
+现在它是：
+
+```text
+取 actions[0]
+```
+
+方案 B 会把它替换成：
+
+```text
+1. 从 actions 里取前几个候选。
+2. 对候选调用 terra.evaluate_action_risk。
+3. 把候选行动和风险结果整理成 JSON。
+4. 发给 LLM。
+5. LLM 返回 piece_id 和 to_cell_id。
+6. 脚本继续 submit proposal 和 execute。
+```
+
+也就是说，LLM 只替换“选择哪个 action”这一小块。
+
+脚本中这些部分仍然保留：
+
+- MCP 连接。
+- session 初始化。
+- tools/list。
+- submit proposal。
+- execute validated action。
+- 错误处理。
+- 后续 decision log。
+
+推荐的演进方式：
+
+```text
+当前版本:
+  action = actions[0]
+
+方案 B:
+  action = await chooseActionWithLlm(actions, risks)
+
+方案 C:
+  LLM 可以自己调用 get_turn_context/list_legal_actions/evaluate_action_risk/submit_action_proposal
+  但 execute_validated_action 仍由脚本最终调用
+```
+
+这样做的好处是：
+
+- MCP 连接层只写一次。
+- UE 执行边界不变。
+- LLM 输出非法时，脚本还能 fallback。
+- 以后换模型，只改 `llmPolicy`，不改 UE。
 ### Step 0 验收
 
 1. UE 启动 MCP server。
@@ -303,6 +468,269 @@ else:
 5. `execute_validated_action.executed=true`。
 6. UE 中棋子移动，回合推进。
 7. 如果 LLM 返回非法 action，fallback 仍能执行。
+
+### 本项目 Step B 已实现脚本
+
+当前 Step B 脚本位于：
+
+```text
+Tools/NpcAgent/src/run-llm-choice.js
+```
+
+它和 Step 0 的 `run-once.js` 使用同一套 MCP HTTP 连接方式：
+
+```text
+initialize
+notifications/initialized
+tools/list
+tools/call
+```
+
+区别是 `run-once.js` 直接取 `actions[0]`，而 `run-llm-choice.js` 会：
+
+```text
+1. 调 terra.get_turn_context。
+2. 调 terra.list_legal_actions。
+3. 从合法行动里挑出前 N 个候选，默认 N=5。
+4. 对每个候选调 terra.evaluate_action_risk。
+5. 把候选行动和风险信息整理成 JSON。
+6. 调 OpenAI-compatible Chat Completions 接口。
+7. 要求 LLM 只返回 JSON：piece_id、to_cell_id、reason。
+8. 检查 LLM 返回的行动是否存在于 candidate_actions。
+9. 调 terra.submit_action_proposal 做 Gameplay 校验。
+10. 校验通过后调 terra.execute_validated_action 执行。
+11. 如果 LLM 失败或返回非法行动，fallback 到确定性策略。
+```
+
+这里的“OpenAI-compatible”意思是：脚本调用的是这种 HTTP 接口：
+
+```text
+POST {base_url}/chat/completions
+Authorization: Bearer {api_key}
+```
+
+默认配置是：
+
+```text
+base_url = https://api.openai.com/v1
+model = gpt-4.1-mini
+candidate_limit = 5
+```
+
+如果以后使用本地模型或其他服务，只要它兼容 `/chat/completions`，通常只需要改 `TERRA_NPC_LLM_BASE_URL` 和 `TERRA_NPC_LLM_MODEL`。
+
+### Step B 具体操作步骤
+
+#### 1. 启动 UE MCP server
+
+启动 UE 时带上：
+
+```text
+-TerraNpcMcpStartServer -TerraNpcMcpPort=8765 -TerraNpcMcpPath=/terra-npc-mcp
+```
+
+确认 MCP endpoint 仍然是：
+
+```text
+http://127.0.0.1:8765/terra-npc-mcp
+```
+
+建议先用 Inspector 或 Step 0 脚本确认 MCP 已经跑通：
+
+```powershell
+cd C:\workspace\TerraCivilization\Tools\NpcAgent
+npm run run-once
+```
+
+Step 0 能执行成功后，再开始 Step B。这样如果 Step B 出问题，基本可以判断问题在 LLM 配置或 LLM 输出，而不是 UE MCP。
+
+#### 2. 配置 LLM API key
+
+在当前 PowerShell 窗口中设置：
+
+```powershell
+$env:TERRA_NPC_LLM_API_KEY="你的 API key"
+```
+
+也可以使用通用环境变量：
+
+```powershell
+$env:OPENAI_API_KEY="你的 API key"
+```
+
+脚本优先读取 `TERRA_NPC_LLM_API_KEY`，如果没有再读取 `OPENAI_API_KEY`。
+
+#### 3. 可选配置模型和服务地址
+
+默认使用：
+
+```powershell
+$env:TERRA_NPC_LLM_BASE_URL="https://api.openai.com/v1"
+$env:TERRA_NPC_LLM_MODEL="gpt-4.1-mini"
+$env:TERRA_NPC_CANDIDATE_LIMIT="5"
+```
+
+如果你使用其他兼容服务，例如本地网关，可以改成：
+
+```powershell
+$env:TERRA_NPC_LLM_BASE_URL="http://127.0.0.1:11434/v1"
+$env:TERRA_NPC_LLM_MODEL="你的模型名"
+```
+
+注意：服务必须兼容 Chat Completions，并且支持普通的 `messages` 输入。脚本会请求 `response_format: { "type": "json_object" }`，如果某个兼容服务不支持这个字段，后续需要在脚本里为该服务加一个开关。
+
+#### 4. 先 dry-run 检查发给 LLM 的输入
+
+dry-run 会连接 UE MCP、读取局势、读取合法行动、评估候选风险，然后打印即将发送给 LLM 的 payload，但不会真正调用 LLM，也不会执行行动：
+
+```powershell
+cd C:\workspace\TerraCivilization\Tools\NpcAgent
+node .\src\run-llm-choice.js --dry-run-llm
+```
+
+你应该能看到类似结构：
+
+```json
+{
+  "endpoint": "https://api.openai.com/v1/chat/completions",
+  "body": {
+    "model": "gpt-4.1-mini",
+    "temperature": 0.2,
+    "response_format": {
+      "type": "json_object"
+    },
+    "messages": [
+      {
+        "role": "system",
+        "content": "..."
+      },
+      {
+        "role": "user",
+        "content": "{\"task\":\"choose_one_legal_action\",...}"
+      }
+    ]
+  }
+}
+```
+
+如果 dry-run 失败，优先看：
+
+```text
+1. UE 是否真的带参数启动了 MCP server。
+2. MCP URL 是否正确。
+3. 当前是否有合法行动。
+4. terra.evaluate_action_risk 是否在 tools/list 中存在。
+```
+
+#### 5. 正式运行 Step B
+
+使用 npm script：
+
+```powershell
+cd C:\workspace\TerraCivilization\Tools\NpcAgent
+npm run run-llm-choice
+```
+
+或者直接运行：
+
+```powershell
+node .\src\run-llm-choice.js --url http://127.0.0.1:8765/terra-npc-mcp --llm-model gpt-4.1-mini --candidate-limit 5
+```
+
+正常输出会包含：
+
+```text
+[Agent] Connecting to MCP: ...
+[Agent] MCP initialized. ...
+[Agent] Tools OK: ...
+[Agent] Turn=... Faction=... Phase=...
+[Agent] Legal actions=...
+[Agent] Candidate actions:
+[Agent] LLM choice:
+[Agent] Proposal accepted. Fallback=false
+[Agent] Execution result:
+```
+
+其中 `LLM choice` 应该是：
+
+```json
+{
+  "piece_id": 31,
+  "to_cell_id": 428,
+  "reason": "..."
+}
+```
+
+#### 6. 观察 UE 侧结果
+
+运行成功后，UE 中应该发生和 Inspector 手动执行 `terra.execute_validated_action` 一样的事情：
+
+```text
+1. 当前阵营的一个棋子被选中。
+2. 棋子通过真实点击路径移动。
+3. Gameplay 逻辑推进。
+4. 表现层同步更新。
+5. 回合进入下一阶段或下一个阵营。
+```
+
+如果 Agent 输出 `executed=true`，但 UE 表现层没有更新，优先回到 A3 C++ 侧检查 `terra.execute_validated_action` 是否仍然走 `APlanetTessellatedMesh` 的真实点击路径。
+
+#### 7. 理解 fallback
+
+Step B 的 fallback 是 Agent 自己做的，不依赖 LLM。
+
+以下情况会触发 fallback：
+
+```text
+1. 没有配置 API key。
+2. LLM HTTP 请求失败。
+3. LLM 返回的不是 JSON。
+4. LLM 返回的 piece_id/to_cell_id 不是整数。
+5. LLM 选择了 candidate_actions 之外的行动。
+6. LLM 选择的行动被 submit_action_proposal 拒绝。
+```
+
+fallback 策略是：
+
+```text
+1. 优先 capture_count 最大。
+2. 并列时优先 is_jump=false。
+3. 仍并列时按 piece_id、to_cell_id 排序。
+```
+
+所以即使 LLM 不可用，脚本也应该尽量执行一个合法行动。日志中会显示：
+
+```text
+[Agent] LLM choice failed. Fallback to piece_id=... to_cell_id=...
+[Agent] Fallback reason: ...
+[Agent] Proposal accepted. Fallback=true
+```
+
+#### 8. Step B 当前边界
+
+当前 Step B 不是完整的“LLM 自主 MCP Agent”。
+
+LLM 看不到完整 MCP tools，也不能自己调用 tools。它只看到 Agent 整理后的候选 JSON，并且只负责选择一个候选行动。
+
+这个边界是有意保留的：
+
+```text
+LLM:
+  只做选择。
+
+Agent:
+  连接 MCP。
+  查询 tools。
+  调确定性 Gameplay tools。
+  校验 LLM 输出。
+  执行 fallback。
+  调 execute_validated_action。
+
+UE:
+  仍然是规则和执行权威。
+```
+
+后续 Step C 才会让 LLM 使用 MCP tool calling，但仍建议把 `terra.execute_validated_action` 留作 Agent-only 工具。
 
 ## Step C：LLM 使用 MCP Tool Calling
 
@@ -559,3 +987,4 @@ fallback 必须不依赖 LLM。
 ```
 
 不要跳过第 2 步。它能把 MCP 连接、工具调用、执行和日志先打通，后面接 LLM 时问题会少很多。
+
