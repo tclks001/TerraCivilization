@@ -1,0 +1,12 @@
+{
+  "name": "terra-npc-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "run-once": "node src/run-once.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

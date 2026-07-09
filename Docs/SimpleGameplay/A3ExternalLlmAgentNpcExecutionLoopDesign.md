@@ -628,3 +628,17 @@ A3 不做：
 5. 文档化 Inspector 和脚本验收步骤。
 
 LLM 接入可以作为 A3 的第二小步，但设计上先把接口留好。
+
+## 附录：LLM Agent 与 MCP 连接操作手册
+
+外部 LLM Agent 的实际接入步骤单独整理在：
+
+- `Docs/SimpleGameplay/A3LlmAgentMcpConnectionGuide.md`
+
+该手册重点说明：
+
+- Agent 和 MCP 的关系。
+- 为什么先做无 LLM 的 deterministic Agent。
+- 方案 B：LLM 只做行动选择，Agent 负责 MCP 调用和执行。
+- 方案 C：LLM 使用 MCP tool calling，Agent 负责工具白名单、执行确认、fallback 和日志。
+- Timeout、fallback、decision log 和验收步骤。
