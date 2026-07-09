@@ -941,6 +941,7 @@ public:
     // 生命周期
     //----------------------------------------------------------
     virtual void OnConstruction(const FTransform& Transform) override;
+    virtual void BeginPlay() override;
     virtual void Tick(float DeltaSeconds) override;
 
 #if WITH_EDITOR

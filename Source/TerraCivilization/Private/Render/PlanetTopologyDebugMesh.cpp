@@ -124,7 +124,9 @@ APlanetTopologyDebugMesh::APlanetTopologyDebugMesh()
     PrimaryActorTick.bCanEverTick = false;
 
     // 让 Construction Script 在编辑器内移动 Actor 时也跑：保证编辑器中位置变化能及时刷新 mesh 朝向。
+#if WITH_EDITORONLY_DATA
     bRunConstructionScriptOnDrag = true;
+#endif
 
     MeshComp = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("MeshComp"));
     SetRootComponent(MeshComp);
@@ -971,7 +973,9 @@ void APlanetTopologyDebugMesh::RebuildCellAttrLUT_(int32 NumCells)
     // Filter 默认 Nearest、强制 SRGB=false、强制 NoMipmaps、强制不压缩。
     // 比 Pixels2D 更严格、更可靠（Pixels2D 在 cooked 平台上可能被 ini 覆写成 Bilinear）。
     NewLUT->LODGroup      = TEXTUREGROUP_ColorLookupTable;
+#if WITH_EDITORONLY_DATA
     NewLUT->MipGenSettings = TMGS_NoMipmaps;
+#endif
 
     // 锁 Mip0 写数据。BGRA8 每像素 4 字节。
     FTexturePlatformData* Plat = NewLUT->GetPlatformData();
@@ -1235,7 +1239,9 @@ void APlanetTopologyDebugMesh::RebuildCellDirLUT_(int32 NumCells)
     NewLUT->AddressY      = TA_Clamp;
     NewLUT->NeverStream   = true;
     NewLUT->CompressionSettings = TC_HDR;        // FP32 RGBA，不压缩
+#if WITH_EDITORONLY_DATA
     NewLUT->MipGenSettings      = TMGS_NoMipmaps;
+#endif
 
     FTexturePlatformData* Plat = NewLUT->GetPlatformData();
     if (!Plat || Plat->Mips.Num() == 0)
@@ -1354,7 +1360,9 @@ static UTexture2D* R8_CreateFloatRGBALUT(int32 NumCells, const TCHAR* DebugName)
     NewLUT->NeverStream   = true;
     NewLUT->CompressionSettings = TC_HDR;
     NewLUT->LODGroup      = TEXTUREGROUP_ColorLookupTable;
+#if WITH_EDITORONLY_DATA
     NewLUT->MipGenSettings = TMGS_NoMipmaps;
+#endif
     return NewLUT;
 }
 

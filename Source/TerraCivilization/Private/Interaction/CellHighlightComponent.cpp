@@ -112,7 +112,9 @@ bool UCellHighlightComponent::EnsureLUTCreated_(int32& OutNumCells)
     NewLUT->AddressY      = TA_Clamp;
     NewLUT->NeverStream   = true;
     NewLUT->LODGroup      = TEXTUREGROUP_ColorLookupTable;
+#if WITH_EDITORONLY_DATA
     NewLUT->MipGenSettings = TMGS_NoMipmaps;
+#endif
     NewLUT->CompressionSettings = TC_VectorDisplacementmap;
 
     // 全 0 初始：所有 cell 都未 hover、未 select。直接通过 mip 0 BulkData 写入。

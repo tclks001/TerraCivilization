@@ -704,6 +704,7 @@ protected:
 | 4 | D15 `OnPostWorldCleanup_` 在 BeginDestroy 没解绑 → 编辑器关闭崩溃 | TerraCivilization 之前发生过同款崩溃（[AgentWorkflow.md §3.9](AgentWorkflow.md)）| BeginDestroy override 中**只调** `FWorldDelegates::OnPostWorldCleanup.RemoveAll(this)`，**绝不 Reset TUniquePtr 字段** |
 | 5 | sub=3 的 R8 actor 视觉对照（T3-F）失败：T3 球皮颜色与 R8 完全不同 | UV1/UV2 的 cell ID 编码 Hi/Lo 算反了 / dot 权重未归一化 | T2 自检已覆盖 dot 权重 sum=1；T3 需补"Hi*256 + Lo == CellId" 的 cpp 端断言（在 RebuildTerrainMesh_ 末尾随机抽 10 个顶点验证） |
 | 6 | `R8RecipeTable.h` 抽出后 R8 actor 的 `R8_PlaceholderRecipeIndex` 重定义 | R8 actor cpp 内还保留旧 file-static 实现 | T3 落地时**同步删除** R8 actor cpp 内的 file-static 定义，统一 include `R8RecipeTable.h`；这是对 R8 actor 的一次小手术——已在 §11 风险登记 |
+| 7 | 打包后运行关卡只看到 `PlanetTessellatedMesh`，没有棋子 Actor；PIE 正常 | `CellTopology` / `MeshTopology` / `Generator` / `GameplayContainer` 都是纯 C++ `TUniquePtr` 运行态，不会随 cooked map 序列化；旧实现只依赖 Editor/PIE 的 `OnConstruction` 建好这些状态，GameWorld 启动时可能为 null，导致 Gameplay 未初始化、棋子表现层拿不到 snapshot | `APlanetTessellatedMesh::BeginPlay` 在 `World->IsGameWorld()` 下检测拓扑、生成器、Gameplay 容器是否缺失或未初始化；缺失时调用 `RebuildAll_()`，让打包运行时重新建立双拓扑、WorldGen、GameplayContainer 与棋子表现同步 |
 
 ---
 

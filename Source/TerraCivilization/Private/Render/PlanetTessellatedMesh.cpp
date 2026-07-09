@@ -103,6 +103,7 @@ namespace
         OutMasks.Add(MakeP7Mask(ETerraGameplayPieceType::Cavalry, 1, 0, 1, 1));
         OutMasks.Add(MakeP7Mask(ETerraGameplayPieceType::Archer, 1, 0, 1, 6));
     }
+
 }
 
 // ===================================================================
@@ -114,7 +115,9 @@ APlanetTessellatedMesh::APlanetTessellatedMesh()
     // 与 APlanetTopologyDebugMesh 一致：在编辑器中拖动属性即时刷新；Tick 仅在 HISM hover 防抖启用时打开。
     PrimaryActorTick.bCanEverTick = true;
     PrimaryActorTick.bStartWithTickEnabled = true;
+#if WITH_EDITORONLY_DATA
     bRunConstructionScriptOnDrag = true;
+#endif
 
     USceneComponent* RootScene = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
     SetRootComponent(RootScene);
@@ -205,6 +208,22 @@ void APlanetTessellatedMesh::OnConstruction(const FTransform& Transform)
 {
     Super::OnConstruction(Transform);
     RebuildAll_();
+}
+
+void APlanetTessellatedMesh::BeginPlay()
+{
+    Super::BeginPlay();
+
+    const UWorld* World = GetWorld();
+    if (World && World->IsGameWorld()
+        && (!CellTopology.IsValid()
+            || !MeshTopology.IsValid()
+            || !Generator.IsValid()
+            || !GameplayContainer.IsValid()
+            || !GameplayContainer->IsInitialized()))
+    {
+        RebuildAll_();
+    }
 }
 
 void APlanetTessellatedMesh::Tick(float DeltaSeconds)
@@ -554,7 +573,9 @@ void APlanetTessellatedMesh::RebuildCellAttrLUT_(int32 NumCells)
     NewLUT->CompressionSettings = TC_VectorDisplacementmap;
     NewLUT->NeverStream   = true;
     NewLUT->LODGroup      = TEXTUREGROUP_ColorLookupTable;
+#if WITH_EDITORONLY_DATA
     NewLUT->MipGenSettings = TMGS_NoMipmaps;
+#endif
 
     FTexturePlatformData* Plat = NewLUT->GetPlatformData();
     if (!Plat || Plat->Mips.Num() == 0)
@@ -624,7 +645,9 @@ void APlanetTessellatedMesh::RebuildCellDirLUT_(int32 NumCells)
     NewLUT->AddressY      = TA_Clamp;
     NewLUT->NeverStream   = true;
     NewLUT->CompressionSettings = TC_HDR;
+#if WITH_EDITORONLY_DATA
     NewLUT->MipGenSettings      = TMGS_NoMipmaps;
+#endif
 
     FTexturePlatformData* Plat = NewLUT->GetPlatformData();
     if (!Plat || Plat->Mips.Num() == 0)
@@ -675,7 +698,9 @@ namespace
         NewLUT->NeverStream   = true;
         NewLUT->CompressionSettings = TC_HDR;
         NewLUT->LODGroup      = TEXTUREGROUP_ColorLookupTable;
+#if WITH_EDITORONLY_DATA
         NewLUT->MipGenSettings = TMGS_NoMipmaps;
+#endif
         return NewLUT;
     }
 }

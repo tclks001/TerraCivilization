@@ -869,10 +869,45 @@ void AMyActor::OnPostWorldCleanup_(UWorld* World, bool bSessionEnded, bool bClea
 >
 > **必须**注册 `FWorldDelegates::OnPostWorldCleanup` 兜底回调，按 §3.11.3 模板实现 4 个防御 + Rebuild 调用，确保 PIE 退出后 Editor 视觉一致。
 >
-> 如果 Actor 同时还运行在 PIE/Game 中（实际游戏 Actor），还要在 `BeginPlay` 中再触发一次 Rebuild ——但这是另一个话题（运行时材质刷新），与本节排坑无关。
+> 如果 Actor 同时还运行在 PIE/Game 中（实际游戏 Actor），还要在 `BeginPlay` 中再触发一次 Rebuild 或做运行态缺失检测。详见 §3.11.7。
 >
 > 项目内已落地的样板：
 > - [APlanetTopologyDebugMesh::OnPostWorldCleanup_](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp)（本节复盘对象，R8 主 mesh + 水面层）
+
+#### 3.11.7 Packaged GameWorld 必须重建纯 C++ 运行态（TessellatedMesh 棋子缺失踩坑）
+
+##### 现象
+
+`BP_PlanetTessellatedMesh` 在 PIE 中正常，打包 Development 后进入 `TessellatedMeshTestMap` 只剩一个 `PlanetTessellatedMesh`，没有任何棋子 Actor。
+
+临时诊断日志显示：
+
+```text
+[Tess][PackageDiag] BeginPlay ... IsGameWorld=1 CellTopology=0 MeshTopology=0 Generator=0 GameplayValid=0 GameplayInitialized=0 PresentedPieces=0
+```
+
+##### 根因
+
+`APlanetTessellatedMesh` 的 `CellTopology` / `MeshTopology` / `Generator` / `GameplayContainer` 都是纯 C++ `TUniquePtr` 运行态对象，不会序列化进 cooked map。旧实现主要依赖 `OnConstruction -> RebuildAll_()` 在 Editor/PIE 路径中把这些状态建好；打包 GameWorld 启动时这些指针可能为空，于是 `RebuildGameplay_()` 没有有效依赖，`UTerraPiecePresentationManager` 收不到棋子 snapshot，自然不会 spawn 棋子 Actor。
+
+##### 修复
+
+`APlanetTessellatedMesh::BeginPlay` 必须在 `World->IsGameWorld()` 下检查运行态是否缺失：
+
+- `CellTopology` / `MeshTopology` / `Generator` 任一无效
+- `GameplayContainer` 无效或未初始化
+
+命中后直接调用 `RebuildAll_()`，让打包运行时重新建立双拓扑、WorldGen、Gameplay 容器，并继续走 `SyncP1PiecePresentation_()` 生成棋子 Actor。
+
+##### 通用规则
+
+凡 `OnConstruction` 中填充的对象满足以下任一条件，都不能假设它会存在于 cooked GameWorld：
+
+- `TUniquePtr` / 普通 C++ 容器持有的拓扑、生成器、查询结构、规则容器
+- `CreateTransient` / `NewObject` / `UMaterialInstanceDynamic::Create` 得到的运行态资源
+- 依赖 Editor construction 路径派生出来、但没有直接序列化到 `.umap` 的表现层缓存
+
+这类 Actor 如果会进入实际游戏，必须在 `BeginPlay` 做 GameWorld 运行态重建或缺失检测。以后遇到“PIE 正常、打包后缺对象 / 缺材质 / 缺缓存”的问题，第一步先在 `BeginPlay` 打印这些运行态指针是否有效，而不是先怀疑资产 cook。
 
 ---
 
