@@ -37,6 +37,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 #include "Animation/AnimationAsset.h"
 #include "GameFramework/PlayerController.h"
 #include "Camera/PlayerCameraManager.h"
@@ -234,8 +235,24 @@ void APlanetTessellatedMesh::Tick(float DeltaSeconds)
         && GameplayContainer->IsInitialized()
         && G2_5LastCameraFocusedTurnIndex != GameplayContainer->GetTurnIndex())
     {
-        FocusCameraOnCurrentFactionBase_();
-        G2_5LastCameraFocusedTurnIndex = GameplayContainer->GetTurnIndex();
+        if (!GetWorld()->GetTimerManager().IsTimerActive(C6_5DelayedTurnStartFocusTimerHandle))
+        {
+            UE_LOG(LogPlanetTess, Log,
+                TEXT("[Tess][C6.5] Tick fallback turn focus is not delayed. LastFocusedTurn=%d CurrentTurn=%d CurrentFaction=%d"),
+                G2_5LastCameraFocusedTurnIndex,
+                GameplayContainer->GetTurnIndex(),
+                GameplayContainer->GetCurrentFactionId());
+            FocusCameraOnCurrentFactionBase_();
+            G2_5LastCameraFocusedTurnIndex = GameplayContainer->GetTurnIndex();
+        }
+        else
+        {
+            UE_LOG(LogPlanetTess, Verbose,
+                TEXT("[Tess][C6.5] Tick fallback turn focus suppressed by active delay timer. LastFocusedTurn=%d CurrentTurn=%d CurrentFaction=%d"),
+                G2_5LastCameraFocusedTurnIndex,
+                GameplayContainer->GetTurnIndex(),
+                GameplayContainer->GetCurrentFactionId());
+        }
     }
 
     DrawG1DebugPieces_();
@@ -1529,6 +1546,11 @@ void APlanetTessellatedMesh::WriteHISMHighlightForCell_(int32 CellId, bool bMark
 
 void APlanetTessellatedMesh::RebuildGameplay_()
 {
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(C6_5DelayedTurnStartFocusTimerHandle);
+    }
+
     if (!CellTopology.IsValid() || !Generator.IsValid())
     {
         if (GameplayContainer.IsValid())
@@ -1892,6 +1914,262 @@ void APlanetTessellatedMesh::RequestC6ActionCameraTrackingForMoveEvents_(const T
                 BlendSeconds);
         }
     }
+}
+
+float APlanetTessellatedMesh::GetC6_5AnimationLengthSeconds_(UAnimationAsset* AnimationAsset, float FallbackSeconds) const
+{
+    return AnimationAsset
+        ? FMath::Max(AnimationAsset->GetPlayLength(), 0.001f)
+        : FMath::Max(FallbackSeconds, 0.001f);
+}
+
+float APlanetTessellatedMesh::GetC6_5AttackAnimationDurationSeconds_(
+    ETerraGameplayPieceType PieceType,
+    UAnimationAsset* AttackAnimation,
+    float FallbackSeconds) const
+{
+    if (PieceType == ETerraGameplayPieceType::Commander)
+    {
+        return FMath::Max(P35CommanderAttackDurationSeconds, 0.001f)
+            / FMath::Max(P35CommanderAttackPlayRateScale, 0.001f);
+    }
+
+    if (PieceType == ETerraGameplayPieceType::Archer)
+    {
+        return FMath::Max(P35ArcherAttackDurationSeconds, 0.001f)
+            / FMath::Max(P35ArcherAttackPlayRateScale, 0.001f);
+    }
+
+    return P3AttackAnimationStartOffsetSeconds
+        + GetC6_5AnimationLengthSeconds_(AttackAnimation, FallbackSeconds);
+}
+
+float APlanetTessellatedMesh::GetC6_5ActionPresentationDelaySeconds_(
+    const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents,
+    const TArray<FTerraPiecePresentationCaptureEvent>& CaptureEvents) const
+{
+    float MoveSeconds = 0.0f;
+    int32 ValidMoveEventCount = 0;
+    for (const FTerraPiecePresentationMoveEvent& MoveEvent : MoveEvents)
+    {
+        if (MoveEvent.IsValidMove())
+        {
+            ++ValidMoveEventCount;
+            MoveSeconds = FMath::Max(MoveSeconds, GetC6ActionCameraBlendSeconds_(MoveEvent.MoveType));
+            UE_LOG(LogPlanetTess, Log,
+                TEXT("[Tess][C6.5] Delay estimate includes move. Piece=%d FromCell=%d ToCell=%d MoveType=%d MoveSecondsNow=%.3f"),
+                MoveEvent.PieceId,
+                MoveEvent.FromCellId,
+                MoveEvent.ToCellId,
+                static_cast<int32>(MoveEvent.MoveType),
+                MoveSeconds);
+        }
+        else
+        {
+            UE_LOG(LogPlanetTess, Log,
+                TEXT("[Tess][C6.5] Delay estimate ignores invalid move event. Piece=%d FromCell=%d ToCell=%d MoveType=%d"),
+                MoveEvent.PieceId,
+                MoveEvent.FromCellId,
+                MoveEvent.ToCellId,
+                static_cast<int32>(MoveEvent.MoveType));
+        }
+    }
+
+    float CaptureSeconds = 0.0f;
+    int32 ValidCaptureEventCount = 0;
+    const FTerraPieceVisualConfig VisualConfig = BuildP1PieceVisualConfig_();
+    for (const FTerraPiecePresentationCaptureEvent& CaptureEvent : CaptureEvents)
+    {
+        if (!CaptureEvent.IsValidCapture())
+        {
+            UE_LOG(LogPlanetTess, Log,
+                TEXT("[Tess][C6.5] Delay estimate ignores invalid capture event. Captured=%d Attacker=%d Vanguard=%d"),
+                CaptureEvent.Captured.PieceId,
+                CaptureEvent.Attacker.PieceId,
+                CaptureEvent.Vanguard.PieceId);
+            continue;
+        }
+        ++ValidCaptureEventCount;
+
+        float MaxAttackToHitSeconds = FMath::Max(P3HitReactDelaySeconds, 0.0f);
+        auto IncludeAttackToHit = [&VisualConfig, &MaxAttackToHitSeconds](const FTerraPiecePresentationCaptureParticipant& Participant)
+        {
+            if (Participant.IsValid())
+            {
+                MaxAttackToHitSeconds = FMath::Max(
+                    MaxAttackToHitSeconds,
+                    FMath::Max(VisualConfig.ResolveAttackToHitSeconds(Participant.PieceType), 0.0f));
+            }
+        };
+        IncludeAttackToHit(CaptureEvent.Attacker);
+        if (CaptureEvent.Vanguard.PieceId != CaptureEvent.Attacker.PieceId)
+        {
+            IncludeAttackToHit(CaptureEvent.Vanguard);
+        }
+
+        float AttackStepSeconds = 0.0f;
+        auto IncludeAttackLength = [this, &VisualConfig, MaxAttackToHitSeconds, &AttackStepSeconds](const FTerraPiecePresentationCaptureParticipant& Participant)
+        {
+            if (!Participant.IsValid())
+            {
+                return;
+            }
+
+            const float AttackToHitSeconds = FMath::Max(VisualConfig.ResolveAttackToHitSeconds(Participant.PieceType), 0.0f);
+            const float AttackStartDelaySeconds = FMath::Max(MaxAttackToHitSeconds - AttackToHitSeconds, 0.0f);
+            UAnimationAsset* AttackAnimation = VisualConfig.ResolveAttackAnimation(Participant.PieceType);
+            AttackStepSeconds = FMath::Max(
+                AttackStepSeconds,
+                AttackStartDelaySeconds
+                    + GetC6_5AttackAnimationDurationSeconds_(Participant.PieceType, AttackAnimation, 0.5f));
+        };
+
+        IncludeAttackLength(CaptureEvent.Attacker);
+        if (CaptureEvent.Vanguard.PieceId != CaptureEvent.Attacker.PieceId)
+        {
+            IncludeAttackLength(CaptureEvent.Vanguard);
+        }
+
+        const float HitSeconds = MaxAttackToHitSeconds
+            + P3HitAnimationStartOffsetSeconds
+            + GetC6_5AnimationLengthSeconds_(P3HitAnimation, 0.35f);
+        const float DeathSeconds = MaxAttackToHitSeconds
+            + P3DeathAfterHitDelaySeconds
+            + P3DeathAnimationStartOffsetSeconds
+            + GetC6_5AnimationLengthSeconds_(P3DeathAnimation, 0.75f);
+        AttackStepSeconds = FMath::Max(AttackStepSeconds, HitSeconds);
+        AttackStepSeconds = FMath::Max(AttackStepSeconds, DeathSeconds);
+
+        const float FinishSeconds = AttackStepSeconds
+            + FMath::Max(P3MeleeReturnSeconds, P3CapturedFadeSeconds);
+        const float CaptureEventSeconds = P3FacingBlendSeconds
+            + FMath::Max(P3MeleeRunInSeconds, 0.001f)
+            + FinishSeconds;
+        CaptureSeconds += CaptureEventSeconds;
+
+        UE_LOG(LogPlanetTess, Log,
+            TEXT("[Tess][C6.5] Delay estimate includes capture. Captured=%d Attacker=%d Vanguard=%d MaxAttackToHit=%.3f AttackStep=%.3f Hit=%.3f Death=%.3f EventSeconds=%.3f CaptureSecondsTotal=%.3f"),
+            CaptureEvent.Captured.PieceId,
+            CaptureEvent.Attacker.PieceId,
+            CaptureEvent.Vanguard.PieceId,
+            MaxAttackToHitSeconds,
+            AttackStepSeconds,
+            HitSeconds,
+            DeathSeconds,
+            CaptureEventSeconds,
+            CaptureSeconds);
+    }
+
+    UE_LOG(LogPlanetTess, Log,
+        TEXT("[Tess][C6.5] Delay estimate summary. MoveEvents=%d ValidMoveEvents=%d CaptureEvents=%d ValidCaptureEvents=%d MoveSeconds=%.3f CaptureSeconds=%.3f Total=%.3f"),
+        MoveEvents.Num(),
+        ValidMoveEventCount,
+        CaptureEvents.Num(),
+        ValidCaptureEventCount,
+        MoveSeconds,
+        CaptureSeconds,
+        MoveSeconds + CaptureSeconds);
+
+    return MoveSeconds + CaptureSeconds;
+}
+
+bool APlanetTessellatedMesh::TryRequestC6_5DelayedTurnStartFocus_(
+    int32 ExpectedTurnIndex,
+    int32 ExpectedFactionId,
+    const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents,
+    const TArray<FTerraPiecePresentationCaptureEvent>& CaptureEvents)
+{
+    if (!bEnableC6_5DelayTurnStartFocusUntilActionPresentationEnds)
+    {
+        UE_LOG(LogPlanetTess, Log,
+            TEXT("[Tess][C6.5] Delay request rejected: disabled. Faction=%d Turn=%d MoveEvents=%d CaptureEvents=%d"),
+            ExpectedFactionId,
+            ExpectedTurnIndex,
+            MoveEvents.Num(),
+            CaptureEvents.Num());
+        return false;
+    }
+
+    UWorld* World = GetWorld();
+    if (!World || !World->IsGameWorld())
+    {
+        UE_LOG(LogPlanetTess, Log,
+            TEXT("[Tess][C6.5] Delay request rejected: no game world. Faction=%d Turn=%d MoveEvents=%d CaptureEvents=%d"),
+            ExpectedFactionId,
+            ExpectedTurnIndex,
+            MoveEvents.Num(),
+            CaptureEvents.Num());
+        return false;
+    }
+
+    const float DelaySeconds = GetC6_5ActionPresentationDelaySeconds_(MoveEvents, CaptureEvents);
+    if (DelaySeconds <= KINDA_SMALL_NUMBER)
+    {
+        UE_LOG(LogPlanetTess, Log,
+            TEXT("[Tess][C6.5] Delay request rejected: estimated delay is zero. Faction=%d Turn=%d Delay=%.6f MoveEvents=%d CaptureEvents=%d"),
+            ExpectedFactionId,
+            ExpectedTurnIndex,
+            DelaySeconds,
+            MoveEvents.Num(),
+            CaptureEvents.Num());
+        return false;
+    }
+
+    const bool bHadExistingTimer = World->GetTimerManager().IsTimerActive(C6_5DelayedTurnStartFocusTimerHandle);
+    World->GetTimerManager().ClearTimer(C6_5DelayedTurnStartFocusTimerHandle);
+    const float TotalDelaySeconds = DelaySeconds + FMath::Max(C6_5TurnStartFocusDelayPaddingSeconds, 0.0f);
+    const FTimerDelegate Delegate = FTimerDelegate::CreateUObject(
+        this,
+        &APlanetTessellatedMesh::ExecuteC6_5DelayedTurnStartFocus_,
+        ExpectedTurnIndex,
+        ExpectedFactionId);
+    World->GetTimerManager().SetTimer(
+        C6_5DelayedTurnStartFocusTimerHandle,
+        Delegate,
+        FMath::Max(TotalDelaySeconds, 0.001f),
+        false);
+
+    UE_LOG(LogPlanetTess, Log,
+        TEXT("[Tess][C6.5] Delayed turn start camera focus. Faction=%d Turn=%d Delay=%.3f RawDelay=%.3f Padding=%.3f MoveEvents=%d CaptureEvents=%d ReplacedExistingTimer=%d"),
+        ExpectedFactionId,
+        ExpectedTurnIndex,
+        TotalDelaySeconds,
+        DelaySeconds,
+        FMath::Max(C6_5TurnStartFocusDelayPaddingSeconds, 0.0f),
+        MoveEvents.Num(),
+        CaptureEvents.Num(),
+        bHadExistingTimer ? 1 : 0);
+    return true;
+}
+
+void APlanetTessellatedMesh::ExecuteC6_5DelayedTurnStartFocus_(int32 ExpectedTurnIndex, int32 ExpectedFactionId)
+{
+    if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
+    {
+        UE_LOG(LogPlanetTess, Log,
+            TEXT("[Tess][C6.5] Delayed turn start focus fired but gameplay is unavailable. ExpectedFaction=%d ExpectedTurn=%d"),
+            ExpectedFactionId,
+            ExpectedTurnIndex);
+        return;
+    }
+
+    if (GameplayContainer->GetTurnIndex() != ExpectedTurnIndex
+        || GameplayContainer->GetCurrentFactionId() != ExpectedFactionId)
+    {
+        UE_LOG(LogPlanetTess, Verbose,
+            TEXT("[Tess][C6.5] Skip stale delayed turn start focus. ExpectedFaction=%d ExpectedTurn=%d CurrentFaction=%d CurrentTurn=%d"),
+            ExpectedFactionId,
+            ExpectedTurnIndex,
+            GameplayContainer->GetCurrentFactionId(),
+            GameplayContainer->GetTurnIndex());
+        return;
+    }
+
+    UE_LOG(LogPlanetTess, Log,
+        TEXT("[Tess][C6.5] Delayed turn start focus fired. Faction=%d Turn=%d"),
+        ExpectedFactionId,
+        ExpectedTurnIndex);
+    FocusCameraOnCurrentFactionBase_();
 }
 
 void APlanetTessellatedMesh::FocusCameraOnSelectedCellSmart_(int32 CellId)
@@ -3341,6 +3619,7 @@ bool APlanetTessellatedMesh::HandleGameplayCellClick_(int32 CellId, const TCHAR*
 
     GameplayContainer->SetDebugKeepSameFactionOnEndTurn(bG3DebugKeepSameFactionOnEndTurn);
 
+    const int32 PrevTurnIndex = GameplayContainer->GetTurnIndex();
     const int32 PrevFactionId = GameplayContainer->GetCurrentFactionId();
     const int32 PrevSelectedPieceId = GameplayContainer->GetSelectedPieceId();
     const ETerraGameplayInteractionPhase PrevPhase = GameplayContainer->GetInteractionPhase();
@@ -3368,6 +3647,7 @@ bool APlanetTessellatedMesh::HandleGameplayCellClick_(int32 CellId, const TCHAR*
     RefreshG4CapturePreviewCellsForActionTarget_(HISMCurrentHoverCellId);
 
     const int32 NewFactionId = GameplayContainer->GetCurrentFactionId();
+    const int32 NewTurnIndex = GameplayContainer->GetTurnIndex();
     const int32 NewSelectedPieceId = GameplayContainer->GetSelectedPieceId();
     const ETerraGameplayInteractionPhase NewPhase = GameplayContainer->GetInteractionPhase();
     int32 NewSelectedPieceCellId = INDEX_NONE;
@@ -3424,13 +3704,31 @@ bool APlanetTessellatedMesh::HandleGameplayCellClick_(int32 CellId, const TCHAR*
         }
     }
 
-    if (NewFactionId != PrevFactionId)
+    const bool bTurnChanged = NewTurnIndex != PrevTurnIndex;
+    const bool bFactionChanged = NewFactionId != PrevFactionId;
+
+    if (bTurnChanged)
     {
-        RefreshFactionPieceHighlights_(PrevFactionId);
+        UE_LOG(LogPlanetTess, Log,
+            TEXT("[Tess][C6.5] Turn changed after click. PrevTurn=%d NewTurn=%d PrevFaction=%d NewFaction=%d FactionChanged=%d PrevPhase=%d NewPhase=%d bGameplayHandled=%d PendingCapturesBeforeClick=%d P2MoveEvents=%d P3CaptureEvents=%d"),
+            PrevTurnIndex,
+            NewTurnIndex,
+            PrevFactionId,
+            NewFactionId,
+            bFactionChanged ? 1 : 0,
+            static_cast<int32>(PrevPhase),
+            static_cast<int32>(NewPhase),
+            bGameplayHandled ? 1 : 0,
+            PendingCaptureEntriesBeforeClick.Num(),
+            P2MoveEvents.Num(),
+            P3CaptureEvents.Num());
+        if (bFactionChanged)
+        {
+            RefreshFactionPieceHighlights_(PrevFactionId);
+        }
         RefreshFactionPieceHighlights_(NewFactionId);
         G2_5LastHighlightedFactionId = NewFactionId;
-        G2_5LastCameraFocusedTurnIndex = GameplayContainer->GetTurnIndex();
-        FocusCameraOnCurrentFactionBase_();
+        G2_5LastCameraFocusedTurnIndex = NewTurnIndex;
     }
     else if (NewPhase != PrevPhase || bGameplayHandled)
     {
@@ -3452,6 +3750,23 @@ bool APlanetTessellatedMesh::HandleGameplayCellClick_(int32 CellId, const TCHAR*
     RebuildG1DebugPieces_();
     RequestC6ActionCameraTrackingForMoveEvents_(P2MoveEvents);
     SyncP1PiecePresentation_(P2MoveEvents, P3CaptureEvents);
+
+    if (bTurnChanged
+        && !TryRequestC6_5DelayedTurnStartFocus_(
+            NewTurnIndex,
+            NewFactionId,
+            P2MoveEvents,
+            P3CaptureEvents))
+    {
+        UE_LOG(LogPlanetTess, Log,
+            TEXT("[Tess][C6.5] Falling back to immediate turn focus. Faction=%d Turn=%d FactionChanged=%d P2MoveEvents=%d P3CaptureEvents=%d"),
+            NewFactionId,
+            NewTurnIndex,
+            bFactionChanged ? 1 : 0,
+            P2MoveEvents.Num(),
+            P3CaptureEvents.Num());
+        FocusCameraOnCurrentFactionBase_();
+    }
 
     UE_LOG(LogPlanetTess, Log,
         TEXT("[Tess][G2] %s -> Gameplay Cell=%d Instance=%d Component=%s Handled=%d CurrentFaction=%d Turn=%d Phase=%d P2MoveEvents=%d P3CaptureEvents=%d"),

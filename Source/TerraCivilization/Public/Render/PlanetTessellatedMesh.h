@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/EngineTypes.h"
+#include "Engine/TimerHandle.h"
 #include "GameFramework/Actor.h"
 #include "TerraGameplayContainer.h"
 #include "TerraPiecePresentationTypes.h"
@@ -928,6 +929,14 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C6 Camera")
     bool bEnableC6ActionCameraTracking = true;
 
+    /** C6.5：true 时行动确认换回合后，等待本次移动 / 攻击表现预计结束再执行 C2.5 回合战区回正。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C6.5 Camera")
+    bool bEnableC6_5DelayTurnStartFocusUntilActionPresentationEnds = true;
+
+    /** C6.5：延迟回正额外缓冲秒数，避免计时略早于动画 / timer 结束。 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C6.5 Camera", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+    float C6_5TurnStartFocusDelayPaddingSeconds = 0.05f;
+
     //----------------------------------------------------------
     // 生命周期
     //----------------------------------------------------------
@@ -1096,6 +1105,24 @@ private:
 
     /** SimpleGameplay C6：按移动类型取与 P2 表现一致的镜头 Blend 时长。 */
     float GetC6ActionCameraBlendSeconds_(ETerraPiecePresentationMoveType MoveType) const;
+
+    /** SimpleGameplay C6.5：如果本次确认行动正在播放移动 / 攻击表现，则延迟 C2.5 回合回正。返回 true 表示已接管本次回正。 */
+    bool TryRequestC6_5DelayedTurnStartFocus_(
+        int32 ExpectedTurnIndex,
+        int32 ExpectedFactionId,
+        const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents,
+        const TArray<FTerraPiecePresentationCaptureEvent>& CaptureEvents);
+
+    /** SimpleGameplay C6.5：timer 到点后校验仍是同一回合，再调用既有 C2/C2.5 回合镜头入口。 */
+    void ExecuteC6_5DelayedTurnStartFocus_(int32 ExpectedTurnIndex, int32 ExpectedFactionId);
+
+    /** SimpleGameplay C6.5：估算本次移动 / 攻击表现最长持续时间。 */
+    float GetC6_5ActionPresentationDelaySeconds_(
+        const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents,
+        const TArray<FTerraPiecePresentationCaptureEvent>& CaptureEvents) const;
+
+    float GetC6_5AttackAnimationDurationSeconds_(ETerraGameplayPieceType PieceType, UAnimationAsset* AttackAnimation, float FallbackSeconds) const;
+    float GetC6_5AnimationLengthSeconds_(UAnimationAsset* AnimationAsset, float FallbackSeconds) const;
 
     /** SimpleGameplay C2：游戏开始时硬设置到当前阵营活棋子战区中心斜俯视。成功处理返回 true。 */
     bool FocusCameraOnCurrentFactionWarZoneHard_();
@@ -1313,6 +1340,9 @@ public:
 
     /** SimpleGameplay C2：本局是否已经完成游戏开始硬设置镜头。 */
     bool bC2GameStartCameraApplied = false;
+
+    /** SimpleGameplay C6.5：延迟回合回正 timer。 */
+    FTimerHandle C6_5DelayedTurnStartFocusTimerHandle;
 
     /** SimpleGameplay G1/G2：当前初始化出的调试棋子缓存。 */
     TArray<FTerraG1DebugPiece> G1DebugPieces;
