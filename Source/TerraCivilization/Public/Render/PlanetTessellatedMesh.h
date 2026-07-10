@@ -22,23 +22,11 @@ class UHierarchicalInstancedStaticMeshComponent;
 class UStaticMesh;
 class USkeletalMesh;
 class UPlanetCameraComponent;
+class UPlanetGameplayComponent;
 class UPlanetPiecePresentationComponent;
+struct FTerraGameplayPieceState;
+struct FTerraGameplayCaptureEntry;
 struct FHitResult;
-
-enum class ETerraG1DebugPieceType : uint8
-{
-    Base,
-    Infantry,
-    Cavalry,
-    Archer,
-};
-
-struct FTerraG1DebugPiece
-{
-    int32 FactionId = INDEX_NONE;
-    int32 CellId = INDEX_NONE;
-    ETerraG1DebugPieceType PieceType = ETerraG1DebugPieceType::Infantry;
-};
 
 /**
  * APlanetTessellatedMesh
@@ -54,6 +42,7 @@ class TERRACIVILIZATION_API APlanetTessellatedMesh : public AActor
 {
     GENERATED_BODY()
     friend class UPlanetCameraComponent;
+    friend class UPlanetGameplayComponent;
 
 public:
     APlanetTessellatedMesh();
@@ -156,54 +145,6 @@ public:
     float HISMHighlightOuterRadius = 0.50f;
 
     //----------------------------------------------------------
-    // SimpleGameplay G1：棋子初始化调试绘制
-    //----------------------------------------------------------
-
-    /** true：用 DrawDebugSphere 显示 G1 初始棋子布局。 */
-    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|SimpleGameplay G1")
-    bool bEnableG1DebugPieces = true;
-
-    /** G1 调试棋子球半径（cm）。 */
-    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|SimpleGameplay G1", meta = (ClampMin = "10.0", ClampMax = "1000.0"))
-    float G1DebugPieceRadiusCM = 140.0f;
-
-    /** G1 调试棋子相对球面外抬高度（cm）。 */
-    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|SimpleGameplay G1", meta = (ClampMin = "0.0", ClampMax = "5000.0"))
-    float G1DebugPieceHeightOffsetCM = 200.0f;
-
-    //----------------------------------------------------------
-    // SimpleGameplay P1：真实棋子模型表现
-    //----------------------------------------------------------
-
-    //----------------------------------------------------------
-    // SimpleGameplay G2.5：视角与当前阵营提示
-    //----------------------------------------------------------
-
-    /** 当前阵营所有棋子脚下 Cell 的淡粉色提示。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G2.5")
-    FLinearColor G2_5CurrentFactionPieceColor = FLinearColor(1.0f, 0.45f, 0.68f, 1.0f);
-
-    /** hover 到当前阵营棋子时的加红提示色。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G2.5")
-    FLinearColor G2_5CurrentFactionPieceHoverColor = FLinearColor(1.0f, 0.22f, 0.32f, 1.0f);
-
-    //----------------------------------------------------------
-    // SimpleGameplay G3：跳跃与调试
-    //----------------------------------------------------------
-
-    /** true：调试时回合结束不跳到下一个玩家，下一回合仍保持当前玩家。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G3|Debug")
-    bool bG3DebugKeepSameFactionOnEndTurn = false;
-
-    /** hover 到可行走 / 可跳跃淡蓝落点时使用的加深颜色。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G3")
-    FLinearColor G3ActionTargetHoverColor = FLinearColor(0.08f, 0.45f, 1.0f, 1.0f);
-
-    /** hover 到某个可吃子落点时，该落点对应可吃目标使用的加深红色。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G4")
-    FLinearColor G4CaptureTargetHoverColor = FLinearColor(1.0f, 0.0f, 0.0f, 1.0f);
-
-    //----------------------------------------------------------
     // 生命周期
     //----------------------------------------------------------
     virtual void OnConstruction(const FTransform& Transform) override;
@@ -260,6 +201,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "PlanetTopology|Tess|Camera")
     UPlanetCameraComponent* GetPlanetCameraComponent() const { return PlanetCameraComponent; }
 
+    UFUNCTION(BlueprintCallable, Category = "PlanetTopology|Tess|Gameplay")
+    UPlanetGameplayComponent* GetPlanetGameplayComponent() const { return PlanetGameplayComponent; }
+
     UFUNCTION(BlueprintCallable, Category = "PlanetTopology|Tess|Piece Presentation")
     UPlanetPiecePresentationComponent* GetPlanetPiecePresentationComponent() const { return PlanetPiecePresentationComponent; }
 
@@ -288,20 +232,10 @@ private:
     void UpdateHISMHoverCell_(int32 NewCellId);
 
     void RebuildGameplay_();
-
-    /** SimpleGameplay G2：刷新 Gameplay 容器报告的脏 Cell 高亮。 */
     void RefreshGameplayHighlights_(const TArray<int32>& DirtyCellIds);
-
-    /** SimpleGameplay G2/C5：统一处理 Gameplay Cell 点击及其表现侧后处理。 */
     bool HandleGameplayCellClick_(int32 CellId, const TCHAR* SourceLabel, int32 InstanceIndex, const FString& ComponentName);
-
-    /** SimpleGameplay A3：NPC MCP 执行入口，复用真实点击路径以同步表现层。 */
     bool TryExecuteNpcMcpValidatedAction_(int32 ExpectedTurnIndex, int32 ExpectedFactionId, int32 PieceId, int32 ToCellId, FTerraGameplayContainer::FValidatedActionExecutionResult& OutResult);
-
-    /** SimpleGameplay G2.5：刷新指定阵营所有棋子所在 Cell 的 HISM 高亮。 */
     void RefreshFactionPieceHighlights_(int32 FactionId);
-
-    /** SimpleGameplay G2.5：刷新当前阵营所有棋子所在 Cell 的 HISM 高亮。 */
     void RefreshCurrentFactionPieceHighlights_();
 
     /** SimpleGameplay G2.5：根据 CellId 计算球面 Cell 中心世界坐标。 */
@@ -380,10 +314,7 @@ public:
         FVector& InOutFocusUnitDir,
         float& InOutYawAroundFocusDeg) const;
 
-    /** SimpleGameplay G1/G2：按当前 Gameplay 棋子状态重建调试棋子缓存。 */
     void RebuildG1DebugPieces_();
-
-    /** SimpleGameplay G1：用 DrawDebugSphere 绘制当前调试棋子缓存。 */
     void DrawG1DebugPieces_() const;
 
     /** D15：PIE 退出后材质恢复钩子（详见 AgentWorkflow.md §3.11）。 */
@@ -418,22 +349,17 @@ public:
     /** HISM 瓦片渲染、实例索引、命中反查与 PerInstanceCustomData 高亮状态。 */
     FPlanetHISMTileRenderer HISMTileRenderer;
 
-    /** SimpleGameplay G2：棋子、Cell 逻辑、回合和 Gameplay 高亮的总容器。 */
-    TUniquePtr<FTerraGameplayContainer> GameplayContainer;
-
-    /** SimpleGameplay G2.5：上一次已刷新底色提示的当前阵营。 */
-    int32 G2_5LastHighlightedFactionId = INDEX_NONE;
-
     /** SimpleGameplay Camera：独立相机组件，承载配置字段与镜头运行时状态。 */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|Camera", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<UPlanetCameraComponent> PlanetCameraComponent;
 
+    /** SimpleGameplay Gameplay：独立玩法编排组件，承载回合/点击/Undo/NPC 执行等运行时状态。 */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|Gameplay", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UPlanetGameplayComponent> PlanetGameplayComponent;
+
     /** SimpleGameplay Piece Presentation：独立棋子表现组件，承载配置字段与表现运行时状态。 */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|Piece Presentation", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<UPlanetPiecePresentationComponent> PlanetPiecePresentationComponent;
-
-    /** SimpleGameplay G1/G2：当前初始化出的调试棋子缓存。 */
-    TArray<FTerraG1DebugPiece> G1DebugPieces;
 
     //----------------------------------------------------------
     // D15：PIE 退出后材质恢复（详见 AgentWorkflow.md §3.11）

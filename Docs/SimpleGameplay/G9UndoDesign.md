@@ -360,3 +360,8 @@ G9 不需要新增蓝图资产，只沿用已有入口：
 - 回滚相机位置。
 - 回滚已经写入文件的历史日志。
 - 跨回合撤销。
+> Implementation Update
+>
+> - Undo 编排已从 `APlanetTessellatedMesh` 迁移到 `UPlanetGameplayComponent::HandleHISMUndo()`。
+> - `APlanetTessellatedMesh::HandleHISMUndo()` 现仅为兼容桥接入口。
+> - Undo 前后棋子快照比较、反向 `MoveEvent` 生成、HISM 高亮刷新、P1 表现同步，现都由 `UPlanetGameplayComponent` 负责。

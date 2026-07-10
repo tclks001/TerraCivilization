@@ -188,3 +188,8 @@ C5 暂不实现：
 - 按距离当前镜头排序。
 - 多选或框选。
 - 给不可行动棋子单独导航。
+> Implementation Update
+>
+> - C5 的真实实现已迁移到 `UPlanetGameplayComponent::HandleC5NavigateCurrentFactionPiece(...)`。
+> - `APlanetTessellatedMesh::HandleC5NavigateCurrentFactionPiece(...)` 现仅保留兼容桥接。
+> - 文中涉及 `HandleGameplayCellClick_(...)` 的调用链，现应理解为进入 `UPlanetGameplayComponent::HandleGameplayCellClick(...)` 的真实实现。

@@ -1,5 +1,6 @@
 #include "Render/PlanetCameraComponent.h"
 
+#include "Render/PlanetGameplayComponent.h"
 #include "Render/PlanetTessellatedMesh.h"
 #include "Render/PlanetPiecePresentationComponent.h"
 #include "TerraGameplayContainer.h"
@@ -40,30 +41,32 @@ void UPlanetCameraComponent::TickCamera(float DeltaSeconds)
     }
 
     (void)DeltaSeconds;
+    UPlanetGameplayComponent* GameplayComp = Host->GetPlanetGameplayComponent();
+    const FTerraGameplayContainer* Gameplay = GameplayComp ? GameplayComp->GetGameplayContainer() : nullptr;
     if (bEnableG2_5CameraAssist
         && Host->GetWorld()
         && Host->GetWorld()->IsGameWorld()
-        && Host->GameplayContainer.IsValid()
-        && Host->GameplayContainer->IsInitialized()
-        && LastFocusedTurnIndex != Host->GameplayContainer->GetTurnIndex())
+        && Gameplay
+        && Gameplay->IsInitialized()
+        && LastFocusedTurnIndex != Gameplay->GetTurnIndex())
     {
         if (!IsDelayedTurnStartFocusTimerActive())
         {
             UE_LOG(LogPlanetCamera, Log,
                 TEXT("[Tess][C6.5] Tick fallback turn focus is not delayed. LastFocusedTurn=%d CurrentTurn=%d CurrentFaction=%d"),
                 LastFocusedTurnIndex,
-                Host->GameplayContainer->GetTurnIndex(),
-                Host->GameplayContainer->GetCurrentFactionId());
+                Gameplay->GetTurnIndex(),
+                Gameplay->GetCurrentFactionId());
             FocusCameraOnCurrentFactionBase();
-            LastFocusedTurnIndex = Host->GameplayContainer->GetTurnIndex();
+            LastFocusedTurnIndex = Gameplay->GetTurnIndex();
         }
         else
         {
             UE_LOG(LogPlanetCamera, Verbose,
                 TEXT("[Tess][C6.5] Tick fallback turn focus suppressed by active delay timer. LastFocusedTurn=%d CurrentTurn=%d CurrentFaction=%d"),
                 LastFocusedTurnIndex,
-                Host->GameplayContainer->GetTurnIndex(),
-                Host->GameplayContainer->GetCurrentFactionId());
+                Gameplay->GetTurnIndex(),
+                Gameplay->GetCurrentFactionId());
         }
     }
 }
@@ -611,7 +614,9 @@ void UPlanetCameraComponent::ExecuteC6_5DelayedTurnStartFocus(int32 ExpectedTurn
         return;
     }
 
-    if (!Host->GameplayContainer.IsValid() || !Host->GameplayContainer->IsInitialized())
+    UPlanetGameplayComponent* GameplayComp = Host->GetPlanetGameplayComponent();
+    const FTerraGameplayContainer* Gameplay = GameplayComp ? GameplayComp->GetGameplayContainer() : nullptr;
+    if (!Gameplay || !Gameplay->IsInitialized())
     {
         UE_LOG(LogPlanetCamera, Log,
             TEXT("[Tess][C6.5] Delayed turn start focus fired but gameplay is unavailable. ExpectedFaction=%d ExpectedTurn=%d"),
@@ -620,15 +625,15 @@ void UPlanetCameraComponent::ExecuteC6_5DelayedTurnStartFocus(int32 ExpectedTurn
         return;
     }
 
-    if (Host->GameplayContainer->GetTurnIndex() != ExpectedTurnIndex
-        || Host->GameplayContainer->GetCurrentFactionId() != ExpectedFactionId)
+    if (Gameplay->GetTurnIndex() != ExpectedTurnIndex
+        || Gameplay->GetCurrentFactionId() != ExpectedFactionId)
     {
         UE_LOG(LogPlanetCamera, Verbose,
             TEXT("[Tess][C6.5] Skip stale delayed turn start focus. ExpectedFaction=%d ExpectedTurn=%d CurrentFaction=%d CurrentTurn=%d"),
             ExpectedFactionId,
             ExpectedTurnIndex,
-            Host->GameplayContainer->GetCurrentFactionId(),
-            Host->GameplayContainer->GetTurnIndex());
+            Gameplay->GetCurrentFactionId(),
+            Gameplay->GetTurnIndex());
         return;
     }
 
@@ -683,7 +688,9 @@ void UPlanetCameraComponent::FocusCameraOnCurrentFactionBase()
         return;
     }
 
-    if (!Host->GameplayContainer.IsValid() || !Host->GameplayContainer->IsInitialized())
+    UPlanetGameplayComponent* GameplayComp = Host->GetPlanetGameplayComponent();
+    const FTerraGameplayContainer* Gameplay = GameplayComp ? GameplayComp->GetGameplayContainer() : nullptr;
+    if (!Gameplay || !Gameplay->IsInitialized())
     {
         return;
     }
@@ -701,7 +708,7 @@ void UPlanetCameraComponent::FocusCameraOnCurrentFactionBase()
         return;
     }
 
-    FocusCameraOnCell(Host->GameplayContainer->GetCurrentFactionBaseCellId(), true);
+    FocusCameraOnCell(Gameplay->GetCurrentFactionBaseCellId(), true);
 }
 
 bool UPlanetCameraComponent::TryBuildCurrentFactionWarZoneDirection(FVector& OutLocalWarZoneDir) const
@@ -712,16 +719,18 @@ bool UPlanetCameraComponent::TryBuildCurrentFactionWarZoneDirection(FVector& Out
         return false;
     }
 
-    if (!Host->GameplayContainer.IsValid() || !Host->GameplayContainer->IsInitialized() || !Host->CellTopology.IsValid())
+    UPlanetGameplayComponent* GameplayComp = Host->GetPlanetGameplayComponent();
+    const FTerraGameplayContainer* Gameplay = GameplayComp ? GameplayComp->GetGameplayContainer() : nullptr;
+    if (!Gameplay || !Gameplay->IsInitialized() || !Host->CellTopology.IsValid())
     {
         return false;
     }
 
-    const int32 CurrentFactionId = Host->GameplayContainer->GetCurrentFactionId();
+    const int32 CurrentFactionId = Gameplay->GetCurrentFactionId();
     FVector LocalDirSum = FVector::ZeroVector;
     int32 AlivePieceCount = 0;
 
-    for (const FTerraGameplayPieceState& Piece : Host->GameplayContainer->GetPieces())
+    for (const FTerraGameplayPieceState& Piece : Gameplay->GetPieces())
     {
         if (!Piece.bAlive
             || Piece.OwnerFactionId != CurrentFactionId
@@ -751,13 +760,15 @@ bool UPlanetCameraComponent::TryBuildCurrentFactionCommanderDirection(FVector& O
         return false;
     }
 
-    if (!Host->GameplayContainer.IsValid() || !Host->GameplayContainer->IsInitialized() || !Host->CellTopology.IsValid())
+    UPlanetGameplayComponent* GameplayComp = Host->GetPlanetGameplayComponent();
+    const FTerraGameplayContainer* Gameplay = GameplayComp ? GameplayComp->GetGameplayContainer() : nullptr;
+    if (!Gameplay || !Gameplay->IsInitialized() || !Host->CellTopology.IsValid())
     {
         return false;
     }
 
-    const int32 CurrentFactionId = Host->GameplayContainer->GetCurrentFactionId();
-    for (const FTerraGameplayPieceState& Piece : Host->GameplayContainer->GetPieces())
+    const int32 CurrentFactionId = Gameplay->GetCurrentFactionId();
+    for (const FTerraGameplayPieceState& Piece : Gameplay->GetPieces())
     {
         if (Piece.bAlive
             && Piece.OwnerFactionId == CurrentFactionId
@@ -769,7 +780,7 @@ bool UPlanetCameraComponent::TryBuildCurrentFactionCommanderDirection(FVector& O
         }
     }
 
-    const int32 BaseCellId = Host->GameplayContainer->GetCurrentFactionBaseCellId();
+    const int32 BaseCellId = Gameplay->GetCurrentFactionBaseCellId();
     if (Host->CellTopology->Cells.IsValidIndex(BaseCellId))
     {
         OutLocalCommanderDir = Host->CellTopology->Cells[BaseCellId].UnitCenter.GetSafeNormal();
@@ -898,10 +909,13 @@ bool UPlanetCameraComponent::FocusCameraOnCurrentFactionWarZoneHard()
             InteractionController->SetControlRotation(LookRotation);
             ApplyFocusCameraState(LocalWarZoneDir, CameraDistance, CameraTiltDeg, C3YawAroundFocusDeg);
 
+            UPlanetGameplayComponent* GameplayComp = Host->GetPlanetGameplayComponent();
+            const FTerraGameplayContainer* Gameplay = GameplayComp ? GameplayComp->GetGameplayContainer() : nullptr;
+
             UE_LOG(LogPlanetCamera, Log,
                 TEXT("[Tess][C2] Game start focus war zone camera via C3 state Faction=%d Turn=%d Camera=(%.1f, %.1f, %.1f) Target=(%.1f, %.1f, %.1f) Distance=%.1f Tilt=%.1f Yaw=%.1f"),
-                Host->GameplayContainer.IsValid() ? Host->GameplayContainer->GetCurrentFactionId() : INDEX_NONE,
-                Host->GameplayContainer.IsValid() ? Host->GameplayContainer->GetTurnIndex() : INDEX_NONE,
+                Gameplay ? Gameplay->GetCurrentFactionId() : INDEX_NONE,
+                Gameplay ? Gameplay->GetTurnIndex() : INDEX_NONE,
                 CameraWorldPosition.X,
                 CameraWorldPosition.Y,
                 CameraWorldPosition.Z,
@@ -923,10 +937,13 @@ bool UPlanetCameraComponent::FocusCameraOnCurrentFactionWarZoneHard()
     }
     PlayerController->SetControlRotation(LookRotation);
 
+    UPlanetGameplayComponent* GameplayComp = Host->GetPlanetGameplayComponent();
+    const FTerraGameplayContainer* Gameplay = GameplayComp ? GameplayComp->GetGameplayContainer() : nullptr;
+
     UE_LOG(LogPlanetCamera, Log,
         TEXT("[Tess][C2] Game start focus war zone camera fallback Faction=%d Turn=%d Camera=(%.1f, %.1f, %.1f) Target=(%.1f, %.1f, %.1f) Distance=%.1f Tilt=%.1f"),
-        Host->GameplayContainer.IsValid() ? Host->GameplayContainer->GetCurrentFactionId() : INDEX_NONE,
-        Host->GameplayContainer.IsValid() ? Host->GameplayContainer->GetTurnIndex() : INDEX_NONE,
+        Gameplay ? Gameplay->GetCurrentFactionId() : INDEX_NONE,
+        Gameplay ? Gameplay->GetTurnIndex() : INDEX_NONE,
         CameraWorldPosition.X,
         CameraWorldPosition.Y,
         CameraWorldPosition.Z,
@@ -947,7 +964,9 @@ bool UPlanetCameraComponent::BlendCameraFocusToCurrentFactionWarZone()
         return false;
     }
 
-    if (!Host->GameplayContainer.IsValid() || !Host->GameplayContainer->IsInitialized() || !Host->CellTopology.IsValid())
+    UPlanetGameplayComponent* GameplayComp = Host->GetPlanetGameplayComponent();
+    const FTerraGameplayContainer* Gameplay = GameplayComp ? GameplayComp->GetGameplayContainer() : nullptr;
+    if (!Gameplay || !Gameplay->IsInitialized() || !Host->CellTopology.IsValid())
     {
         return false;
     }
@@ -978,8 +997,8 @@ bool UPlanetCameraComponent::BlendCameraFocusToCurrentFactionWarZone()
     {
         UE_LOG(LogPlanetCamera, Log,
             TEXT("[Tess][C2.5] Requested turn start war zone focus blend Faction=%d Turn=%d Blend=%.2f"),
-            Host->GameplayContainer->GetCurrentFactionId(),
-            Host->GameplayContainer->GetTurnIndex(),
+            Gameplay->GetCurrentFactionId(),
+            Gameplay->GetTurnIndex(),
             C2_5TurnStartFocusBlendSeconds);
     }
     return bRequested;

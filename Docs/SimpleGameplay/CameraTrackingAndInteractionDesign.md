@@ -793,3 +793,11 @@ Gameplay 规则
 > `UPlanetCameraComponent` owns serialized camera UPROPERTY settings and runtime
 > camera state. `APlanetTessellatedMesh` keeps public compatibility wrappers and
 > gameplay/render triggers delegate to the component.
+> Implementation Update
+>
+> - 当前职责划分已更新为：
+>   - `APlanetTessellatedMesh`：球面/HISM/宿主装配与兼容桥接
+>   - `UPlanetCameraComponent`：镜头状态、C2/C2.5/C3/C4/C6/C6.5 等相机逻辑
+>   - `UPlanetGameplayComponent`：GameplayContainer 持有、点击编排、Undo、Tab 导航、NPC MCP 执行桥、阵营高亮刷新
+>   - `UPlanetPiecePresentationComponent`：棋子表现配置、表现事件、Manager 同步
+> - 旧稿中把 Gameplay 编排直接归到 `APlanetTessellatedMesh` 的表述，现均应以上述结构为准。

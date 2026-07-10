@@ -426,4 +426,11 @@ G3 起可以在同一个容器中继续扩展：
 - 二吃一与弓兵远程攻击红色高亮。
 - 主将失败与胜负结算。
 
-
+> Implementation Update
+>
+> - `FTerraGameplayContainer` 的运行态持有与编排入口，现已从 `APlanetTessellatedMesh` 迁移到 `UPlanetGameplayComponent`。
+> - `APlanetTessellatedMesh` 现在只作为宿主 actor，挂载 `PlanetGameplayComponent`，并保留少量兼容桥接函数。
+> - 旧稿中凡提到 `APlanetTessellatedMesh::RebuildGameplay_()`、`HandleGameplayCellClick_()`、`HandleHISMUndo()`、`HandleC5NavigateCurrentFactionPiece()` 直接承载实现的地方，现均应理解为：
+>   - 真实实现位于 `Source/TerraCivilization/Public/Render/PlanetGameplayComponent.h`
+>   - `Source/TerraCivilization/Private/Render/PlanetGameplayComponent.cpp`
+>   - `APlanetTessellatedMesh` 仅转发到 `UPlanetGameplayComponent`

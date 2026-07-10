@@ -1,5 +1,6 @@
 #include "Render/PlanetPiecePresentationComponent.h"
 
+#include "Render/PlanetGameplayComponent.h"
 #include "Render/PlanetTessellatedMesh.h"
 #include "TerraGameplayContainer.h"
 #include "TerraPiecePresentationManager.h"
@@ -97,7 +98,9 @@ void UPlanetPiecePresentationComponent::SyncPresentation(
         return;
     }
 
-    if (!PiecePresentationManager || !Host->GameplayContainer.IsValid() || !Host->GameplayContainer->IsInitialized())
+    UPlanetGameplayComponent* GameplayComp = Host->GetPlanetGameplayComponent();
+    const FTerraGameplayContainer* Gameplay = GameplayComp ? GameplayComp->GetGameplayContainer() : nullptr;
+    if (!PiecePresentationManager || !Gameplay || !Gameplay->IsInitialized())
     {
         ClearPresentation();
         return;
@@ -106,7 +109,7 @@ void UPlanetPiecePresentationComponent::SyncPresentation(
     const FTerraPieceVisualConfig VisualConfig = BuildVisualConfig();
 
     TArray<FTerraPiecePresentationSnapshot> Snapshots;
-    const TArray<FTerraGameplayPieceState>& Pieces = Host->GameplayContainer->GetPieces();
+    const TArray<FTerraGameplayPieceState>& Pieces = Gameplay->GetPieces();
     Snapshots.Reserve(Pieces.Num());
 
     for (const FTerraGameplayPieceState& Piece : Pieces)

@@ -1735,3 +1735,21 @@ For Blueprint-derived actors, constructor-time `this` can be the class default o
 ### Rule
 
 A native `UActorComponent` that needs its owning actor should resolve it from `GetOwner()` at runtime. Do not cache actor-constructor `this` inside a component as persistent state, especially for Blueprint-derived actors where the constructor also runs for the CDO.
+## Gameplay 编排组件化（实现更新）
+
+- 当前 `FTerraGameplayContainer` 已不再由 `APlanetTessellatedMesh` 直接持有。
+- 新结构为：
+  - `APlanetTessellatedMesh` 挂载 `UPlanetGameplayComponent`
+  - `UPlanetGameplayComponent` 内部持有 `TUniquePtr<FTerraGameplayContainer>`
+  - `APlanetTessellatedMesh` 上旧的 Gameplay 入口仅保留兼容桥接
+- 受影响的真实实现位置：
+  - `Source/TerraCivilization/Public/Render/PlanetGameplayComponent.h`
+  - `Source/TerraCivilization/Private/Render/PlanetGameplayComponent.cpp`
+- 已迁移的职责包括：
+  - Gameplay rebuild
+  - Cell click 编排
+  - Tab 棋子循环导航
+  - Undo
+  - NPC MCP validated action 执行桥
+  - 当前阵营/脏格高亮刷新
+  - G1 调试棋子缓存与绘制

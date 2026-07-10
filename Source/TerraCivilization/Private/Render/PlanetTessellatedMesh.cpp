@@ -2,8 +2,8 @@
 
 #include "Render/PlanetTessellatedMesh.h"
 #include "Render/PlanetCameraComponent.h"
+#include "Render/PlanetGameplayComponent.h"
 #include "Render/PlanetPiecePresentationComponent.h"
-#include "TerraGameplayContainer.h"
 #include "TerraNpcMcpGameplayBridge.h"
 
 #include "FSphereTopology.h"
@@ -69,6 +69,7 @@ APlanetTessellatedMesh::APlanetTessellatedMesh()
     MountainTileHISMComp->SetCollisionResponseToAllChannels(ECR_Block);
 
     PlanetCameraComponent = CreateDefaultSubobject<UPlanetCameraComponent>(TEXT("PlanetCameraComponent"));
+    PlanetGameplayComponent = CreateDefaultSubobject<UPlanetGameplayComponent>(TEXT("PlanetGameplayComponent"));
     PlanetPiecePresentationComponent = CreateDefaultSubobject<UPlanetPiecePresentationComponent>(TEXT("PlanetPiecePresentationComponent"));
 
     HISMTileRenderer.Initialize(PlainTileHISMComp, ForestTileHISMComp, MountainTileHISMComp);
@@ -88,10 +89,10 @@ APlanetTessellatedMesh::APlanetTessellatedMesh()
 
 APlanetTessellatedMesh::~APlanetTessellatedMesh()
 {
-    if (GameplayContainer.IsValid())
+    if (PlanetGameplayComponent && PlanetGameplayComponent->GetGameplayContainer())
     {
         FTerraNpcMcpGameplayBridge::UnregisterExecuteValidatedActionDelegate();
-        FTerraNpcMcpGameplayBridge::UnregisterGameplayContainer(GameplayContainer.Get());
+        FTerraNpcMcpGameplayBridge::UnregisterGameplayContainer(PlanetGameplayComponent->GetGameplayContainer());
     }
 
     // PIE 钩子在析构中取消订阅。AddUObject 路径会在 UObject 销毁时自动撤销，
@@ -125,8 +126,9 @@ void APlanetTessellatedMesh::BeginPlay()
     if (World && World->IsGameWorld()
         && (!CellTopology.IsValid()
             || !Generator.IsValid()
-            || !GameplayContainer.IsValid()
-            || !GameplayContainer->IsInitialized()))
+            || !PlanetGameplayComponent
+            || !PlanetGameplayComponent->GetGameplayContainer()
+            || !PlanetGameplayComponent->GetGameplayContainer()->IsInitialized()))
     {
         RebuildAll_();
     }
@@ -140,14 +142,17 @@ void APlanetTessellatedMesh::Tick(float DeltaSeconds)
         DeltaSeconds,
         HISMHoverFadeDuration,
         BuildHISMHighlightConfig_(),
-        GameplayContainer.Get());
+        PlanetGameplayComponent ? PlanetGameplayComponent->GetGameplayContainer() : nullptr);
 
     if (PlanetCameraComponent)
     {
         PlanetCameraComponent->TickCamera(DeltaSeconds);
     }
 
-    DrawG1DebugPieces_();
+    if (PlanetGameplayComponent)
+    {
+        PlanetGameplayComponent->DrawG1DebugPieces();
+    }
 }
 
 void APlanetTessellatedMesh::Rebuild()
@@ -158,7 +163,7 @@ void APlanetTessellatedMesh::Rebuild()
 #if WITH_EDITOR
 bool APlanetTessellatedMesh::ShouldTickIfViewportsOnly() const
 {
-    return bEnableG1DebugPieces;
+    return PlanetGameplayComponent ? PlanetGameplayComponent->bEnableG1DebugPieces : false;
 }
 #endif
 
@@ -175,8 +180,11 @@ void APlanetTessellatedMesh::RebuildAll_()
 
     RebuildHISMTileInstances_();
     ApplyRenderModeVisibility_();
-    RebuildGameplay_();
-    RebuildG1DebugPieces_();
+    if (PlanetGameplayComponent)
+    {
+        PlanetGameplayComponent->RebuildGameplay();
+        PlanetGameplayComponent->RebuildG1DebugPieces();
+    }
     LogTopologyStats_();
 }
 
@@ -221,10 +229,18 @@ FPlanetHISMHighlightConfig APlanetTessellatedMesh::BuildHISMHighlightConfig_() c
     Config.HighlightInnerRadius = HISMHighlightInnerRadius;
     Config.HighlightOuterRadius = HISMHighlightOuterRadius;
     Config.HoverColor = HighlightHoverColor;
-    Config.CurrentFactionPieceColor = G2_5CurrentFactionPieceColor;
-    Config.CurrentFactionPieceHoverColor = G2_5CurrentFactionPieceHoverColor;
-    Config.ActionTargetHoverColor = G3ActionTargetHoverColor;
-    Config.CaptureTargetHoverColor = G4CaptureTargetHoverColor;
+    Config.CurrentFactionPieceColor = PlanetGameplayComponent
+        ? PlanetGameplayComponent->G2_5CurrentFactionPieceColor
+        : FLinearColor(1.0f, 0.45f, 0.68f, 1.0f);
+    Config.CurrentFactionPieceHoverColor = PlanetGameplayComponent
+        ? PlanetGameplayComponent->G2_5CurrentFactionPieceHoverColor
+        : FLinearColor(1.0f, 0.22f, 0.32f, 1.0f);
+    Config.ActionTargetHoverColor = PlanetGameplayComponent
+        ? PlanetGameplayComponent->G3ActionTargetHoverColor
+        : FLinearColor(0.08f, 0.45f, 1.0f, 1.0f);
+    Config.CaptureTargetHoverColor = PlanetGameplayComponent
+        ? PlanetGameplayComponent->G4CaptureTargetHoverColor
+        : FLinearColor(1.0f, 0.0f, 0.0f, 1.0f);
     return Config;
 }
 
@@ -249,19 +265,20 @@ void APlanetTessellatedMesh::WriteHISMHighlightForCell_(int32 CellId, bool bMark
     HISMTileRenderer.WriteHighlightForCell(
         CellId,
         BuildHISMHighlightConfig_(),
-        GameplayContainer.Get(),
+        PlanetGameplayComponent ? PlanetGameplayComponent->GetGameplayContainer() : nullptr,
         bMarkRenderStateDirty);
 }
 
 void APlanetTessellatedMesh::RefreshG4CapturePreviewCellsForActionTarget_(int32 ActionTargetCellId, bool bMarkLastRenderStateDirty)
 {
-    if (!GameplayContainer.IsValid() || ActionTargetCellId == INDEX_NONE)
+    FTerraGameplayContainer* Gameplay = PlanetGameplayComponent ? PlanetGameplayComponent->GetGameplayContainer() : nullptr;
+    if (!Gameplay || ActionTargetCellId == INDEX_NONE)
     {
         return;
     }
 
     TArray<int32> CaptureCellIds;
-    if (!GameplayContainer->CollectCapturePreviewCellIdsForActionTarget(ActionTargetCellId, CaptureCellIds))
+    if (!Gameplay->CollectCapturePreviewCellIdsForActionTarget(ActionTargetCellId, CaptureCellIds))
     {
         return;
     }
@@ -278,152 +295,38 @@ void APlanetTessellatedMesh::UpdateHISMHoverCell_(int32 NewCellId)
         NewCellId,
         HISMHoverFadeDuration,
         BuildHISMHighlightConfig_(),
-        GameplayContainer.Get());
+        PlanetGameplayComponent ? PlanetGameplayComponent->GetGameplayContainer() : nullptr);
 }
 
 void APlanetTessellatedMesh::RebuildGameplay_()
 {
-    if (UWorld* World = GetWorld())
+    if (PlanetGameplayComponent)
     {
-        if (PlanetCameraComponent)
-        {
-            PlanetCameraComponent->ClearDelayedTurnStartFocusTimer();
-        }
+        PlanetGameplayComponent->RebuildGameplay();
     }
-
-    if (!CellTopology.IsValid() || !Generator.IsValid())
-    {
-        if (GameplayContainer.IsValid())
-        {
-            FTerraNpcMcpGameplayBridge::UnregisterExecuteValidatedActionDelegate();
-            FTerraNpcMcpGameplayBridge::UnregisterGameplayContainer(GameplayContainer.Get());
-        }
-        GameplayContainer.Reset();
-        ClearP1PiecePresentation_();
-        G2_5LastHighlightedFactionId = INDEX_NONE;
-        if (PlanetCameraComponent)
-        {
-            PlanetCameraComponent->ResetCameraState();
-        }
-        return;
-    }
-
-    const int32 NumCells = CellTopology->Cells.Num();
-    const TArray<FCellGeoData>& GeoCells = Generator->GetCellData();
-    if (GeoCells.Num() != NumCells)
-    {
-        UE_LOG(LogPlanetTess, Warning,
-            TEXT("[Tess][G2] Skip Gameplay rebuild: WorldGen cell count mismatch. Got=%d Expected=%d"),
-            GeoCells.Num(),
-            NumCells);
-        if (GameplayContainer.IsValid())
-        {
-            FTerraNpcMcpGameplayBridge::UnregisterExecuteValidatedActionDelegate();
-            FTerraNpcMcpGameplayBridge::UnregisterGameplayContainer(GameplayContainer.Get());
-        }
-        GameplayContainer.Reset();
-        ClearP1PiecePresentation_();
-        G2_5LastHighlightedFactionId = INDEX_NONE;
-        if (PlanetCameraComponent)
-        {
-            PlanetCameraComponent->ResetCameraState();
-        }
-        return;
-    }
-
-    TArray<FTerraGameplayCellState> GameplayCells;
-    GameplayCells.SetNum(NumCells);
-
-    for (int32 CellId = 0; CellId < NumCells; ++CellId)
-    {
-        const FCell& SourceCell = CellTopology->Cells[CellId];
-        FTerraGameplayCellState& TargetCell = GameplayCells[CellId];
-        TargetCell.CellId = CellId;
-        TargetCell.bIsPentagon = SourceCell.bIsPentagon;
-        TargetCell.NeighborCellIds = SourceCell.NeighborCellIds;
-
-        switch (GeoCells[CellId].SimpleTerrainType)
-        {
-        case ETerraSimpleTerrainType::Forest:
-            TargetCell.TerrainType = ETerraGameplayTerrainType::Forest;
-            break;
-        case ETerraSimpleTerrainType::Mountain:
-            TargetCell.TerrainType = ETerraGameplayTerrainType::Mountain;
-            break;
-        case ETerraSimpleTerrainType::Plain:
-        default:
-            TargetCell.TerrainType = ETerraGameplayTerrainType::Plain;
-            break;
-        }
-    }
-
-    if (GameplayContainer.IsValid())
-    {
-        FTerraNpcMcpGameplayBridge::UnregisterExecuteValidatedActionDelegate();
-        FTerraNpcMcpGameplayBridge::UnregisterGameplayContainer(GameplayContainer.Get());
-    }
-    GameplayContainer = MakeUnique<FTerraGameplayContainer>();
-    GameplayContainer->Initialize(GameplayCells);
-    GameplayContainer->SetDebugKeepSameFactionOnEndTurn(bG3DebugKeepSameFactionOnEndTurn);
-    FTerraNpcMcpGameplayBridge::RegisterGameplayContainer(GameplayContainer.Get());
-    FTerraNpcMcpGameplayBridge::RegisterExecuteValidatedActionDelegate(
-        [this](int32 ExpectedTurnIndex, int32 ExpectedFactionId, int32 PieceId, int32 ToCellId, FTerraGameplayContainer::FValidatedActionExecutionResult& OutResult)
-        {
-            return TryExecuteNpcMcpValidatedAction_(ExpectedTurnIndex, ExpectedFactionId, PieceId, ToCellId, OutResult);
-        });
-
-    G2_5LastHighlightedFactionId = GameplayContainer->GetCurrentFactionId();
-    if (PlanetCameraComponent)
-        {
-            PlanetCameraComponent->ResetCameraState();
-        }
-    RefreshCurrentFactionPieceHighlights_();
-    SyncP1PiecePresentation_();
 }
 
 void APlanetTessellatedMesh::RefreshGameplayHighlights_(const TArray<int32>& DirtyCellIds)
 {
-    for (const int32 CellId : DirtyCellIds)
+    if (PlanetGameplayComponent)
     {
-        WriteHISMHighlightForCell_(CellId);
+        PlanetGameplayComponent->RefreshGameplayHighlights(DirtyCellIds);
     }
 }
 
 void APlanetTessellatedMesh::RefreshFactionPieceHighlights_(int32 FactionId)
 {
-    if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
+    if (PlanetGameplayComponent)
     {
-        return;
-    }
-
-    TArray<int32> PieceCellIds;
-    if (!GameplayContainer->CollectFactionPieceCellIds(FactionId, PieceCellIds))
-    {
-        return;
-    }
-
-    for (const int32 CellId : PieceCellIds)
-    {
-        WriteHISMHighlightForCell_(CellId);
+        PlanetGameplayComponent->RefreshFactionPieceHighlights(FactionId);
     }
 }
 
 void APlanetTessellatedMesh::RefreshCurrentFactionPieceHighlights_()
 {
-    if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
+    if (PlanetGameplayComponent)
     {
-        return;
-    }
-
-    TArray<int32> PieceCellIds;
-    if (!GameplayContainer->CollectCurrentFactionPieceCellIds(PieceCellIds))
-    {
-        return;
-    }
-
-    for (const int32 CellId : PieceCellIds)
-    {
-        WriteHISMHighlightForCell_(CellId);
+        PlanetGameplayComponent->RefreshCurrentFactionPieceHighlights();
     }
 }
 
@@ -641,442 +544,30 @@ bool APlanetTessellatedMesh::HandleHISMClickHit(const FHitResult& Hit)
 
 bool APlanetTessellatedMesh::HandleC5NavigateCurrentFactionPiece(bool bReverse)
 {
-    if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
-    {
-        UE_LOG(LogPlanetTess, Warning,
-            TEXT("[Tess][C5] Tab navigation ignored: GameplayContainer is not ready."));
-        return false;
-    }
-
-    const ETerraGameplayInteractionPhase Phase = GameplayContainer->GetInteractionPhase();
-    if (Phase != ETerraGameplayInteractionPhase::Idle
-        && Phase != ETerraGameplayInteractionPhase::PieceSelected)
-    {
-        UE_LOG(LogPlanetTess, Log,
-            TEXT("[Tess][C5] Tab navigation ignored in Phase=%d."),
-            static_cast<int32>(Phase));
-        return false;
-    }
-
-    TArray<int32> SelectablePieceIds;
-    if (!GameplayContainer->CollectCurrentFactionSelectablePieceIds(SelectablePieceIds))
-    {
-        UE_LOG(LogPlanetTess, Log,
-            TEXT("[Tess][C5] Tab navigation ignored: no selectable pieces. CurrentFaction=%d Turn=%d"),
-            GameplayContainer->GetCurrentFactionId(),
-            GameplayContainer->GetTurnIndex());
-        return false;
-    }
-
-    const int32 CurrentSelectedPieceId = GameplayContainer->GetSelectedPieceId();
-    int32 CurrentIndex = INDEX_NONE;
-    if (CurrentSelectedPieceId != INDEX_NONE)
-    {
-        CurrentIndex = SelectablePieceIds.IndexOfByKey(CurrentSelectedPieceId);
-    }
-
-    int32 TargetIndex = INDEX_NONE;
-    if (CurrentIndex == INDEX_NONE)
-    {
-        TargetIndex = bReverse ? SelectablePieceIds.Num() - 1 : 0;
-    }
-    else
-    {
-        const int32 Direction = bReverse ? -1 : 1;
-        TargetIndex = (CurrentIndex + Direction + SelectablePieceIds.Num()) % SelectablePieceIds.Num();
-    }
-
-    if (!SelectablePieceIds.IsValidIndex(TargetIndex))
-    {
-        return false;
-    }
-
-    const int32 TargetPieceId = SelectablePieceIds[TargetIndex];
-    int32 TargetCellId = INDEX_NONE;
-    if (!GameplayContainer->TryGetPieceCellId(TargetPieceId, TargetCellId))
-    {
-        return false;
-    }
-
-    HISMTileRenderer.SetLastClickedCellId(TargetCellId);
-    const bool bHandled = HandleGameplayCellClick_(
-        TargetCellId,
-        bReverse ? TEXT("C5 Shift+Tab") : TEXT("C5 Tab"),
-        INDEX_NONE,
-        TEXT("Keyboard"));
-
-    UE_LOG(LogPlanetTess, Log,
-        TEXT("[Tess][C5] Navigate Reverse=%d TargetPiece=%d TargetCell=%d Handled=%d Index=%d/%d"),
-        bReverse ? 1 : 0,
-        TargetPieceId,
-        TargetCellId,
-        bHandled ? 1 : 0,
-        TargetIndex,
-        SelectablePieceIds.Num());
-    return bHandled;
+    return PlanetGameplayComponent
+        ? PlanetGameplayComponent->HandleC5NavigateCurrentFactionPiece(bReverse)
+        : false;
 }
 
 bool APlanetTessellatedMesh::HandleGameplayCellClick_(int32 CellId, const TCHAR* SourceLabel, int32 InstanceIndex, const FString& ComponentName)
 {
-    if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
-    {
-        UE_LOG(LogPlanetTess, Warning,
-            TEXT("[Tess][G2] %s ignored: GameplayContainer is not ready. Cell=%d Instance=%d Component=%s"),
-            SourceLabel ? SourceLabel : TEXT("CellClick"),
-            CellId,
-            InstanceIndex,
-            *ComponentName);
-        return true;
-    }
-
-    GameplayContainer->SetDebugKeepSameFactionOnEndTurn(bG3DebugKeepSameFactionOnEndTurn);
-
-    const int32 PrevTurnIndex = GameplayContainer->GetTurnIndex();
-    const int32 PrevFactionId = GameplayContainer->GetCurrentFactionId();
-    const int32 PrevSelectedPieceId = GameplayContainer->GetSelectedPieceId();
-    const ETerraGameplayInteractionPhase PrevPhase = GameplayContainer->GetInteractionPhase();
-    const TArray<FTerraGameplayPieceState> PrevPieces = GameplayContainer->GetPieces();
-    int32 PrevSelectedPieceCellId = INDEX_NONE;
-    if (PrevSelectedPieceId != INDEX_NONE)
-    {
-        GameplayContainer->TryGetPieceCellId(PrevSelectedPieceId, PrevSelectedPieceCellId);
-    }
-
-    TArray<FTerraGameplayCaptureEntry> PendingCaptureEntriesBeforeClick;
-    const bool bCouldConfirmTurnBeforeClick =
-        PrevSelectedPieceId != INDEX_NONE
-        && PrevSelectedPieceCellId == CellId
-        && (PrevPhase == ETerraGameplayInteractionPhase::PieceMovedCanEndTurn
-            || PrevPhase == ETerraGameplayInteractionPhase::PieceJumpingCanContinue);
-    if (bCouldConfirmTurnBeforeClick)
-    {
-        GameplayContainer->CollectPendingCaptureEntries(PendingCaptureEntriesBeforeClick);
-    }
-
-    TArray<int32> DirtyCellIds;
-    const bool bGameplayHandled = GameplayContainer->HandleCellClick(CellId, DirtyCellIds);
-    RefreshGameplayHighlights_(DirtyCellIds);
-    RefreshG4CapturePreviewCellsForActionTarget_(HISMTileRenderer.GetCurrentHoverCellId());
-
-    const int32 NewFactionId = GameplayContainer->GetCurrentFactionId();
-    const int32 NewTurnIndex = GameplayContainer->GetTurnIndex();
-    const int32 NewSelectedPieceId = GameplayContainer->GetSelectedPieceId();
-    const ETerraGameplayInteractionPhase NewPhase = GameplayContainer->GetInteractionPhase();
-    int32 NewSelectedPieceCellId = INDEX_NONE;
-    if (NewSelectedPieceId != INDEX_NONE)
-    {
-        GameplayContainer->TryGetPieceCellId(NewSelectedPieceId, NewSelectedPieceCellId);
-    }
-
-    TArray<FTerraPiecePresentationCaptureEvent> P3CaptureEvents;
-    if (bGameplayHandled
-        && bCouldConfirmTurnBeforeClick
-        && PendingCaptureEntriesBeforeClick.Num() > 0
-        && NewPhase == ETerraGameplayInteractionPhase::Idle)
-    {
-        BuildP3CaptureEventsFromPendingEntries_(PendingCaptureEntriesBeforeClick, PrevPieces, P3CaptureEvents);
-    }
-
-    TArray<FTerraPiecePresentationMoveEvent> P2MoveEvents;
-    if (bGameplayHandled
-        && PrevSelectedPieceId != INDEX_NONE
-        && PrevSelectedPieceId == NewSelectedPieceId
-        && PrevSelectedPieceCellId != INDEX_NONE
-        && NewSelectedPieceCellId != INDEX_NONE
-        && PrevSelectedPieceCellId != NewSelectedPieceCellId)
-    {
-        ETerraPiecePresentationMoveType MoveType = ETerraPiecePresentationMoveType::None;
-        if (NewPhase == ETerraGameplayInteractionPhase::PieceJumpingCanContinue)
-        {
-            MoveType = ETerraPiecePresentationMoveType::Jump;
-        }
-        else if (NewPhase == ETerraGameplayInteractionPhase::PieceMovedCanEndTurn)
-        {
-            MoveType = ETerraPiecePresentationMoveType::Move;
-        }
-
-        if (MoveType != ETerraPiecePresentationMoveType::None)
-        {
-            const ETerraGameplayPieceType MovingPieceType = PrevPieces.IsValidIndex(PrevSelectedPieceId)
-                ? PrevPieces[PrevSelectedPieceId].PieceType
-                : ETerraGameplayPieceType::Infantry;
-            FTransform FromWorldTransform = FTransform::Identity;
-            FTransform ToWorldTransform = FTransform::Identity;
-            if (BuildP1PieceWorldTransform_(PrevSelectedPieceCellId, MovingPieceType, FromWorldTransform)
-                && BuildP1PieceWorldTransform_(NewSelectedPieceCellId, MovingPieceType, ToWorldTransform))
-            {
-                FTerraPiecePresentationMoveEvent& MoveEvent = P2MoveEvents.AddDefaulted_GetRef();
-                MoveEvent.PieceId = NewSelectedPieceId;
-                MoveEvent.FromCellId = PrevSelectedPieceCellId;
-                MoveEvent.ToCellId = NewSelectedPieceCellId;
-                MoveEvent.MoveType = MoveType;
-                MoveEvent.FromWorldTransform = FromWorldTransform;
-                MoveEvent.ToWorldTransform = ToWorldTransform;
-            }
-        }
-    }
-
-    const bool bTurnChanged = NewTurnIndex != PrevTurnIndex;
-    const bool bFactionChanged = NewFactionId != PrevFactionId;
-
-    if (bTurnChanged)
-    {
-        UE_LOG(LogPlanetTess, Log,
-            TEXT("[Tess][C6.5] Turn changed after click. PrevTurn=%d NewTurn=%d PrevFaction=%d NewFaction=%d FactionChanged=%d PrevPhase=%d NewPhase=%d bGameplayHandled=%d PendingCapturesBeforeClick=%d P2MoveEvents=%d P3CaptureEvents=%d"),
-            PrevTurnIndex,
-            NewTurnIndex,
-            PrevFactionId,
-            NewFactionId,
-            bFactionChanged ? 1 : 0,
-            static_cast<int32>(PrevPhase),
-            static_cast<int32>(NewPhase),
-            bGameplayHandled ? 1 : 0,
-            PendingCaptureEntriesBeforeClick.Num(),
-            P2MoveEvents.Num(),
-            P3CaptureEvents.Num());
-        if (bFactionChanged)
-        {
-            RefreshFactionPieceHighlights_(PrevFactionId);
-        }
-        RefreshFactionPieceHighlights_(NewFactionId);
-        G2_5LastHighlightedFactionId = NewFactionId;
-        if (PlanetCameraComponent)
-        {
-            PlanetCameraComponent->SetLastFocusedTurnIndex(NewTurnIndex);
-        }
-    }
-    else if (NewPhase != PrevPhase || bGameplayHandled)
-    {
-        RefreshFactionPieceHighlights_(NewFactionId);
-    }
-
-    if (bGameplayHandled
-        && NewSelectedPieceId != INDEX_NONE
-        && NewSelectedPieceId != PrevSelectedPieceId
-        && NewPhase == ETerraGameplayInteractionPhase::PieceSelected)
-    {
-        int32 SelectedPieceCellId = INDEX_NONE;
-        if (PlanetCameraComponent && GameplayContainer->TryGetPieceCellId(NewSelectedPieceId, SelectedPieceCellId))
-        {
-            PlanetCameraComponent->FocusCameraOnSelectedCellSmart(SelectedPieceCellId);
-        }
-    }
-
-    RebuildG1DebugPieces_();
-    if (PlanetCameraComponent)
-    {
-        PlanetCameraComponent->RequestC6ActionCameraTrackingForMoveEvents(P2MoveEvents);
-    }
-    SyncP1PiecePresentation_(P2MoveEvents, P3CaptureEvents);
-
-    if (bTurnChanged
-        && (!PlanetCameraComponent || !PlanetCameraComponent->TryRequestC6_5DelayedTurnStartFocus(
-            NewTurnIndex,
-            NewFactionId,
-            P2MoveEvents,
-            P3CaptureEvents)))
-    {
-        UE_LOG(LogPlanetTess, Log,
-            TEXT("[Tess][C6.5] Falling back to immediate turn focus. Faction=%d Turn=%d FactionChanged=%d P2MoveEvents=%d P3CaptureEvents=%d"),
-            NewFactionId,
-            NewTurnIndex,
-            bFactionChanged ? 1 : 0,
-            P2MoveEvents.Num(),
-            P3CaptureEvents.Num());
-        if (PlanetCameraComponent)
-        {
-            PlanetCameraComponent->FocusCameraOnCurrentFactionBase();
-        }
-    }
-
-    UE_LOG(LogPlanetTess, Log,
-        TEXT("[Tess][G2] %s -> Gameplay Cell=%d Instance=%d Component=%s Handled=%d CurrentFaction=%d Turn=%d Phase=%d P2MoveEvents=%d P3CaptureEvents=%d"),
-        SourceLabel ? SourceLabel : TEXT("CellClick"),
-        CellId,
-        InstanceIndex,
-        *ComponentName,
-        bGameplayHandled ? 1 : 0,
-        GameplayContainer->GetCurrentFactionId(),
-        GameplayContainer->GetTurnIndex(),
-        static_cast<int32>(GameplayContainer->GetInteractionPhase()),
-        P2MoveEvents.Num(),
-        P3CaptureEvents.Num());
-
-    return true;
+    return PlanetGameplayComponent
+        ? PlanetGameplayComponent->HandleGameplayCellClick(CellId, SourceLabel, InstanceIndex, ComponentName)
+        : true;
 }
 
 bool APlanetTessellatedMesh::TryExecuteNpcMcpValidatedAction_(int32 ExpectedTurnIndex, int32 ExpectedFactionId, int32 PieceId, int32 ToCellId, FTerraGameplayContainer::FValidatedActionExecutionResult& OutResult)
 {
-    OutResult = FTerraGameplayContainer::FValidatedActionExecutionResult();
-    OutResult.TurnIndexBefore = GameplayContainer.IsValid() ? GameplayContainer->GetTurnIndex() : INDEX_NONE;
-    OutResult.TurnIndexAfter = OutResult.TurnIndexBefore;
-    OutResult.FactionIdBefore = GameplayContainer.IsValid() ? GameplayContainer->GetCurrentFactionId() : INDEX_NONE;
-    OutResult.FactionIdAfter = OutResult.FactionIdBefore;
-    OutResult.PieceId = PieceId;
-    OutResult.ToCellId = ToCellId;
-
-    auto Reject = [this, &OutResult](const TCHAR* Reason) -> bool
-    {
-        OutResult.bAccepted = false;
-        OutResult.bExecuted = false;
-        OutResult.RejectReason = Reason;
-        OutResult.TurnIndexAfter = GameplayContainer.IsValid() ? GameplayContainer->GetTurnIndex() : INDEX_NONE;
-        OutResult.FactionIdAfter = GameplayContainer.IsValid() ? GameplayContainer->GetCurrentFactionId() : INDEX_NONE;
-        return false;
-    };
-
-    if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
-    {
-        return Reject(TEXT("gameplay_unavailable"));
-    }
-    if (GameplayContainer->IsMatchEnded())
-    {
-        return Reject(TEXT("match_ended"));
-    }
-    if (GameplayContainer->GetInteractionPhase() != ETerraGameplayInteractionPhase::Idle)
-    {
-        return Reject(TEXT("not_idle"));
-    }
-    if (GameplayContainer->GetTurnIndex() != ExpectedTurnIndex || GameplayContainer->GetCurrentFactionId() != ExpectedFactionId)
-    {
-        return Reject(TEXT("snapshot_mismatch"));
-    }
-
-    FTerraGameplayContainer::FLegalActionQuery LegalAction;
-    if (!GameplayContainer->IsCurrentFactionLegalAction(PieceId, ToCellId, LegalAction))
-    {
-        return Reject(TEXT("not_current_faction_action"));
-    }
-
-    OutResult.bAccepted = true;
-    OutResult.PieceId = LegalAction.PieceId;
-    OutResult.FromCellId = LegalAction.FromCellId;
-    OutResult.ToCellId = LegalAction.ToCellId;
-    OutResult.bWasJump = LegalAction.bIsJump;
-    OutResult.CaptureEntries = LegalAction.CaptureEntries;
-
-    if (!HandleGameplayCellClick_(LegalAction.FromCellId, TEXT("NPC MCP Select"), INDEX_NONE, TEXT("NpcMcp")))
-    {
-        return Reject(TEXT("select_failed"));
-    }
-    if (GameplayContainer->GetSelectedPieceId() != LegalAction.PieceId)
-    {
-        return Reject(TEXT("select_failed"));
-    }
-
-    if (!HandleGameplayCellClick_(LegalAction.ToCellId, TEXT("NPC MCP Move"), INDEX_NONE, TEXT("NpcMcp")))
-    {
-        TArray<int32> UndoDirtyCellIds;
-        GameplayContainer->UndoCurrentInteraction(UndoDirtyCellIds);
-        RefreshGameplayHighlights_(UndoDirtyCellIds);
-        SyncP1PiecePresentation_();
-        return Reject(TEXT("move_failed"));
-    }
-
-    const ETerraGameplayInteractionPhase PostMovePhase = GameplayContainer->GetInteractionPhase();
-    if (PostMovePhase != ETerraGameplayInteractionPhase::PieceMovedCanEndTurn
-        && PostMovePhase != ETerraGameplayInteractionPhase::PieceJumpingCanContinue)
-    {
-        TArray<int32> UndoDirtyCellIds;
-        GameplayContainer->UndoCurrentInteraction(UndoDirtyCellIds);
-        RefreshGameplayHighlights_(UndoDirtyCellIds);
-        SyncP1PiecePresentation_();
-        return Reject(TEXT("move_failed"));
-    }
-
-    if (!HandleGameplayCellClick_(LegalAction.ToCellId, TEXT("NPC MCP EndTurn"), INDEX_NONE, TEXT("NpcMcp")))
-    {
-        TArray<int32> UndoDirtyCellIds;
-        GameplayContainer->UndoCurrentInteraction(UndoDirtyCellIds);
-        RefreshGameplayHighlights_(UndoDirtyCellIds);
-        SyncP1PiecePresentation_();
-        return Reject(TEXT("end_turn_failed"));
-    }
-
-    if (GameplayContainer->GetInteractionPhase() != ETerraGameplayInteractionPhase::Idle)
-    {
-        return Reject(TEXT("end_turn_failed"));
-    }
-
-    OutResult.bExecuted = true;
-    OutResult.RejectReason.Reset();
-    OutResult.TurnIndexAfter = GameplayContainer->GetTurnIndex();
-    OutResult.FactionIdAfter = GameplayContainer->GetCurrentFactionId();
-    return true;
+    return PlanetGameplayComponent
+        ? PlanetGameplayComponent->TryExecuteNpcMcpValidatedAction(ExpectedTurnIndex, ExpectedFactionId, PieceId, ToCellId, OutResult)
+        : false;
 }
 
 bool APlanetTessellatedMesh::HandleHISMUndo()
 {
-    if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
-    {
-        return false;
-    }
-
-    const ETerraGameplayInteractionPhase PrevPhase = GameplayContainer->GetInteractionPhase();
-    const TArray<FTerraGameplayPieceState> PrevPieces = GameplayContainer->GetPieces();
-
-    TArray<int32> DirtyCellIds;
-    const bool bUndone = GameplayContainer->UndoCurrentInteraction(DirtyCellIds);
-    if (!bUndone)
-    {
-        return false;
-    }
-
-    const TArray<FTerraGameplayPieceState>& NewPieces = GameplayContainer->GetPieces();
-    TArray<FTerraPiecePresentationMoveEvent> UndoMoveEvents;
-    for (const FTerraGameplayPieceState& NewPiece : NewPieces)
-    {
-        if (!NewPiece.bAlive || !PrevPieces.IsValidIndex(NewPiece.PieceId))
-        {
-            continue;
-        }
-
-        const FTerraGameplayPieceState& PrevPiece = PrevPieces[NewPiece.PieceId];
-        if (!PrevPiece.bAlive
-            || PrevPiece.CellId == NewPiece.CellId
-            || PrevPiece.OwnerFactionId != NewPiece.OwnerFactionId)
-        {
-            continue;
-        }
-
-        ETerraPiecePresentationMoveType MoveType = ETerraPiecePresentationMoveType::Move;
-        if (PrevPhase == ETerraGameplayInteractionPhase::PieceJumpingCanContinue)
-        {
-            MoveType = ETerraPiecePresentationMoveType::Jump;
-        }
-
-        FTransform FromWorldTransform = FTransform::Identity;
-        FTransform ToWorldTransform = FTransform::Identity;
-        if (BuildP1PieceWorldTransform_(PrevPiece.CellId, NewPiece.PieceType, FromWorldTransform)
-            && BuildP1PieceWorldTransform_(NewPiece.CellId, NewPiece.PieceType, ToWorldTransform))
-        {
-            FTerraPiecePresentationMoveEvent& MoveEvent = UndoMoveEvents.AddDefaulted_GetRef();
-            MoveEvent.PieceId = NewPiece.PieceId;
-            MoveEvent.FromCellId = PrevPiece.CellId;
-            MoveEvent.ToCellId = NewPiece.CellId;
-            MoveEvent.MoveType = MoveType;
-            MoveEvent.FromWorldTransform = FromWorldTransform;
-            MoveEvent.ToWorldTransform = ToWorldTransform;
-        }
-    }
-
-    RefreshGameplayHighlights_(DirtyCellIds);
-    RefreshCurrentFactionPieceHighlights_();
-    RefreshG4CapturePreviewCellsForActionTarget_(HISMTileRenderer.GetCurrentHoverCellId());
-    RebuildG1DebugPieces_();
-    if (PlanetCameraComponent)
-    {
-        PlanetCameraComponent->RequestC6ActionCameraTrackingForMoveEvents(UndoMoveEvents);
-    }
-    SyncP1PiecePresentation_(UndoMoveEvents);
-
-    UE_LOG(LogPlanetTess, Log,
-        TEXT("[Tess][G9] HISM Undo -> CurrentFaction=%d Turn=%d Phase=%d UndoMoveEvents=%d"),
-        GameplayContainer->GetCurrentFactionId(),
-        GameplayContainer->GetTurnIndex(),
-        static_cast<int32>(GameplayContainer->GetInteractionPhase()),
-        UndoMoveEvents.Num());
-    return true;
+    return PlanetGameplayComponent
+        ? PlanetGameplayComponent->HandleHISMUndo()
+        : false;
 }
 
 void APlanetTessellatedMesh::ClearHISMHover()
@@ -1086,323 +577,24 @@ void APlanetTessellatedMesh::ClearHISMHover()
 
 void APlanetTessellatedMesh::ClearAllHISMHighlights()
 {
-    HISMTileRenderer.ClearAllHighlights(BuildHISMHighlightConfig_(), GameplayContainer.Get());
+    HISMTileRenderer.ClearAllHighlights(
+        BuildHISMHighlightConfig_(),
+        PlanetGameplayComponent ? PlanetGameplayComponent->GetGameplayContainer() : nullptr);
 }
 
 void APlanetTessellatedMesh::RebuildG1DebugPieces_()
 {
-    G1DebugPieces.Reset();
-
-    if (!bEnableG1DebugPieces || !CellTopology.IsValid())
+    if (PlanetGameplayComponent)
     {
-        return;
+        PlanetGameplayComponent->RebuildG1DebugPieces();
     }
-
-    if (GameplayContainer.IsValid() && GameplayContainer->IsInitialized())
-    {
-        for (const FTerraGameplayPieceState& Piece : GameplayContainer->GetPieces())
-        {
-            if (!Piece.bAlive || !CellTopology->Cells.IsValidIndex(Piece.CellId))
-            {
-                continue;
-            }
-
-            FTerraG1DebugPiece& DebugPiece = G1DebugPieces.AddDefaulted_GetRef();
-            DebugPiece.FactionId = Piece.OwnerFactionId;
-            DebugPiece.CellId = Piece.CellId;
-
-            switch (Piece.PieceType)
-            {
-            case ETerraGameplayPieceType::Commander:
-                DebugPiece.PieceType = ETerraG1DebugPieceType::Base;
-                break;
-            case ETerraGameplayPieceType::Cavalry:
-                DebugPiece.PieceType = ETerraG1DebugPieceType::Cavalry;
-                break;
-            case ETerraGameplayPieceType::Archer:
-                DebugPiece.PieceType = ETerraG1DebugPieceType::Archer;
-                break;
-            case ETerraGameplayPieceType::Infantry:
-            default:
-                DebugPiece.PieceType = ETerraG1DebugPieceType::Infantry;
-                break;
-            }
-        }
-        return;
-    }
-
-    const int32 NumCells = CellTopology->Cells.Num();
-    TSet<int32> OccupiedCells;
-
-    auto IsValidCellId = [NumCells](int32 CellId)
-    {
-        return CellId >= 0 && CellId < NumCells;
-    };
-
-    auto AddPiece = [this, &OccupiedCells, &IsValidCellId](int32 FactionId, int32 CellId, ETerraG1DebugPieceType PieceType)
-    {
-        if (!IsValidCellId(CellId))
-        {
-            UE_LOG(LogPlanetTess, Warning,
-                TEXT("[Tess][G1] Skip invalid debug piece cell. Faction=%d Cell=%d Type=%d"),
-                FactionId,
-                CellId,
-                static_cast<int32>(PieceType));
-            return false;
-        }
-
-        if (OccupiedCells.Contains(CellId))
-        {
-            UE_LOG(LogPlanetTess, Warning,
-                TEXT("[Tess][G1] Skip occupied debug piece cell. Faction=%d Cell=%d Type=%d"),
-                FactionId,
-                CellId,
-                static_cast<int32>(PieceType));
-            return false;
-        }
-
-        OccupiedCells.Add(CellId);
-
-        FTerraG1DebugPiece& Piece = G1DebugPieces.AddDefaulted_GetRef();
-        Piece.FactionId = FactionId;
-        Piece.CellId = CellId;
-        Piece.PieceType = PieceType;
-        return true;
-    };
-
-    TArray<int32> PentagonCellIds;
-    for (const FCell& Cell : CellTopology->Cells)
-    {
-        if (Cell.bIsPentagon)
-        {
-            PentagonCellIds.Add(Cell.CellId);
-        }
-    }
-
-    PentagonCellIds.Sort();
-
-    if (PentagonCellIds.Num() != 12)
-    {
-        UE_LOG(LogPlanetTess, Warning,
-            TEXT("[Tess][G1] Expected 12 pentagon bases, got %d."),
-            PentagonCellIds.Num());
-    }
-
-    int32 BaseCount = 0;
-    int32 InfantryCount = 0;
-    int32 CavalryCount = 0;
-    int32 ArcherCount = 0;
-
-    for (int32 FactionId = 0; FactionId < PentagonCellIds.Num(); ++FactionId)
-    {
-        const int32 BaseCellId = PentagonCellIds[FactionId];
-        if (!IsValidCellId(BaseCellId))
-        {
-            continue;
-        }
-
-        const FCell& BaseCell = CellTopology->Cells[BaseCellId];
-        if (AddPiece(FactionId, BaseCellId, ETerraG1DebugPieceType::Base))
-        {
-            ++BaseCount;
-        }
-
-        TArray<int32> ArcherCells;
-        TArray<int32> CavalryCells;
-        ArcherCells.Reserve(5);
-        CavalryCells.Reserve(5);
-
-        for (int32 NeighborSlot = 0; NeighborSlot < 5; ++NeighborSlot)
-        {
-            const int32 ArcherCellId = BaseCell.NeighborCellIds[NeighborSlot];
-            if (!IsValidCellId(ArcherCellId))
-            {
-                UE_LOG(LogPlanetTess, Warning,
-                    TEXT("[Tess][G1] Invalid archer neighbor. Faction=%d Base=%d Slot=%d Cell=%d"),
-                    FactionId,
-                    BaseCellId,
-                    NeighborSlot,
-                    ArcherCellId);
-                continue;
-            }
-
-            ArcherCells.Add(ArcherCellId);
-            if (AddPiece(FactionId, ArcherCellId, ETerraG1DebugPieceType::Archer))
-            {
-                ++ArcherCount;
-            }
-
-            const FCell& ArcherCell = CellTopology->Cells[ArcherCellId];
-            int32 BackToBaseIndex = INDEX_NONE;
-            int32 NeighborCount = 0;
-            for (int32 I = 0; I < 6; ++I)
-            {
-                const int32 NeighborCellId = ArcherCell.NeighborCellIds[I];
-                if (IsValidCellId(NeighborCellId))
-                {
-                    ++NeighborCount;
-                }
-                if (NeighborCellId == BaseCellId)
-                {
-                    BackToBaseIndex = I;
-                }
-            }
-
-            if (NeighborCount != 6 || BackToBaseIndex == INDEX_NONE)
-            {
-                UE_LOG(LogPlanetTess, Warning,
-                    TEXT("[Tess][G1] Cannot resolve cavalry opposite cell. Faction=%d Base=%d Archer=%d NeighborCount=%d BackIndex=%d"),
-                    FactionId,
-                    BaseCellId,
-                    ArcherCellId,
-                    NeighborCount,
-                    BackToBaseIndex);
-                CavalryCells.Add(INDEX_NONE);
-                continue;
-            }
-
-            const int32 CavalryCellId = ArcherCell.NeighborCellIds[(BackToBaseIndex + 3) % 6];
-            CavalryCells.Add(CavalryCellId);
-            if (AddPiece(FactionId, CavalryCellId, ETerraG1DebugPieceType::Cavalry))
-            {
-                ++CavalryCount;
-            }
-        }
-
-        for (int32 I = 0; I < CavalryCells.Num(); ++I)
-        {
-            const int32 CavalryAId = CavalryCells[I];
-            const int32 CavalryBId = CavalryCells[(I + 1) % CavalryCells.Num()];
-            if (!IsValidCellId(CavalryAId) || !IsValidCellId(CavalryBId))
-            {
-                continue;
-            }
-
-            const FCell& CavalryA = CellTopology->Cells[CavalryAId];
-            const FCell& CavalryB = CellTopology->Cells[CavalryBId];
-            const FVector MidDir = (CavalryA.UnitCenter + CavalryB.UnitCenter).GetSafeNormal();
-
-            int32 BestInfantryCellId = INDEX_NONE;
-            float BestScore = -FLT_MAX;
-
-            for (int32 SlotA = 0; SlotA < 6; ++SlotA)
-            {
-                const int32 CandidateCellId = CavalryA.NeighborCellIds[SlotA];
-                if (!IsValidCellId(CandidateCellId)
-                    || CandidateCellId == BaseCellId
-                    || ArcherCells.Contains(CandidateCellId)
-                    || CavalryCells.Contains(CandidateCellId)
-                    || OccupiedCells.Contains(CandidateCellId))
-                {
-                    continue;
-                }
-
-                bool bAlsoNeighborOfB = false;
-                for (int32 SlotB = 0; SlotB < 6; ++SlotB)
-                {
-                    if (CavalryB.NeighborCellIds[SlotB] == CandidateCellId)
-                    {
-                        bAlsoNeighborOfB = true;
-                        break;
-                    }
-                }
-
-                if (!bAlsoNeighborOfB)
-                {
-                    continue;
-                }
-
-                const float Score = static_cast<float>(FVector::DotProduct(CellTopology->Cells[CandidateCellId].UnitCenter, MidDir));
-                if (Score > BestScore)
-                {
-                    BestScore = Score;
-                    BestInfantryCellId = CandidateCellId;
-                }
-            }
-
-            if (BestInfantryCellId == INDEX_NONE)
-            {
-                UE_LOG(LogPlanetTess, Warning,
-                    TEXT("[Tess][G1] Cannot resolve infantry between cavalry cells. Faction=%d Base=%d CavalryA=%d CavalryB=%d"),
-                    FactionId,
-                    BaseCellId,
-                    CavalryAId,
-                    CavalryBId);
-                continue;
-            }
-
-            if (AddPiece(FactionId, BestInfantryCellId, ETerraG1DebugPieceType::Infantry))
-            {
-                ++InfantryCount;
-            }
-        }
-    }
-
-    UE_LOG(LogPlanetTess, Log,
-        TEXT("[Tess][G1] Rebuilt debug pieces: Factions=%d Bases=%d Infantry=%d Cavalry=%d Archer=%d Total=%d"),
-        PentagonCellIds.Num(),
-        BaseCount,
-        InfantryCount,
-        CavalryCount,
-        ArcherCount,
-        G1DebugPieces.Num());
 }
 
 void APlanetTessellatedMesh::DrawG1DebugPieces_() const
 {
-    UWorld* World = GetWorld();
-    if (PlanetPiecePresentationComponent
-        && PlanetPiecePresentationComponent->bHideG1DebugPiecesWhenP1IsActive
-        && PlanetPiecePresentationComponent->bEnableP1PiecePresentation
-        && World
-        && World->IsGameWorld())
+    if (PlanetGameplayComponent)
     {
-        return;
-    }
-
-    if (!bEnableG1DebugPieces || G1DebugPieces.Num() == 0 || !CellTopology.IsValid())
-    {
-        return;
-    }
-
-    if (!World)
-    {
-        return;
-    }
-
-    const float DrawRadius = FMath::Max(10.0f, G1DebugPieceRadiusCM);
-    const float DrawDistance = GlobeRadiusCM + G1DebugPieceHeightOffsetCM;
-    const FTransform ActorTransform = GetActorTransform();
-
-    for (const FTerraG1DebugPiece& Piece : G1DebugPieces)
-    {
-        if (!CellTopology->Cells.IsValidIndex(Piece.CellId))
-        {
-            continue;
-        }
-
-        FColor DrawColor = FColor::White;
-        switch (Piece.PieceType)
-        {
-        case ETerraG1DebugPieceType::Base:
-            DrawColor = FColor::Red;
-            break;
-        case ETerraG1DebugPieceType::Infantry:
-            DrawColor = FColor::Yellow;
-            break;
-        case ETerraG1DebugPieceType::Cavalry:
-            DrawColor = FColor::Blue;
-            break;
-        case ETerraG1DebugPieceType::Archer:
-            DrawColor = FColor::Green;
-            break;
-        default:
-            break;
-        }
-
-        const FVector LocalPosition = CellTopology->Cells[Piece.CellId].UnitCenter * DrawDistance;
-        const FVector WorldPosition = ActorTransform.TransformPosition(LocalPosition);
-        DrawDebugSphere(World, WorldPosition, DrawRadius, 12, DrawColor, false, 0.05f, 0, 3.0f);
+        PlanetGameplayComponent->DrawG1DebugPieces();
     }
 }
 
@@ -1410,7 +602,8 @@ void APlanetTessellatedMesh::ApplyRenderModeVisibility_()
 {
     HISMTileRenderer.ApplyVisibility(bEnableHISMTileRendering, bEnableHISMTileCollision);
 
-    const bool bNeedTick = (bEnableHISMInstanceHighlight && bEnableHISMTileRendering) || bEnableG1DebugPieces;
+    const bool bNeedTick = (bEnableHISMInstanceHighlight && bEnableHISMTileRendering)
+        || (PlanetGameplayComponent && PlanetGameplayComponent->bEnableG1DebugPieces);
     PrimaryActorTick.SetTickFunctionEnable(bNeedTick);
 }
 
