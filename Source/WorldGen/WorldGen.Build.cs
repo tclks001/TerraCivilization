@@ -13,9 +13,7 @@ public class WorldGen : ModuleRules
             "Core",
             "CoreUObject",
             "Engine",
-            "Grid",
-            "GameplayTags",
-            "TerrainTags"
+            "Grid"
         });
     }
 }

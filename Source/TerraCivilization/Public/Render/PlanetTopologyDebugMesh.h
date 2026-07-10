@@ -16,25 +16,10 @@ class UTexture2DArray;
 class FSphereTopology;
 class FWorldGenerator;
 
-/**
- * EWorldGenDebugView
- *
- * W2 引入的“世界生成 Debug 视图切换”枚举。
- * 默认 None 与 LandSea 等价（LayerIndex = bIsLand ? 4 : 0）；PlateId 模式下按板块染色。
- * 详见 Docs/W2_PlatesAndLandSea.md §4.4。
- * W3/W4/W5 各自追加选项（Elevation / Moisture / Temperature 热图等）。
- */
 UENUM(BlueprintType)
 enum class EWorldGenDebugView : uint8
 {
-    None         UMETA(DisplayName = "None (默认 LayerIndex / 与 Biome 等价)"),
-    PlateId      UMETA(DisplayName = "PlateId 染色"),
-    LandSea      UMETA(DisplayName = "海陆两色"),
-    Elevation    UMETA(DisplayName = "Elevation 热图 (W3)"),     // W3 新增
-    Moisture     UMETA(DisplayName = "Moisture 热图 (W3)"),      // W3 新增
-    Temperature  UMETA(DisplayName = "Temperature 热图 (W3)"),   // W3 新增
-    Mountain     UMETA(DisplayName = "Mountain 高亮 (W3)"),      // W3 新增
-    Biome        UMETA(DisplayName = "Biome 真实分类 (W4，默认值)"),  // W4 新增
+    Terrain UMETA(DisplayName = "SimpleGameplay Terrain"),
 };
 
 /**
@@ -100,21 +85,14 @@ public:
     int32 SubdivisionLevel = 3;
 
     /**
-     * WorldGen 流水线参数面板。W1 阶段：仅暴露 UPROPERTY，Rebuild() 末尾跑一次空 Generate()
-     * 验证模块加载与日志通道；不消费任何字段、不影响 R7 Triplanar 视觉。
-     * W2 起逐 step 启用：W2 板块/海陆、W3 高程/温湿度、W4 Whittaker 生物群系、W5 河流、W6 基地。
-     * 详见 Docs/WorldGenDesign.md §4.1 与 Docs/W1_ModuleSkeleton.md §2.1。
+     * SimpleGameplay WorldGen 参数：只生成平原、森林、山脉。
      */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PlanetTopology|WorldGen")
     FWorldGenSettings WorldGenSettings;
 
-    /**
-     * W2 引入：Debug 视图切换。None 默认为「按 bIsLand 两色」，PlateId 模式按板块哈希染色。
-     * 切换后需重跑 Rebuild()（仅重写 LUT，几何不变；< 1 ms 成本）。
-     * 详见 Docs/W2_PlatesAndLandSea.md §4.4。
-     */
+    /** Debug 视图固定为 SimpleGameplay 三地形。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|WorldGen")
-    EWorldGenDebugView DebugView = EWorldGenDebugView::Biome;
+    EWorldGenDebugView DebugView = EWorldGenDebugView::Terrain;
 
     /** 渲染用的名义球半径（cm）。仅做几何缩放，不参与拓扑。 */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PlanetTopology", meta = (ClampMin = "1.0"))
@@ -133,9 +111,7 @@ public:
     /**
      * R3 placeholder：每 Cell 的 LayerIndex 用伪随机值填充时的层数上限。
      *
-     * 真正的 LayerIndex 应该由 WorldGen 根据 TerrainTag 决定（详见 SDF 设计稿）；
-     * 在 R3 阶段我们还没接入 WorldGen，所以用 (CellId * 2654435761u) %% NumLayersHint
-     * 这种 Knuth 哈希做 placeholder。
+     * Generator 失效时的 fallback layer 数量。
      *
      * 调小这个值（比如 8）可以让相同 LayerIndex 的 Cell 更频繁出现，便于看到
      * "两个 hex 相邻地形相同时无可见边界" 的合并效果。
@@ -465,10 +441,8 @@ private:
      * Placeholder 策略：LayerIndex = (CellId * 2654435761u) % NumLayersHint
      *   —— 这是 Knuth 整数哈希常数（黄金分割），保证相邻 CellId 也能落在不同 Layer。
      *
-     * R7 接入 WorldGen 后，本函数会被替换为 "按 FCellGeoData[].TerrainTag 的 LayerIndex 填表"。
-     *
-     * R8：当 bUseR8PlaceholderRecipes=true 时，DebugView=Biome/None 默认分支改写 R 通道为
-     * R8_PlaceholderRecipeIndex(CellId)（17 配方），其它 DebugView 沿用 W2/W3/W4 语义。
+     * SimpleGameplay WorldGen 有效时按 Plain / Forest / Mountain 写入固定 layer；
+     * Generator 失效时才使用 placeholder hash 或 R8 recipe fallback。
      */
     void RebuildCellAttrLUT_(int32 NumCells);
 

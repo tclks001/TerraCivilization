@@ -22,11 +22,6 @@
 //   FWorldDelegates::OnPostWorldCleanup 在 Engine 模块，无需 UnrealEd。
 #include "Engine/World.h"
 
-// W4 引入：从 UTerrainSet 查 UTerrainDefinition->LayerIndex，写入 LUT.R。
-#include "TerrainSet.h"
-#include "TerrainDefinition.h"
-#include "GameplayTagContainer.h"
-
 // R8 引入：ProceduralMesh 几何重建依赖。水面层是本 Actor 下一个子组件（bEnableWaterShell
 //   开关 + WaterMaterial，详见 R8_ParametricTint.md §4.5 / AgentWorkflow.md §3.10）。
 //   原「Spawn 独立 APlanetWaterShell Actor 」路径已废弃（PIE 深拷贝会造成材质丢失）。
@@ -392,12 +387,8 @@ void APlanetTopologyDebugMesh::Rebuild()
     //   NumLayersHint 改变会同时影响 (A) 和 (B)，因此两条路径视觉上等价（仅"硬边"和"软边"
     //   的区别）。如果 (B) 视觉异常但 (A) 正常 → 一定是 Custom HLSL 节点配置错误。
     //
-    //   ⚠ W2 兼容性说明（2026-06）：W2 起 RebuildCellAttrLUT_ 中 R 通道写入逻辑已切换为
-    //   "DebugView=None: bIsLand?4:0 / DebugView=PlateId: 板块哈希"，与此处的 Knuth 哈希
-    //   *不再一致*。两条路径的"等价性"承诺被有意打破——保持本路径用 Knuth 哈希是为了：
-    //     · R7 Triplanar 视觉链路（路径 B 主用）由 LUT 驱动，不依赖 VertexColor → 视觉零回归
-    //     · 极简 VertexColor 材质（路径 A 备用）继续显示伪随机色块，便于检视拓扑
-    //   若 W3+ 需要让二者重新对齐，可把这段循环也改为按 Generator->GetCellData() 取值。
+    //   当前 SimpleGameplay 主路径由 RebuildCellAttrLUT_ 按 Plain / Forest / Mountain
+    //   写入 LUT；VertexColor fallback 仍使用 Knuth 哈希，方便在无材质时检视拓扑。
     // ------------------------------------------------------------------
     constexpr uint32 KnuthHash    = 2654435761u;
     const int32      LayerModCpp  = FMath::Clamp(NumLayersHint, 1, 256);
@@ -597,10 +588,8 @@ void APlanetTopologyDebugMesh::Rebuild()
         VertexColors, Tangents,
         /*bCreateCollision=*/false);
 
-    // 4) R3：构建 1×NumCells 的 CellAttrLUT，把每 Cell 的 LayerIndex 写入 R 通道。
-    //    ★ W2 起：在调用 RebuildCellAttrLUT_ 之前先跑 WorldGen 流水线，
-    //      LUT 写入时按 Generator->GetCellData()[i].bIsLand 取值（DebugView=None 默认两色）。
-    //      Generator 提升为成员持有，Reset → MakeUnique → Generate 顺序见 Docs/W2_PlatesAndLandSea.md §6 #11。
+    // 4) R3：构建 1×NumCells 的 CellAttrLUT，把 SimpleGameplay 三地形 LayerIndex 写入 R 通道。
+    //    在调用 RebuildCellAttrLUT_ 之前先跑 WorldGen，确保 Plain / Forest / Mountain 已生成。
     {
         Generator.Reset();
         Generator = MakeUnique<FWorldGenerator>(Topology.Get(), WorldGenSettings);
@@ -894,12 +883,8 @@ void APlanetTopologyDebugMesh::Rebuild()
         WaterSurfaceOffset,
         NumLayersHint);
 
-    // ===== W2: WorldGen 板块构造 + 海陆分离 =====
-    // W2 已在 RebuildCellAttrLUT_(NumCells) 之前完成 Generator 重建与 Generate()，
-    // CellAttrLUT 已经按 Generator->GetCellData()[i].bIsLand 写入（DebugView=None 默认两色）；
-    // 这里末尾不再重复运行——保留代码块占位，方便 W3+ 在此追加流水线后处理（如
-    // 反射诊断、AssetTagSync 等不影响 LUT 的副效应）。
-    // 详见 Docs/W2_PlatesAndLandSea.md §4。
+    // SimpleGameplay WorldGen 已在 RebuildCellAttrLUT_(NumCells) 之前完成；
+    // 这里只保留后续 debug mesh 视觉重建步骤。
 
     // ===== R8: 水面层重建（Component 子对象路径）=====
     //
@@ -997,90 +982,24 @@ void APlanetTopologyDebugMesh::RebuildCellAttrLUT_(int32 NumCells)
         return;
     }
 
-    // Knuth 整数哈希常数（黄金分割比 × 2^32）：保证相邻 CellId 也能落到不同 layer。
+    // Knuth 整数哈希常数（黄金分割比 × 2^32）：Generator 失效时 fallback 使用。
     constexpr uint32 KnuthHash = 2654435761u;
 
-    // SimpleGameplay：预构建 Tag → UTerrainDefinition 反查表，供 Biome / None 默认分支按 Def->LayerIndex 写 LUT.R。
-    //   - WorldGen 已把平原 / 森林 / 山脉 TerrainTag 写入 CellData[]；
-    //   - 本函数仅需查一次 LayerIndex 写入 R 通道。
-    //   - TerrainSet 当前作为渲染兼容查表，不再驱动 WorldGen 分类。
-    TMap<FGameplayTag, UTerrainDefinition*> TagToDefMap;
-    if (UTerrainSet* TSet = WorldGenSettings.TerrainSet.LoadSynchronous())
+    // SimpleGameplay：把三地形映射到现有 R8 recipe layer，供旧 debug mesh 看大致地形分布。
+    auto ComputeLayerForCell = [](const FCellGeoData& CD) -> uint8
     {
-        TSet->LoadSynchronous();
-        const TArray<UTerrainDefinition*>& Defs = TSet->GetLoadedDefs();
-        TagToDefMap.Reserve(Defs.Num());
-        for (UTerrainDefinition* Def : Defs)
+        switch (CD.SimpleTerrainType)
         {
-            if (Def && Def->TerrainTag.IsValid())
-            {
-                TagToDefMap.Add(Def->TerrainTag, Def);
-            }
-        }
-    }
-
-    // 小 Lambda：根据 CD 按 DebugView 计算 Layer（身体 + 诊断复用同一份逻辑，避免剧本偏移）。
-    auto ComputeLayerForCell = [&](const FCellGeoData& CD) -> uint8
-    {
-        switch (DebugView)
-        {
-            case EWorldGenDebugView::PlateId:
-            {
-                const uint32 Pid    = (uint32)FMath::Max(0, CD.PlateId);
-                const uint32 Hashed = (Pid * KnuthHash) >> 24;
-                return (uint8)(Hashed % 19u);
-            }
-            case EWorldGenDebugView::Elevation:
-            {
-                const float Norm = FMath::Clamp((CD.Elevation + 1.0f) * 0.5f, 0.0f, 1.0f);
-                return (uint8)FMath::FloorToInt(Norm * 18.0f);
-            }
-            case EWorldGenDebugView::Moisture:
-            {
-                return (uint8)FMath::FloorToInt(FMath::Clamp(CD.Moisture, 0.0f, 1.0f) * 18.0f);
-            }
-            case EWorldGenDebugView::Temperature:
-            {
-                const float Norm = FMath::Clamp((CD.Temperature + 1.0f) * 0.5f, 0.0f, 1.0f);
-                return (uint8)FMath::FloorToInt(Norm * 18.0f);
-            }
-            case EWorldGenDebugView::Mountain:
-            {
-                return CD.bIsMountain ? (uint8)11 : (CD.bIsLand ? (uint8)4 : (uint8)0);
-            }
-            case EWorldGenDebugView::LandSea:
-            {
-                return CD.bIsLand ? (uint8)4 : (uint8)0;
-            }
-            case EWorldGenDebugView::Biome:
-            case EWorldGenDebugView::None:
+            case ETerraSimpleTerrainType::Mountain:
+                return 11;
+            case ETerraSimpleTerrainType::Forest:
+                return 2;
+            case ETerraSimpleTerrainType::Plain:
             default:
-            {
-                // ★ R8：当启用 placeholder 配方时，优先返回 17 配方哈希索引（0..16），
-                //   覆盖 W4 真实 Layer。R8 主验收期默认走此分支；W4 联调时把
-                //   bUseR8PlaceholderRecipes 关闭即可切回 W4 路径。
-                if (bUseR8PlaceholderRecipes)
-                {
-                    return (uint8)R8_PlaceholderRecipeIndex(CD.CellId);
-                }
-                // ★ W4：默认视图 = Biome 真实分类。
-                // CD.TerrainTag 未设（None）或 Tag 不在表中（TerrainSet 未挂） → fallback LayerIndex 0。
-                if (UTerrainDefinition* const* Found = TagToDefMap.Find(CD.TerrainTag))
-                {
-                    if (*Found)
-                    {
-                        return (uint8)FMath::Clamp((*Found)->LayerIndex, 0, 255);
-                    }
-                }
-                return (uint8)0;
-            }
+                return 0;
         }
     };
 
-    // ★ W2：从 WorldGen 取每 Cell 的板块/海陆数据；按 DebugView 切换 R 通道写入逻辑。
-    //   - W4 上起：默认视图 升级为 Biome（Def->LayerIndex），LandSea 仍作为独立选项供回归。
-    //   - PlateId / Elevation / Moisture / Temperature / Mountain 沿用 W2/W3 语义。
-    //   详见 Docs/W4_BiomeClassification.md §A.10 / Docs/W2_PlatesAndLandSea.md §A.3。
     const TArray<FCellGeoData>* CellsPtr =
         (Generator.IsValid() && Generator->GetCellData().Num() == NumCells)
             ? &Generator->GetCellData()
@@ -1095,8 +1014,7 @@ void APlanetTopologyDebugMesh::RebuildCellAttrLUT_(int32 NumCells)
         }
         else
         {
-            // Fallback：Generator 失效时使用 R8 placeholder（与上面 default 分支一致），
-            // 否则使用 W2 之前的 Knuth 哈希按 NumLayersHint 取模。
+            // Fallback：Generator 失效时使用 R8 placeholder，否则使用 Knuth 哈希按 NumLayersHint 取模。
             if (bUseR8PlaceholderRecipes)
             {
                 Layer = (uint8)R8_PlaceholderRecipeIndex(CellId);
@@ -1154,18 +1072,9 @@ void APlanetTopologyDebugMesh::RebuildCellAttrLUT_(int32 NumCells)
                     Verify[i * 4 + 3],
                     Expected);
             }
-            const TCHAR* DebugViewName =
-                (DebugView == EWorldGenDebugView::PlateId)     ? TEXT("PlateId")
-              : (DebugView == EWorldGenDebugView::LandSea)     ? TEXT("LandSea")
-              : (DebugView == EWorldGenDebugView::Elevation)   ? TEXT("Elevation")
-              : (DebugView == EWorldGenDebugView::Moisture)    ? TEXT("Moisture")
-              : (DebugView == EWorldGenDebugView::Temperature) ? TEXT("Temperature")
-              : (DebugView == EWorldGenDebugView::Mountain)    ? TEXT("Mountain")
-              : (DebugView == EWorldGenDebugView::Biome)       ? TEXT("Biome")
-              :                                                  TEXT("None");
             UE_LOG(LogPlanetTopologyDebugMesh, Log,
                 TEXT("[PlanetTopologyDebugMesh] CellAttrLUT first %d cells (NumCells=%d, DebugView=%s, NumLayersHint=%d, LayerMod=%d):\n%s"),
-                NumDump, NumCells, DebugViewName, NumLayersHint, LayerMod, *Dump);
+                NumDump, NumCells, TEXT("SimpleGameplayTerrain"), NumLayersHint, LayerMod, *Dump);
             Bulk.Unlock();
         }
         else

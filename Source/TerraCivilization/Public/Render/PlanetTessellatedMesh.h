@@ -92,20 +92,12 @@ public:
     //----------------------------------------------------------
 
     /**
-     * SimpleGameplay WorldGen 参数（RandomSeed / 山脉数量与平均节点数 / 森林数量与平均节点数 / TerrainSet）。
+     * SimpleGameplay WorldGen 参数（RandomSeed / 山脉数量与平均节点数 / 森林数量与平均节点数）。
      * 改动后 OnConstruction 自动重跑 Generator->Generate() 并刷新 HISM tile instances。
      * 与 APlanetTopologyDebugMesh 的 WorldGenSettings 字段语义完全一致（两 actor 各跑各自的实例）。
      */
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|WorldGen")
     FWorldGenSettings WorldGenSettings;
-
-    /**
-     * D21：true → 退回 T3 余弦 ramp（赤道 +1，两极 -1，回归对照路径）；
-     *      false（默认）→ 走 Generator->GetCellData()[c].Elevation 真实数据。
-     * 联调期排查 mesh 形变异常时一键回到 T3 baseline。
-     */
-    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|WorldGen")
-    bool bUsePlaceholderElevation = false;
 
     //----------------------------------------------------------
     // SimpleGameplay：HISM 静态网格瓦片渲染
@@ -155,7 +147,7 @@ public:
     /** 材质侧 UV 边缘高亮内半径建议值；C++ 会写入 HISM 动态材质参数。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|HISM Highlight",
               meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float HISMHighlightInnerRadius = 0.40f;
+    float HISMHighlightInnerRadius = 0.20f;
 
     /** 材质侧 UV 边缘高亮外半径建议值；C++ 会写入 HISM 动态材质参数。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|HISM Highlight",
@@ -176,7 +168,7 @@ public:
 
     /** G1 调试棋子相对球面外抬高度（cm）。 */
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|SimpleGameplay G1", meta = (ClampMin = "0.0", ClampMax = "5000.0"))
-    float G1DebugPieceHeightOffsetCM = 260.0f;
+    float G1DebugPieceHeightOffsetCM = 200.0f;
 
     //----------------------------------------------------------
     // SimpleGameplay P1：真实棋子模型表现
@@ -192,11 +184,11 @@ public:
 
     /** P1 棋子模型相对球面的外抬高度（cm）。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "10000.0"))
-    float P1PieceRadiusOffsetCM = 260.0f;
+    float P1PieceRadiusOffsetCM = 0.0f;
 
     /** P1 所有人物模型统一缩放。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
-    float P1PieceUniformScale = 1.0f;
+    float P1PieceUniformScale = 4.0f;
 
     /** P1 模型组件相对棋子 Actor 根节点的位置修正。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
@@ -204,7 +196,7 @@ public:
 
     /** P1 模型组件相对棋子 Actor 根节点的导入朝向修正。默认 Yaw=90，用于修正当前人物模型"逻辑朝前实际朝右"的资源坐标差异。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
-    FRotator P1MeshRelativeRotation = FRotator(0.0f, 90.0f, 0.0f);
+    FRotator P1MeshRelativeRotation = FRotator(0.0f, 0.0f, -90.0f);
 
     /** 主将模型。推荐挂 Content/Animations/Adventurers/Characters/Mage1。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
@@ -265,7 +257,7 @@ public:
     /** P2.6：骑兵高度射线相对 Cell 中心外法线的角度偏移（度）。0 表示沿用 P2.5 中心采样。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation",
               meta = (ClampMin = "0.0", ClampMax = "15.0", UIMin = "0.0", UIMax = "5.0"))
-    float P2_6CavalryHeightTraceAngularOffsetDeg = 1.0f;
+    float P2_6CavalryHeightTraceAngularOffsetDeg = 2.0f;
 
     /** P4.1 骑兵马模型。推荐 Content/Animations/Horse/Horse。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
@@ -285,7 +277,7 @@ public:
 
     /** P4.2 马跳跃动画播放速率缩放。最终速率 = 动画长度 / P2 跳跃时长 * 本参数。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "10.0"))
-    float P4HorseJumpPlayRateScale = 1.0f;
+    float P4HorseJumpPlayRateScale = 0.9f;
 
     /** P4.3 马死亡动画。推荐 HorseDeath。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
@@ -317,23 +309,23 @@ public:
 
     /** P4.1 马相对骑兵 Actor 根节点的导入朝向修正。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
-    FRotator P4HorseRelativeRotation = FRotator::ZeroRotator;
+    FRotator P4HorseRelativeRotation = FRotator(0.0f, 0.0f, -90.0f);
 
     /** P4.1 马模型统一缩放。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
-    float P4HorseUniformScale = 1.0f;
+    float P4HorseUniformScale = 3.0f;
 
     /** P4.1 骑手相对 RiderAnchor / 马背锚点的位置。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
-    FVector P4RiderRelativeLocation = FVector::ZeroVector;
+    FVector P4RiderRelativeLocation = FVector(0.0f, -1.0f, 0.5f);
 
     /** P4.1 骑手相对 RiderAnchor / 马背锚点的旋转。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
-    FRotator P4RiderRelativeRotation = FRotator::ZeroRotator;
+    FRotator P4RiderRelativeRotation = FRotator(0.0f, 0.0f, -90.0f);
 
     /** P4.1 骑手相对缩放。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
-    float P4RiderUniformScale = 1.0f;
+    float P4RiderUniformScale = 0.003f;
 
     /** P4.3 骑兵死亡时 RiderAnchor 的落地相对位置。用于让 Rider 从马背落到地面再播放死亡动画。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
@@ -381,11 +373,11 @@ public:
 
     /** P5 弓兵弓相对挂点旋转。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
-    FRotator P5ArcherBowRelativeRotation = FRotator::ZeroRotator;
+    FRotator P5ArcherBowRelativeRotation = FRotator(0.0f, 180.0f, 0.0f);
 
     /** P5 弓兵弓相对缩放。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
-    float P5ArcherBowUniformScale = 1.0f;
+    float P5ArcherBowUniformScale = 0.01f;
 
     /** P5 步兵剑相对挂点位置。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
@@ -397,7 +389,7 @@ public:
 
     /** P5 步兵剑相对缩放。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
-    float P5InfantrySwordUniformScale = 1.0f;
+    float P5InfantrySwordUniformScale = 0.01f;
 
     /** P5 步兵盾相对挂点位置。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
@@ -405,11 +397,11 @@ public:
 
     /** P5 步兵盾相对挂点旋转。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
-    FRotator P5InfantryShieldRelativeRotation = FRotator::ZeroRotator;
+    FRotator P5InfantryShieldRelativeRotation = FRotator(0.0f, 90.0f, 180.0f);
 
     /** P5 步兵盾相对缩放。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
-    float P5InfantryShieldUniformScale = 1.0f;
+    float P5InfantryShieldUniformScale = 0.01f;
 
     /** P5 骑兵斧相对挂点位置。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
@@ -421,7 +413,7 @@ public:
 
     /** P5 骑兵斧相对缩放。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
-    float P5CavalryAxeUniformScale = 1.0f;
+    float P5CavalryAxeUniformScale = 0.015f;
 
     /** P6 弓兵远程投射物 StaticMesh。默认 Content/Animations/Adventurers/Assets/arrow_bow。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
@@ -445,11 +437,11 @@ public:
 
     /** P6 箭矢相对飞行朝向的旋转。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
-    FRotator P6ArrowRelativeRotation = FRotator::ZeroRotator;
+    FRotator P6ArrowRelativeRotation = FRotator(0.0f, 0.0f, -90.0f);
 
     /** P6 箭矢相对缩放。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
-    float P6ArrowUniformScale = 1.0f;
+    float P6ArrowUniformScale = 5.0f;
 
     /** P6 箭矢落点相对被吃 Actor 坐标系的位置偏移。用于校准箭矢落在身体中心、上身或脚下。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
@@ -461,7 +453,7 @@ public:
 
     /** P6 法术 Actor 相对飞行朝向的旋转。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
-    FRotator P6SpellRelativeRotation = FRotator::ZeroRotator;
+    FRotator P6SpellRelativeRotation = FRotator(0.0f, 90.0f, 0.0f);
 
     /** P6 法术 Actor 相对缩放。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
@@ -469,7 +461,7 @@ public:
 
     /** P6 箭矢释放延迟（秒）。从弓兵攻击动画起播算起，用于对齐松弦帧。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "10.0"))
-    float P6ArrowReleaseDelaySeconds = 0.18f;
+    float P6ArrowReleaseDelaySeconds = 0.5f;
 
     /** P6 法术释放延迟（秒）。从主将施法动画起播算起，用于对齐释放帧。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "10.0"))
@@ -477,7 +469,7 @@ public:
 
     /** P6 箭矢飞行时长（秒）。箭矢按测地线基础叠加抛物线高度飞向目标。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "10.0"))
-    float P6ArrowFlightSeconds = 0.28f;
+    float P6ArrowFlightSeconds = 0.5f;
 
     /** P6 法术飞行时长（秒）。法术按球面测地线飞向目标。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "10.0"))
@@ -485,7 +477,7 @@ public:
 
     /** P6 箭矢抛物线最大额外高度（cm）。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.0", ClampMax = "10000.0"))
-    float P6ArrowArcHeightCM = 350.0f;
+    float P6ArrowArcHeightCM = 1500.0f;
 
     /** P7 阵营换色母材质。为空时尝试加载 /Game/PiecePresentation/Materials/M_TerraPiece_PaletteReplace。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P7 Faction Palette")
@@ -529,7 +521,7 @@ public:
 
     /** P3.5 弓兵远程攻击动画播放速率缩放，用于微调射箭动作和箭矢释放/飞行/受击同步。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "10.0"))
-    float P35ArcherAttackPlayRateScale = 1.0f;
+    float P35ArcherAttackPlayRateScale = 0.3f;
 
     /** P3 主将施法攻击动画。推荐 Rig_Medium_GeneralMagic_Spell_Casting。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
@@ -689,15 +681,15 @@ public:
 
     /** C3.7：自动倾角插值的最小距离（cm）。低于此距离时倾角固定为 C3AutoTiltAtMinDistanceDeg。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "0.0", ClampMax = "200000.0"))
-    float C3AutoTiltMinDistanceCM = 2500.0f;
+    float C3AutoTiltMinDistanceCM = 6000.0f;
 
     /** C3.7：自动倾角插值的最大距离（cm）。高于此距离时倾角固定为 C3AutoTiltAtMaxDistanceDeg。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "0.0", ClampMax = "200000.0"))
-    float C3AutoTiltMaxDistanceCM = 30000.0f;
+    float C3AutoTiltMaxDistanceCM = 20000.0f;
 
     /** C3.7：最小距离时的视线倾角（度）。玩家拉到最近时接近平视地表。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "5.0", ClampMax = "85.0"))
-    float C3AutoTiltAtMinDistanceDeg = 10.0f;
+    float C3AutoTiltAtMinDistanceDeg = 30.0f;
 
     /** C3.7：最大距离时的视线倾角（度）。玩家拉到最远时接近垂直俯瞰。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "5.0", ClampMax = "85.0"))
@@ -713,11 +705,11 @@ public:
 
     /** C4：选中单位与当前视角中心的球面角距离不超过该值时，认为已在舒适区内。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C4 Camera", meta = (ClampMin = "0.0", ClampMax = "180.0"))
-    float C4ComfortFocusAngleDeg = 18.0f;
+    float C4ComfortFocusAngleDeg = 9.0f;
 
     /** C4：选中屏幕外/边缘棋子时 C3 焦点 Blend 时长（秒）。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C4 Camera", meta = (ClampMin = "0.0", ClampMax = "5.0"))
-    float C4SelectedPieceFocusBlendSeconds = 0.35f;
+    float C4SelectedPieceFocusBlendSeconds = 0.5f;
 
     /** C6：true 时棋子行动落点离开 C4 舒适区会同步触发行动镜头追踪。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C6 Camera")
@@ -729,7 +721,7 @@ public:
 
     /** C6.5：延迟回正额外缓冲秒数，避免计时略早于动画 / timer 结束。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C6.5 Camera", meta = (ClampMin = "0.0", ClampMax = "2.0"))
-    float C6_5TurnStartFocusDelayPaddingSeconds = 0.05f;
+    float C6_5TurnStartFocusDelayPaddingSeconds = 0.1f;
 
     //----------------------------------------------------------
     // 生命周期

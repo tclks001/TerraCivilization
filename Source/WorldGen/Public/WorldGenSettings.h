@@ -3,7 +3,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/DataAsset.h"
 #include "WorldGenSettings.generated.h"
 
 /**
@@ -27,7 +26,7 @@ struct WORLDGEN_API FWorldGenSettings
 
     /** 生成多少条山脉。 */
     UPROPERTY(EditAnywhere, Category = "WorldGen|SimpleGameplay|Mountain", meta = (ClampMin = "0"))
-    int32 MountainStripCount = 24;
+    int32 MountainStripCount = 12;
 
     /** 每条山脉平均包含多少个 Cell；单次实际值按正态分布采样。 */
     UPROPERTY(EditAnywhere, Category = "WorldGen|SimpleGameplay|Mountain", meta = (ClampMin = "1.0"))
@@ -35,16 +34,9 @@ struct WORLDGEN_API FWorldGenSettings
 
     /** 生成多少片森林。 */
     UPROPERTY(EditAnywhere, Category = "WorldGen|SimpleGameplay|Forest", meta = (ClampMin = "0"))
-    int32 ForestPatchCount = 36;
+    int32 ForestPatchCount = 12;
 
     /** 每片森林平均包含多少个 Cell；单次实际值按正态分布采样。 */
     UPROPERTY(EditAnywhere, Category = "WorldGen|SimpleGameplay|Forest", meta = (ClampMin = "1.0"))
-    float AverageForestCellCount = 10.0f;
-
-    /**
-     * 渲染兼容项：PlanetTopologyDebugMesh 仍会用 TerrainSet 把 TerrainTag 映射到材质 LayerIndex。
-     * 该字段不再参与 WorldGen 逻辑判定；SimpleGameplay 生成器会直接写入三种 Terrain.* Tag。
-     */
-    UPROPERTY(EditAnywhere, Category = "WorldGen|Rendering")
-    TSoftObjectPtr<class UTerrainSet> TerrainSet;
+    float AverageForestCellCount = 6.0f;
 };

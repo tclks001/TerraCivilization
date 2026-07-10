@@ -5,34 +5,7 @@
 #include "FCell.h"
 #include "FSphereTopology.h"
 #include "FSphereTopologyQuery.h"
-#include "GameplayTagsManager.h"
 #include "WorldGenLog.h"
-
-namespace
-{
-    FGameplayTag RequestOptionalTerrainTag(const TCHAR* TagName)
-    {
-        return UGameplayTagsManager::Get().RequestGameplayTag(FName(TagName), /*ErrorIfNotFound=*/false);
-    }
-
-    FGameplayTag GetPlainTerrainTag()
-    {
-        static const FGameplayTag Tag = RequestOptionalTerrainTag(TEXT("Terrain.Plain.Grass"));
-        return Tag;
-    }
-
-    FGameplayTag GetForestTerrainTag()
-    {
-        static const FGameplayTag Tag = RequestOptionalTerrainTag(TEXT("Terrain.Forest.Temperate"));
-        return Tag;
-    }
-
-    FGameplayTag GetMountainTerrainTag()
-    {
-        static const FGameplayTag Tag = RequestOptionalTerrainTag(TEXT("Terrain.Mountain.Peak"));
-        return Tag;
-    }
-}
 
 FWorldGenerator::FWorldGenerator(FSphereTopology* InTopology, const FWorldGenSettings& InSettings)
     : Topology(InTopology)
@@ -191,10 +164,6 @@ void FWorldGenerator::GenerateForestPatches()
 
 void FWorldGenerator::WriteSimpleTerrainToCellData()
 {
-    const FGameplayTag PlainTag = GetPlainTerrainTag();
-    const FGameplayTag ForestTag = GetForestTerrainTag();
-    const FGameplayTag MountainTag = GetMountainTerrainTag();
-
     LastMountainCount = 0;
     LastForestCount = 0;
 
@@ -207,42 +176,20 @@ void FWorldGenerator::WriteSimpleTerrainToCellData()
 
         FCellGeoData& CD = CellData[CellId];
         CD.SimpleTerrainType = SimpleTerrainField[CellId];
-        CD.PlateId = 0;
-        CD.bIsLand = 1;
-        CD.bIsCoast = 0;
-        CD.bIsRiver = 0;
-        CD.bIsLake = 0;
-        CD.FlowTo = INDEX_NONE;
         CD.BaseFactionId = INDEX_NONE;
-        CD.Resources.Reset();
 
         switch (SimpleTerrainField[CellId])
         {
             case ETerraSimpleTerrainType::Mountain:
-                CD.bIsMountain = 1;
-                CD.Elevation = 1.0f;
-                CD.Moisture = 0.5f;
-                CD.Temperature = 0.0f;
-                CD.TerrainTag = MountainTag;
                 ++LastMountainCount;
                 break;
 
             case ETerraSimpleTerrainType::Forest:
-                CD.bIsMountain = 0;
-                CD.Elevation = 0.0f;
-                CD.Moisture = 1.0f;
-                CD.Temperature = 0.0f;
-                CD.TerrainTag = ForestTag;
                 ++LastForestCount;
                 break;
 
             case ETerraSimpleTerrainType::Plain:
             default:
-                CD.bIsMountain = 0;
-                CD.Elevation = 0.0f;
-                CD.Moisture = 0.5f;
-                CD.Temperature = 0.0f;
-                CD.TerrainTag = PlainTag;
                 break;
         }
     }
