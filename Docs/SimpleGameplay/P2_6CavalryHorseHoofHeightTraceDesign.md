@@ -1,4 +1,8 @@
 # TerraCivilization SimpleGameplay P2.6 Cavalry Horse Hoof Height Trace Design
+> 实现更新（2026-07-10）：
+> - P2.6 的骑兵偏移采样逻辑已迁移到 `UPlanetPiecePresentationComponent::BuildPieceWorldTransform(...)`。
+> - `P2_6CavalryHeightTraceAngularOffsetDeg` 现由 `PlanetPiecePresentationComponent` 持有。
+> - 文中所有“在 `APlanetTessellatedMesh` 上调 P2.6 参数”的表述，现应理解为在 `PlanetPiecePresentationComponent` 上调参。
 
 > 本稿对应 [PieceAnimationPresentationDesign.md](PieceAnimationPresentationDesign.md) 中的 **P2.6：骑兵马蹄高度偏移采样**。
 >
@@ -169,4 +173,3 @@ Cell.UnitCenter * (GlobeRadiusCM + P1PieceRadiusOffsetCM)
 | 非骑兵高度变化 | 调试时误改了 P2.5 的通用高度参数 | 检查 `P1PieceRadiusOffsetCM`、HISM collision 与 P2.5 开关 |
 | 日志出现 `NoHISMHit` | 偏移后射线没有命中 HISM 瓦片 | 确认 HISM rendering/collision 开启，或减小偏移角度 |
 | 骑兵移动时高度正确、静止后不一致 | 快照路径未按 `PieceType` 构建 Transform | 检查 `BuildP1PieceWorldTransformForPiece_` 是否调用带 `PieceType` 的重载 |
-

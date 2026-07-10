@@ -1152,3 +1152,11 @@ P4.5 Rider 马背 Socket / 骨骼跟随阶段设计见：[P4_5MountedRiderSaddle
    - 决定骑兵拼装成本
 
 如果这三项确认下来，后面的实现路径就会非常顺。
+
+---
+
+## 实现更新说明（2026-07-10）
+
+- 当前落地结构已从“`APlanetTessellatedMesh` 直接持有全部棋子表现字段和 `PiecePresentationManager`”调整为“`APlanetTessellatedMesh` 挂载 `UPlanetPiecePresentationComponent`”。
+- `UPlanetPiecePresentationComponent` 现在负责持有 P1/P2/P2.5/P2.6/P3/P4/P5/P6/P7 的表现配置、球面站位计算、HISM 高度采样、表现事件构建，以及 `UTerraPiecePresentationManager`。
+- `APlanetTessellatedMesh` 只保留 Gameplay / HISM / 球面拓扑宿主职责，并通过兼容桥接函数转发给表现组件。

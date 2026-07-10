@@ -1,4 +1,8 @@
 # TerraCivilization SimpleGameplay P2.5 棋子 HISM 高度射线修正设计稿
+> 实现更新（2026-07-10）：
+> - P2.5 的 HISM 高度采样逻辑已迁移到 `UPlanetPiecePresentationComponent::TryResolvePieceHeightFromHISM(...)`。
+> - `bEnableP2_5HISMPieceHeightTrace`、`P2_5PieceHeightTraceStartOffsetCM`、`P2_5PieceHeightTracePastCenterOffsetCM` 等字段现由 `PlanetPiecePresentationComponent` 持有。
+> - `APlanetTessellatedMesh` 仅保留兼容桥接函数，不再直接承载 P2.5 配置。
 
 > 本稿对应 [PieceAnimationPresentationDesign.md](PieceAnimationPresentationDesign.md) 中的 **P2.5：棋子站位高度使用 HISM 碰撞修正**。
 >

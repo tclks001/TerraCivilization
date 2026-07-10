@@ -1,4 +1,8 @@
 # TerraCivilization SimpleGameplay P3 攻击、受击与死亡表现设计稿
+> 实现更新（2026-07-10）：
+> - P3 的待结算吃子条目到表现事件的转换，已迁移到 `UPlanetPiecePresentationComponent::BuildCaptureEventsFromPendingEntries(...)`。
+> - P3/P3.5 相关动画资产和时序参数现由 `PlanetPiecePresentationComponent` 持有。
+> - `APlanetTessellatedMesh` 在这一阶段只负责从 Gameplay 宿主路径收集结算时机，并通过兼容桥接调用表现组件。
 
 > 本稿对应 [PieceAnimationPresentationDesign.md](PieceAnimationPresentationDesign.md) 中的 **P3：攻击、受击与死亡表现**。
 >

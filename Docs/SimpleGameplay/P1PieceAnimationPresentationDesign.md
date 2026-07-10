@@ -238,3 +238,11 @@ P1 不处理：
 - 点击移动或 Undo 后，已有 Actor 更新位置，不整盘重建。
 - 被吃棋子在同步后被销毁。
 - 未挂资产时不会崩溃，会输出缺失 Mesh 警告。
+
+---
+
+## 实现更新说明（2026-07-10）
+
+- P1 资产槽位不再直接挂在 `APlanetTessellatedMesh` 上，而是挂在其 `PlanetPiecePresentationComponent` 上。
+- `APlanetTessellatedMesh::SyncP1PiecePresentation_()`、`BuildP1PieceWorldTransform_()`、`BuildP1PieceVisualConfig_()` 现仅保留兼容桥接；真实实现已迁移到 `UPlanetPiecePresentationComponent`。
+- 旧稿中凡提到“在 `APlanetTessellatedMesh` Details 面板配置 P1 字段”的地方，现都应理解为：选中 `PlanetPiecePresentationComponent` 后在组件 Details 面板配置。

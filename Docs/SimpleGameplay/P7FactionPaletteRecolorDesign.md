@@ -1,4 +1,8 @@
 # TerraCivilization SimpleGameplay P7 阵营调色板换色设计稿
+> 实现更新（2026-07-10）：
+> - P7 的调色板材质、基础贴图、阵营颜色表和 tile mask 配置已迁移到 `UPlanetPiecePresentationComponent`。
+> - `APlanetTessellatedMesh::BuildP1PieceVisualConfig_()` 当前仅保留兼容桥接；真实配置拼装逻辑已迁移到 `UPlanetPiecePresentationComponent::BuildVisualConfig()`。
+> - 旧稿中所有 `APlanetTessellatedMesh.P7*` 字段引用，现都应改为 `PlanetPiecePresentationComponent.P7*`。
 
 > 本稿对应 [PieceAnimationPresentationDesign.md](PieceAnimationPresentationDesign.md) 的 **P7：终局演出与职业差异化细化** 中的阵营换色部分。
 > 本稿基于 [PieceMaterialPaletteInvestigation.md](PieceMaterialPaletteInvestigation.md) 的资产线索：当前 Adventurers 人物是单材质槽 SkeletalMesh，材质实例只通过 `DiffuseColorMap` 指向一张 1024 x 1024、8 x 4 色块式贴图，部位语义由模型 UV 决定。
@@ -592,7 +596,8 @@ TArray<FTerraPiecePaletteMask> P7PaletteMasksByPieceType;
 
 ```text
 APlanetTessellatedMesh::SyncP1PiecePresentation_
-    -> BuildP1PieceVisualConfig_
+    -> UPlanetPiecePresentationComponent::SyncPresentation
+    -> UPlanetPiecePresentationComponent::BuildVisualConfig
     -> UTerraPiecePresentationManager::SyncPieces
     -> ATerraPieceActor::ApplyPresentationSnapshot
     -> ATerraPieceActor::ApplyVisualConfig_
@@ -771,7 +776,7 @@ struct FTerraPiecePaletteMask
 
 ### 10.2 配置生成
 
-`APlanetTessellatedMesh::BuildP1PieceVisualConfig_()` 中补：
+`UPlanetPiecePresentationComponent::BuildVisualConfig()` 中补：
 
 ```cpp
 VisualConfig.P7PaletteReplaceMaterial =
@@ -792,7 +797,7 @@ VisualConfig.P7ArcherBaseTexture =
     LoadObject<UTexture2D>(nullptr, TEXT("/Game/Animations/Adventurers/Assets/ranger_texture.ranger_texture"));
 ```
 
-其中 `P7FactionPalettes` 和 tile mask 可以先作为 `UPROPERTY` 暴露在 `APlanetTessellatedMesh`，等稳定后迁移到 DataAsset。
+其中 `P7FactionPalettes` 和 tile mask 当前作为 `UPROPERTY` 暴露在 `UPlanetPiecePresentationComponent`，等稳定后可再迁移到 DataAsset。
 
 ### 10.3 参数写入
 
@@ -1067,12 +1072,12 @@ P7.2 优化：必要时烘焙贴图
 
     return BaseColorOut;
     ```
-13. Apply / Save。保存后 PIE 中若 `APlanetTessellatedMesh.P7PaletteReplaceMaterial` 为空，C++ 会自动尝试加载这个路径；如果路径或资产名不同，必须手动把材质拖到该字段。
+13. Apply / Save。保存后 PIE 中若 `PlanetPiecePresentationComponent.P7PaletteReplaceMaterial` 为空，C++ 会自动尝试加载这个路径；如果路径或资产名不同，必须手动把材质拖到该字段。
 
 ### 12.3 绑定到棋子
 
-1. 在 `FTerraPieceVisualConfig` 和 `APlanetTessellatedMesh` 暴露 P7 参数。
-2. 在 `BuildP1PieceVisualConfig_()` 填默认材质、贴图、阵营色和 tile mask。
+1. 在 `FTerraPieceVisualConfig` 和 `UPlanetPiecePresentationComponent` 暴露 P7 参数。
+2. 在 `BuildVisualConfig()` 填默认材质、贴图、阵营色和 tile mask。
 3. 在 `ATerraPieceActor::ApplyVisualConfig_()` 调 `ApplyP7FactionMaterials_()`。
 4. PIE 运行，观察 12 阵营初始棋子。
 5. 用 `bEnableP1PiecePresentation` 开关确认关闭真实棋子时不会影响 G1 调试球。
