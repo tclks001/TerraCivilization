@@ -1753,3 +1753,19 @@ A native `UActorComponent` that needs its owning actor should resolve it from `G
   - NPC MCP validated action 执行桥
   - 当前阵营/脏格高亮刷新
   - G1 调试棋子缓存与绘制
+
+## HISM 交互与高亮组件化（实现更新）
+
+- 当前 HISM 命中解析与高亮逻辑已不再由 `APlanetTessellatedMesh` 直接承载。
+- 新结构为：
+  - `APlanetTessellatedMesh` 挂载 `UPlanetHISMInteractionComponent`
+  - `UPlanetHISMInteractionComponent` 负责：
+    - HISM hit -> CellId 解析
+    - hover / click 交互桥接
+    - `PerInstanceCustomData` 高亮写入
+    - capture preview cell 刷新
+    - hover fade 计时驱动
+- 真实实现位置：
+  - `Source/TerraCivilization/Public/Render/PlanetHISMInteractionComponent.h`
+  - `Source/TerraCivilization/Private/Render/PlanetHISMInteractionComponent.cpp`
+- `APlanetTessellatedMesh` 上旧的 HISM 交互函数当前仅保留兼容桥接，便于旧蓝图与交互控制器继续工作。

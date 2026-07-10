@@ -799,5 +799,6 @@ Gameplay 规则
 >   - `APlanetTessellatedMesh`：球面/HISM/宿主装配与兼容桥接
 >   - `UPlanetCameraComponent`：镜头状态、C2/C2.5/C3/C4/C6/C6.5 等相机逻辑
 >   - `UPlanetGameplayComponent`：GameplayContainer 持有、点击编排、Undo、Tab 导航、NPC MCP 执行桥、阵营高亮刷新
+>   - `UPlanetHISMInteractionComponent`：HISM 命中解析、hover/click、高亮写入、capture preview 刷新
 >   - `UPlanetPiecePresentationComponent`：棋子表现配置、表现事件、Manager 同步
 > - 旧稿中把 Gameplay 编排直接归到 `APlanetTessellatedMesh` 的表述，现均应以上述结构为准。

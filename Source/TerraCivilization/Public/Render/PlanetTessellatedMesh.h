@@ -23,6 +23,7 @@ class UStaticMesh;
 class USkeletalMesh;
 class UPlanetCameraComponent;
 class UPlanetGameplayComponent;
+class UPlanetHISMInteractionComponent;
 class UPlanetPiecePresentationComponent;
 struct FTerraGameplayPieceState;
 struct FTerraGameplayCaptureEntry;
@@ -43,6 +44,7 @@ class TERRACIVILIZATION_API APlanetTessellatedMesh : public AActor
     GENERATED_BODY()
     friend class UPlanetCameraComponent;
     friend class UPlanetGameplayComponent;
+    friend class UPlanetHISMInteractionComponent;
 
 public:
     APlanetTessellatedMesh();
@@ -64,15 +66,6 @@ public:
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess",
               meta = (ClampMin = "100.0"))
     float GlobeRadiusCM = 15000.0f;
-
-    /** HISM hover 状态 cell 边缘颜色（RGB）。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|R11 Highlight")
-    FLinearColor HighlightHoverColor = FLinearColor(1.0f, 0.85f, 0.10f, 1.0f);
-
-    /** HISM 材质边缘高亮强度倍率。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|R11 Highlight",
-              meta = (ClampMin = "0.0", ClampMax = "5.0"))
-    float HighlightStrength = 1.50f;
 
     /** Deprecated compatibility hook. HISM highlight now uses per-instance custom data. */
     void SetHighlightLUT(class UTexture2D* InLUT);
@@ -125,25 +118,6 @@ public:
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|HISM Tiles", meta = (ClampMin = "0.001"))
     float HISMTileAdditionalUniformScale = 1.0f;
 
-    /** true：启用 HISM 实例拾取与 PerInstanceCustomData tile 边缘高亮。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|HISM Highlight")
-    bool bEnableHISMInstanceHighlight = true;
-
-    /** HISM hover 离开球体后的防抖保留时间；语义与旧 CellHighlightComponent 保持一致。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|HISM Highlight",
-              meta = (ClampMin = "0.0", ClampMax = "5.0"))
-    float HISMHoverFadeDuration = 0.5f;
-
-    /** 材质侧 UV 边缘高亮内半径建议值；C++ 会写入 HISM 动态材质参数。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|HISM Highlight",
-              meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float HISMHighlightInnerRadius = 0.20f;
-
-    /** 材质侧 UV 边缘高亮外半径建议值；C++ 会写入 HISM 动态材质参数。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|HISM Highlight",
-              meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float HISMHighlightOuterRadius = 0.50f;
-
     //----------------------------------------------------------
     // 生命周期
     //----------------------------------------------------------
@@ -192,17 +166,20 @@ public:
 
     /** 获取当前 HISM hover CellId。 */
     UFUNCTION(BlueprintCallable, Category = "PlanetTopology|Tess|HISM Highlight")
-    int32 GetLastHISMPickedCellId() const { return HISMTileRenderer.GetLastPickedCellId(); }
+    int32 GetLastHISMPickedCellId() const;
 
     /** 获取最近一次 HISM click CellId。 */
     UFUNCTION(BlueprintCallable, Category = "PlanetTopology|Tess|HISM Highlight")
-    int32 GetLastHISMClickedCellId() const { return HISMTileRenderer.GetLastClickedCellId(); }
+    int32 GetLastHISMClickedCellId() const;
 
     UFUNCTION(BlueprintCallable, Category = "PlanetTopology|Tess|Camera")
     UPlanetCameraComponent* GetPlanetCameraComponent() const { return PlanetCameraComponent; }
 
     UFUNCTION(BlueprintCallable, Category = "PlanetTopology|Tess|Gameplay")
     UPlanetGameplayComponent* GetPlanetGameplayComponent() const { return PlanetGameplayComponent; }
+
+    UFUNCTION(BlueprintCallable, Category = "PlanetTopology|Tess|HISM Highlight")
+    UPlanetHISMInteractionComponent* GetPlanetHISMInteractionComponent() const { return PlanetHISMInteractionComponent; }
 
     UFUNCTION(BlueprintCallable, Category = "PlanetTopology|Tess|Piece Presentation")
     UPlanetPiecePresentationComponent* GetPlanetPiecePresentationComponent() const { return PlanetPiecePresentationComponent; }
@@ -356,6 +333,10 @@ public:
     /** SimpleGameplay Gameplay：独立玩法编排组件，承载回合/点击/Undo/NPC 执行等运行时状态。 */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|Gameplay", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<UPlanetGameplayComponent> PlanetGameplayComponent;
+
+    /** SimpleGameplay HISM Interaction：独立 HISM 命中解析、高亮写入与 hover/click 交互组件。 */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|HISM Highlight", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UPlanetHISMInteractionComponent> PlanetHISMInteractionComponent;
 
     /** SimpleGameplay Piece Presentation：独立棋子表现组件，承载配置字段与表现运行时状态。 */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|Piece Presentation", meta = (AllowPrivateAccess = "true"))

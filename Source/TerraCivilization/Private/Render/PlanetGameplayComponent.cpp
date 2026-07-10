@@ -2,6 +2,7 @@
 
 #include "Render/PlanetTessellatedMesh.h"
 #include "Render/PlanetCameraComponent.h"
+#include "Render/PlanetHISMInteractionComponent.h"
 #include "Render/PlanetPiecePresentationComponent.h"
 #include "TerraNpcMcpGameplayBridge.h"
 
@@ -143,7 +144,10 @@ void UPlanetGameplayComponent::RefreshGameplayHighlights(const TArray<int32>& Di
 
     for (const int32 CellId : DirtyCellIds)
     {
-        Host->WriteHISMHighlightForCell_(CellId);
+        if (Host->GetPlanetHISMInteractionComponent())
+        {
+            Host->GetPlanetHISMInteractionComponent()->WriteHISMHighlightForCell(CellId);
+        }
     }
 }
 
@@ -163,7 +167,10 @@ void UPlanetGameplayComponent::RefreshFactionPieceHighlights(int32 FactionId)
 
     for (const int32 CellId : PieceCellIds)
     {
-        Host->WriteHISMHighlightForCell_(CellId);
+        if (Host->GetPlanetHISMInteractionComponent())
+        {
+            Host->GetPlanetHISMInteractionComponent()->WriteHISMHighlightForCell(CellId);
+        }
     }
 }
 
@@ -183,7 +190,10 @@ void UPlanetGameplayComponent::RefreshCurrentFactionPieceHighlights()
 
     for (const int32 CellId : PieceCellIds)
     {
-        Host->WriteHISMHighlightForCell_(CellId);
+        if (Host->GetPlanetHISMInteractionComponent())
+        {
+            Host->GetPlanetHISMInteractionComponent()->WriteHISMHighlightForCell(CellId);
+        }
     }
 }
 
@@ -637,7 +647,11 @@ bool UPlanetGameplayComponent::HandleHISMUndo()
 
     RefreshGameplayHighlights(DirtyCellIds);
     RefreshCurrentFactionPieceHighlights();
-    Host->RefreshG4CapturePreviewCellsForActionTarget_(Host->HISMTileRenderer.GetCurrentHoverCellId());
+    if (Host->GetPlanetHISMInteractionComponent())
+    {
+        Host->GetPlanetHISMInteractionComponent()->RefreshCapturePreviewCellsForActionTarget(
+            Host->GetPlanetHISMInteractionComponent()->GetLastHISMPickedCellId());
+    }
     RebuildG1DebugPieces();
     if (UPlanetCameraComponent* Camera = Host->GetPlanetCameraComponent())
     {
@@ -695,7 +709,11 @@ bool UPlanetGameplayComponent::HandleGameplayCellClick(int32 CellId, const TCHAR
     TArray<int32> DirtyCellIds;
     const bool bGameplayHandled = GameplayContainer->HandleCellClick(CellId, DirtyCellIds);
     RefreshGameplayHighlights(DirtyCellIds);
-    Host->RefreshG4CapturePreviewCellsForActionTarget_(Host->HISMTileRenderer.GetCurrentHoverCellId());
+    if (Host->GetPlanetHISMInteractionComponent())
+    {
+        Host->GetPlanetHISMInteractionComponent()->RefreshCapturePreviewCellsForActionTarget(
+            Host->GetPlanetHISMInteractionComponent()->GetLastHISMPickedCellId());
+    }
 
     const int32 NewFactionId = GameplayContainer->GetCurrentFactionId();
     const int32 NewTurnIndex = GameplayContainer->GetTurnIndex();

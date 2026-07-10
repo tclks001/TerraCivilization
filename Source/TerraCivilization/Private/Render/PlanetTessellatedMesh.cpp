@@ -3,6 +3,7 @@
 #include "Render/PlanetTessellatedMesh.h"
 #include "Render/PlanetCameraComponent.h"
 #include "Render/PlanetGameplayComponent.h"
+#include "Render/PlanetHISMInteractionComponent.h"
 #include "Render/PlanetPiecePresentationComponent.h"
 #include "TerraNpcMcpGameplayBridge.h"
 
@@ -70,10 +71,14 @@ APlanetTessellatedMesh::APlanetTessellatedMesh()
 
     PlanetCameraComponent = CreateDefaultSubobject<UPlanetCameraComponent>(TEXT("PlanetCameraComponent"));
     PlanetGameplayComponent = CreateDefaultSubobject<UPlanetGameplayComponent>(TEXT("PlanetGameplayComponent"));
+    PlanetHISMInteractionComponent = CreateDefaultSubobject<UPlanetHISMInteractionComponent>(TEXT("PlanetHISMInteractionComponent"));
     PlanetPiecePresentationComponent = CreateDefaultSubobject<UPlanetPiecePresentationComponent>(TEXT("PlanetPiecePresentationComponent"));
 
     HISMTileRenderer.Initialize(PlainTileHISMComp, ForestTileHISMComp, MountainTileHISMComp);
-    HISMTileRenderer.PrepareHighlightComponents(BuildHISMHighlightConfig_());
+    if (PlanetHISMInteractionComponent)
+    {
+        PlanetHISMInteractionComponent->PrepareHighlightComponents();
+    }
 
 #if WITH_EDITOR
     // ===== D15：PIE 退出后材质恢复钩子（AgentWorkflow §3.11）=====
@@ -138,11 +143,10 @@ void APlanetTessellatedMesh::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
 
-    HISMTileRenderer.TickHoverFade(
-        DeltaSeconds,
-        HISMHoverFadeDuration,
-        BuildHISMHighlightConfig_(),
-        PlanetGameplayComponent ? PlanetGameplayComponent->GetGameplayContainer() : nullptr);
+    if (PlanetHISMInteractionComponent)
+    {
+        PlanetHISMInteractionComponent->TickHoverFade(DeltaSeconds);
+    }
 
     if (PlanetCameraComponent)
     {
@@ -210,7 +214,9 @@ FPlanetHISMTileRenderConfig APlanetTessellatedMesh::BuildHISMTileRenderConfig_()
     FPlanetHISMTileRenderConfig Config;
     Config.bEnableRendering = bEnableHISMTileRendering;
     Config.bEnableCollision = bEnableHISMTileCollision;
-    Config.bEnableInstanceHighlight = bEnableHISMInstanceHighlight;
+    Config.bEnableInstanceHighlight = PlanetHISMInteractionComponent
+        ? PlanetHISMInteractionComponent->bEnableHISMInstanceHighlight
+        : false;
     Config.PlainTileStaticMesh = PlainTileStaticMesh;
     Config.ForestTileStaticMesh = ForestTileStaticMesh;
     Config.MountainTileStaticMesh = MountainTileStaticMesh;
@@ -223,25 +229,9 @@ FPlanetHISMTileRenderConfig APlanetTessellatedMesh::BuildHISMTileRenderConfig_()
 
 FPlanetHISMHighlightConfig APlanetTessellatedMesh::BuildHISMHighlightConfig_() const
 {
-    FPlanetHISMHighlightConfig Config;
-    Config.bEnableInstanceHighlight = bEnableHISMInstanceHighlight;
-    Config.HighlightStrength = HighlightStrength;
-    Config.HighlightInnerRadius = HISMHighlightInnerRadius;
-    Config.HighlightOuterRadius = HISMHighlightOuterRadius;
-    Config.HoverColor = HighlightHoverColor;
-    Config.CurrentFactionPieceColor = PlanetGameplayComponent
-        ? PlanetGameplayComponent->G2_5CurrentFactionPieceColor
-        : FLinearColor(1.0f, 0.45f, 0.68f, 1.0f);
-    Config.CurrentFactionPieceHoverColor = PlanetGameplayComponent
-        ? PlanetGameplayComponent->G2_5CurrentFactionPieceHoverColor
-        : FLinearColor(1.0f, 0.22f, 0.32f, 1.0f);
-    Config.ActionTargetHoverColor = PlanetGameplayComponent
-        ? PlanetGameplayComponent->G3ActionTargetHoverColor
-        : FLinearColor(0.08f, 0.45f, 1.0f, 1.0f);
-    Config.CaptureTargetHoverColor = PlanetGameplayComponent
-        ? PlanetGameplayComponent->G4CaptureTargetHoverColor
-        : FLinearColor(1.0f, 0.0f, 0.0f, 1.0f);
-    return Config;
+    return PlanetHISMInteractionComponent
+        ? PlanetHISMInteractionComponent->BuildHighlightConfig()
+        : FPlanetHISMHighlightConfig();
 }
 
 void APlanetTessellatedMesh::RebuildHISMTileInstances_()
@@ -253,7 +243,10 @@ void APlanetTessellatedMesh::RebuildHISMTileInstances_()
         return;
     }
 
-    HISMTileRenderer.PrepareHighlightComponents(BuildHISMHighlightConfig_());
+    if (PlanetHISMInteractionComponent)
+    {
+        PlanetHISMInteractionComponent->PrepareHighlightComponents();
+    }
     HISMTileRenderer.RebuildInstances(
         *CellTopology,
         Generator->GetCellData(),
@@ -262,40 +255,26 @@ void APlanetTessellatedMesh::RebuildHISMTileInstances_()
 
 void APlanetTessellatedMesh::WriteHISMHighlightForCell_(int32 CellId, bool bMarkRenderStateDirty)
 {
-    HISMTileRenderer.WriteHighlightForCell(
-        CellId,
-        BuildHISMHighlightConfig_(),
-        PlanetGameplayComponent ? PlanetGameplayComponent->GetGameplayContainer() : nullptr,
-        bMarkRenderStateDirty);
+    if (PlanetHISMInteractionComponent)
+    {
+        PlanetHISMInteractionComponent->WriteHISMHighlightForCell(CellId, bMarkRenderStateDirty);
+    }
 }
 
 void APlanetTessellatedMesh::RefreshG4CapturePreviewCellsForActionTarget_(int32 ActionTargetCellId, bool bMarkLastRenderStateDirty)
 {
-    FTerraGameplayContainer* Gameplay = PlanetGameplayComponent ? PlanetGameplayComponent->GetGameplayContainer() : nullptr;
-    if (!Gameplay || ActionTargetCellId == INDEX_NONE)
+    if (PlanetHISMInteractionComponent)
     {
-        return;
-    }
-
-    TArray<int32> CaptureCellIds;
-    if (!Gameplay->CollectCapturePreviewCellIdsForActionTarget(ActionTargetCellId, CaptureCellIds))
-    {
-        return;
-    }
-
-    for (int32 I = 0; I < CaptureCellIds.Num(); ++I)
-    {
-        WriteHISMHighlightForCell_(CaptureCellIds[I], bMarkLastRenderStateDirty && I == CaptureCellIds.Num() - 1);
+        PlanetHISMInteractionComponent->RefreshCapturePreviewCellsForActionTarget(ActionTargetCellId, bMarkLastRenderStateDirty);
     }
 }
 
 void APlanetTessellatedMesh::UpdateHISMHoverCell_(int32 NewCellId)
 {
-    HISMTileRenderer.UpdateHoverCell(
-        NewCellId,
-        HISMHoverFadeDuration,
-        BuildHISMHighlightConfig_(),
-        PlanetGameplayComponent ? PlanetGameplayComponent->GetGameplayContainer() : nullptr);
+    if (PlanetHISMInteractionComponent)
+    {
+        PlanetHISMInteractionComponent->UpdateHISMHoverCell(NewCellId);
+    }
 }
 
 void APlanetTessellatedMesh::RebuildGameplay_()
@@ -501,45 +480,37 @@ void APlanetTessellatedMesh::ExecuteC6_5DelayedTurnStartFocus_(int32 ExpectedTur
 
 bool APlanetTessellatedMesh::TryResolveHISMHitToCellId(const FHitResult& Hit, int32& OutCellId) const
 {
-    if (!bEnableHISMInstanceHighlight || !bEnableHISMTileRendering || !bEnableHISMTileCollision)
-    {
-        OutCellId = INDEX_NONE;
-        return false;
-    }
-
-    return HISMTileRenderer.TryResolveHitToCellId(Hit, bEnableHISMTileCollision, OutCellId);
+    return PlanetHISMInteractionComponent
+        ? PlanetHISMInteractionComponent->TryResolveHISMHitToCellId(Hit, OutCellId)
+        : false;
 }
 
 bool APlanetTessellatedMesh::HandleHISMHoverHit(const FHitResult& Hit)
 {
-    int32 CellId = INDEX_NONE;
-    if (!TryResolveHISMHitToCellId(Hit, CellId))
-    {
-        return false;
-    }
-
-    UpdateHISMHoverCell_(CellId);
-
-    if (GEngine && CellId != INDEX_NONE && CellId != HISMTileRenderer.GetLastClickedCellId())
-    {
-        const FString Msg = FString::Printf(TEXT("HISM Hover Cell #%d  Instance=%d  Component=%s"),
-            CellId, Hit.Item, *GetNameSafe(Hit.GetComponent()));
-        GEngine->AddOnScreenDebugMessage(2, 0.25f, FColor::Yellow, Msg);
-    }
-
-    return true;
+    return PlanetHISMInteractionComponent
+        ? PlanetHISMInteractionComponent->HandleHISMHoverHit(Hit)
+        : false;
 }
 
 bool APlanetTessellatedMesh::HandleHISMClickHit(const FHitResult& Hit)
 {
-    int32 CellId = INDEX_NONE;
-    if (!TryResolveHISMHitToCellId(Hit, CellId))
-    {
-        return false;
-    }
+    return PlanetHISMInteractionComponent
+        ? PlanetHISMInteractionComponent->HandleHISMClickHit(Hit)
+        : false;
+}
 
-    HISMTileRenderer.SetLastClickedCellId(CellId);
-    return HandleGameplayCellClick_(CellId, TEXT("HISM Click"), Hit.Item, GetNameSafe(Hit.GetComponent()));
+int32 APlanetTessellatedMesh::GetLastHISMPickedCellId() const
+{
+    return PlanetHISMInteractionComponent
+        ? PlanetHISMInteractionComponent->GetLastHISMPickedCellId()
+        : INDEX_NONE;
+}
+
+int32 APlanetTessellatedMesh::GetLastHISMClickedCellId() const
+{
+    return PlanetHISMInteractionComponent
+        ? PlanetHISMInteractionComponent->GetLastHISMClickedCellId()
+        : INDEX_NONE;
 }
 
 bool APlanetTessellatedMesh::HandleC5NavigateCurrentFactionPiece(bool bReverse)
@@ -572,14 +543,18 @@ bool APlanetTessellatedMesh::HandleHISMUndo()
 
 void APlanetTessellatedMesh::ClearHISMHover()
 {
-    UpdateHISMHoverCell_(INDEX_NONE);
+    if (PlanetHISMInteractionComponent)
+    {
+        PlanetHISMInteractionComponent->ClearHISMHover();
+    }
 }
 
 void APlanetTessellatedMesh::ClearAllHISMHighlights()
 {
-    HISMTileRenderer.ClearAllHighlights(
-        BuildHISMHighlightConfig_(),
-        PlanetGameplayComponent ? PlanetGameplayComponent->GetGameplayContainer() : nullptr);
+    if (PlanetHISMInteractionComponent)
+    {
+        PlanetHISMInteractionComponent->ClearAllHISMHighlights();
+    }
 }
 
 void APlanetTessellatedMesh::RebuildG1DebugPieces_()
@@ -602,7 +577,9 @@ void APlanetTessellatedMesh::ApplyRenderModeVisibility_()
 {
     HISMTileRenderer.ApplyVisibility(bEnableHISMTileRendering, bEnableHISMTileCollision);
 
-    const bool bNeedTick = (bEnableHISMInstanceHighlight && bEnableHISMTileRendering)
+    const bool bNeedTick = (PlanetHISMInteractionComponent
+            && PlanetHISMInteractionComponent->bEnableHISMInstanceHighlight
+            && bEnableHISMTileRendering)
         || (PlanetGameplayComponent && PlanetGameplayComponent->bEnableG1DebugPieces);
     PrimaryActorTick.SetTickFunctionEnable(bNeedTick);
 }
@@ -649,7 +626,8 @@ void APlanetTessellatedMesh::OnPostWorldCleanup_(UWorld* World, bool bSessionEnd
 
 void APlanetTessellatedMesh::SetHighlightLUT(UTexture2D* InLUT)
 {
-    UE_LOG(LogPlanetTess, Verbose,
-        TEXT("[Tess] Deprecated SetHighlightLUT ignored (%s). HISM highlight uses PerInstanceCustomData."),
-        *GetNameSafe(InLUT));
+    if (PlanetHISMInteractionComponent)
+    {
+        PlanetHISMInteractionComponent->SetHighlightLUT(InLUT);
+    }
 }

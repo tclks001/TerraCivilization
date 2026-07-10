@@ -616,3 +616,10 @@ C++ 每次交互变化时只对受影响 Cell 重新合成最终颜色：
 ```
 
 这样材质图无需再随着玩法状态增加而修改，后续想用任意颜色高亮任意 Cell，只需要 C++ 写入不同最终颜色即可。
+> Implementation Update
+>
+> - HISM 命中解析、hover/click 交互、PerInstanceCustomData 高亮写入、capture preview 刷新，现已从 `APlanetTessellatedMesh` 迁移到 `UPlanetHISMInteractionComponent`。
+> - `APlanetTessellatedMesh` 现在只作为宿主 actor 挂载 `PlanetHISMInteractionComponent`，并保留 `HandleHISMHoverHit(...)`、`HandleHISMClickHit(...)`、`ClearHISMHover()`、`ClearAllHISMHighlights()` 等兼容桥接入口。
+> - 旧稿中所有 `APlanetTessellatedMesh::TryResolveHISMHitToCellId(...)`、`WriteHISMHighlightForCell_(...)`、`RefreshG4CapturePreviewCellsForActionTarget_(...)`、`UpdateHISMHoverCell_(...)` 的真实实现位置，现均应理解为：
+>   - `Source/TerraCivilization/Public/Render/PlanetHISMInteractionComponent.h`
+>   - `Source/TerraCivilization/Private/Render/PlanetHISMInteractionComponent.cpp`

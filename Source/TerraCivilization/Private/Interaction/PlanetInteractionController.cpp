@@ -4,6 +4,7 @@
 
 #include "Interaction/PlanetBinder.h"
 #include "Render/PlanetCameraComponent.h"
+#include "Render/PlanetHISMInteractionComponent.h"
 #include "Render/PlanetTessellatedMesh.h"
 
 #include "Engine/World.h"
@@ -93,7 +94,9 @@ void APlanetInteractionController::PlayerTick(float DeltaTime)
         }
     }
 
-    const bool bUseHISMHighlightPath = Tess && Tess->bEnableHISMInstanceHighlight;
+    const bool bUseHISMHighlightPath = Tess
+        && Tess->GetPlanetHISMInteractionComponent()
+        && Tess->GetPlanetHISMInteractionComponent()->bEnableHISMInstanceHighlight;
     const bool bHISMHoverHandled = bHit && Tess && Tess->HandleHISMHoverHit(Hit);
 
     if (bHISMHoverHandled)
