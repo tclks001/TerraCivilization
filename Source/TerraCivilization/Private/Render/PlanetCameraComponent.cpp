@@ -1,4 +1,4 @@
-#include "Render/PlanetCameraController.h"
+#include "Render/PlanetCameraComponent.h"
 
 #include "Render/PlanetTessellatedMesh.h"
 #include "TerraGameplayContainer.h"
@@ -16,74 +16,108 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogPlanetCamera, Log, All);
 
-FPlanetCameraController::FPlanetCameraController(APlanetTessellatedMesh& InHost)
-    : Host(InHost)
+UPlanetCameraComponent::UPlanetCameraComponent()
 {
+    PrimaryComponentTick.bCanEverTick = false;
 }
 
-void FPlanetCameraController::Tick(float DeltaSeconds)
+void UPlanetCameraComponent::BeginPlay()
 {
+    Super::BeginPlay();
+}
+
+APlanetTessellatedMesh* UPlanetCameraComponent::GetHost() const
+{
+    return Cast<APlanetTessellatedMesh>(GetOwner());
+}
+
+void UPlanetCameraComponent::TickCamera(float DeltaSeconds)
+{
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
+    {
+        return;
+    }
+
     (void)DeltaSeconds;
-    if (Host.bEnableG2_5CameraAssist
-        && Host.GetWorld()
-        && Host.GetWorld()->IsGameWorld()
-        && Host.GameplayContainer.IsValid()
-        && Host.GameplayContainer->IsInitialized()
-        && LastFocusedTurnIndex != Host.GameplayContainer->GetTurnIndex())
+    if (bEnableG2_5CameraAssist
+        && Host->GetWorld()
+        && Host->GetWorld()->IsGameWorld()
+        && Host->GameplayContainer.IsValid()
+        && Host->GameplayContainer->IsInitialized()
+        && LastFocusedTurnIndex != Host->GameplayContainer->GetTurnIndex())
     {
         if (!IsDelayedTurnStartFocusTimerActive())
         {
             UE_LOG(LogPlanetCamera, Log,
                 TEXT("[Tess][C6.5] Tick fallback turn focus is not delayed. LastFocusedTurn=%d CurrentTurn=%d CurrentFaction=%d"),
                 LastFocusedTurnIndex,
-                Host.GameplayContainer->GetTurnIndex(),
-                Host.GameplayContainer->GetCurrentFactionId());
+                Host->GameplayContainer->GetTurnIndex(),
+                Host->GameplayContainer->GetCurrentFactionId());
             FocusCameraOnCurrentFactionBase();
-            LastFocusedTurnIndex = Host.GameplayContainer->GetTurnIndex();
+            LastFocusedTurnIndex = Host->GameplayContainer->GetTurnIndex();
         }
         else
         {
             UE_LOG(LogPlanetCamera, Verbose,
                 TEXT("[Tess][C6.5] Tick fallback turn focus suppressed by active delay timer. LastFocusedTurn=%d CurrentTurn=%d CurrentFaction=%d"),
                 LastFocusedTurnIndex,
-                Host.GameplayContainer->GetTurnIndex(),
-                Host.GameplayContainer->GetCurrentFactionId());
+                Host->GameplayContainer->GetTurnIndex(),
+                Host->GameplayContainer->GetCurrentFactionId());
         }
     }
 }
 
-void FPlanetCameraController::Reset()
+void UPlanetCameraComponent::ResetCameraState()
 {
     ClearDelayedTurnStartFocusTimer();
     LastFocusedTurnIndex = INDEX_NONE;
     bGameStartCameraApplied = false;
 }
 
-void FPlanetCameraController::ClearDelayedTurnStartFocusTimer()
+void UPlanetCameraComponent::ClearDelayedTurnStartFocusTimer()
 {
-    if (UWorld* World = Host.GetWorld())
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
+    {
+        return;
+    }
+
+    if (UWorld* World = Host->GetWorld())
     {
         World->GetTimerManager().ClearTimer(DelayedTurnStartFocusTimerHandle);
     }
 }
 
-bool FPlanetCameraController::IsDelayedTurnStartFocusTimerActive() const
+bool UPlanetCameraComponent::IsDelayedTurnStartFocusTimerActive() const
 {
-    if (UWorld* World = Host.GetWorld())
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
+    {
+        return false;
+    }
+
+    if (UWorld* World = Host->GetWorld())
     {
         return World->GetTimerManager().IsTimerActive(DelayedTurnStartFocusTimerHandle);
     }
     return false;
 }
 
-void FPlanetCameraController::FocusCameraOnCell(int32 CellId, bool bMoveCamera)
+void UPlanetCameraComponent::FocusCameraOnCell(int32 CellId, bool bMoveCamera)
 {
-    if (!Host.bEnableG2_5CameraAssist)
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
     {
         return;
     }
 
-    UWorld* World = Host.GetWorld();
+    if (!bEnableG2_5CameraAssist)
+    {
+        return;
+    }
+
+    UWorld* World = Host->GetWorld();
     if (!World || !World->IsGameWorld())
     {
         return;
@@ -96,7 +130,7 @@ void FPlanetCameraController::FocusCameraOnCell(int32 CellId, bool bMoveCamera)
     }
 
     FVector TargetWorldPosition;
-    if (!Host.GetCellSurfaceWorldPosition_(CellId, 0.0f, TargetWorldPosition))
+    if (!Host->GetCellSurfaceWorldPosition_(CellId, 0.0f, TargetWorldPosition))
     {
         return;
     }
@@ -105,7 +139,7 @@ void FPlanetCameraController::FocusCameraOnCell(int32 CellId, bool bMoveCamera)
     FVector CameraWorldPosition = FVector::ZeroVector;
     if (bMoveCamera)
     {
-        if (!Host.GetCellSurfaceWorldPosition_(CellId, FMath::Max(0.0f, Host.G2_5TurnStartCameraHeightCM), CameraWorldPosition))
+        if (!Host->GetCellSurfaceWorldPosition_(CellId, FMath::Max(0.0f, G2_5TurnStartCameraHeightCM), CameraWorldPosition))
         {
             return;
         }
@@ -152,14 +186,20 @@ void FPlanetCameraController::FocusCameraOnCell(int32 CellId, bool bMoveCamera)
         TargetWorldPosition.Z);
 }
 
-bool FPlanetCameraController::IsCellInC4ComfortView(int32 CellId) const
+bool UPlanetCameraComponent::IsCellInC4ComfortView(int32 CellId) const
 {
-    if (!Host.CellTopology.IsValid() || !Host.CellTopology->Cells.IsValidIndex(CellId))
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
     {
         return false;
     }
 
-    UWorld* World = Host.GetWorld();
+    if (!Host->CellTopology.IsValid() || !Host->CellTopology->Cells.IsValidIndex(CellId))
+    {
+        return false;
+    }
+
+    UWorld* World = Host->GetWorld();
     if (!World || !World->IsGameWorld())
     {
         return false;
@@ -202,7 +242,7 @@ bool FPlanetCameraController::IsCellInC4ComfortView(int32 CellId) const
         return false;
     }
 
-    const FVector TargetFocusUnitDir = Host.CellTopology->Cells[CellId].UnitCenter.GetSafeNormal();
+    const FVector TargetFocusUnitDir = Host->CellTopology->Cells[CellId].UnitCenter.GetSafeNormal();
     CurrentFocusUnitDir = CurrentFocusUnitDir.GetSafeNormal();
     if (TargetFocusUnitDir.IsNearlyZero() || CurrentFocusUnitDir.IsNearlyZero())
     {
@@ -211,18 +251,24 @@ bool FPlanetCameraController::IsCellInC4ComfortView(int32 CellId) const
 
     const float Dot = FMath::Clamp(static_cast<float>(FVector::DotProduct(CurrentFocusUnitDir, TargetFocusUnitDir)), -1.0f, 1.0f);
     const float AngleDeg = FMath::RadiansToDegrees(FMath::Acos(Dot));
-    const float ComfortAngleDeg = FMath::Clamp(Host.C4ComfortFocusAngleDeg, 0.0f, 180.0f);
+    const float ComfortAngleDeg = FMath::Clamp(C4ComfortFocusAngleDeg, 0.0f, 180.0f);
     return AngleDeg <= ComfortAngleDeg;
 }
 
-bool FPlanetCameraController::RequestC4SelectionFocus(int32 CellId) const
+bool UPlanetCameraComponent::RequestC4SelectionFocus(int32 CellId) const
 {
-    if (!Host.CellTopology.IsValid() || !Host.CellTopology->Cells.IsValidIndex(CellId))
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
     {
         return false;
     }
 
-    UWorld* World = Host.GetWorld();
+    if (!Host->CellTopology.IsValid() || !Host->CellTopology->Cells.IsValidIndex(CellId))
+    {
+        return false;
+    }
+
+    UWorld* World = Host->GetWorld();
     if (!World || !World->IsGameWorld())
     {
         return false;
@@ -235,35 +281,47 @@ bool FPlanetCameraController::RequestC4SelectionFocus(int32 CellId) const
         return false;
     }
 
-    const FVector TargetFocusUnitDir = Host.CellTopology->Cells[CellId].UnitCenter.GetSafeNormal();
+    const FVector TargetFocusUnitDir = Host->CellTopology->Cells[CellId].UnitCenter.GetSafeNormal();
     return InteractionController->RequestC4FocusOnUnitDir(
         TargetFocusUnitDir,
-        FMath::Max(0.0f, Host.C4SelectedPieceFocusBlendSeconds));
+        FMath::Max(0.0f, C4SelectedPieceFocusBlendSeconds));
 }
 
-float FPlanetCameraController::GetC6ActionCameraBlendSeconds(ETerraPiecePresentationMoveType MoveType) const
+float UPlanetCameraComponent::GetC6ActionCameraBlendSeconds(ETerraPiecePresentationMoveType MoveType) const
 {
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
+    {
+        return 0.001f;
+    }
+
     return MoveType == ETerraPiecePresentationMoveType::Jump
-        ? FMath::Max(Host.P2JumpDurationSeconds, 0.001f)
-        : FMath::Max(Host.P2MoveDurationSeconds, 0.001f);
+        ? FMath::Max(Host->P2JumpDurationSeconds, 0.001f)
+        : FMath::Max(Host->P2MoveDurationSeconds, 0.001f);
 }
 
-void FPlanetCameraController::RequestC6ActionCameraTrackingForMoveEvents(const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents) const
+void UPlanetCameraComponent::RequestC6ActionCameraTrackingForMoveEvents(const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents) const
 {
-    if (!Host.bEnableC6ActionCameraTracking || MoveEvents.Num() <= 0)
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
     {
         return;
     }
 
-    APlanetInteractionController* InteractionController = Cast<APlanetInteractionController>(UGameplayStatics::GetPlayerController(&Host, 0));
-    if (!InteractionController || !Host.CellTopology.IsValid())
+    if (!bEnableC6ActionCameraTracking || MoveEvents.Num() <= 0)
+    {
+        return;
+    }
+
+    APlanetInteractionController* InteractionController = Cast<APlanetInteractionController>(UGameplayStatics::GetPlayerController(Host, 0));
+    if (!InteractionController || !Host->CellTopology.IsValid())
     {
         return;
     }
 
     for (const FTerraPiecePresentationMoveEvent& MoveEvent : MoveEvents)
     {
-        if (!MoveEvent.IsValidMove() || !Host.CellTopology->Cells.IsValidIndex(MoveEvent.ToCellId))
+        if (!MoveEvent.IsValidMove() || !Host->CellTopology->Cells.IsValidIndex(MoveEvent.ToCellId))
         {
             continue;
         }
@@ -277,7 +335,7 @@ void FPlanetCameraController::RequestC6ActionCameraTrackingForMoveEvents(const T
             continue;
         }
 
-        const FVector TargetFocusUnitDir = Host.CellTopology->Cells[MoveEvent.ToCellId].UnitCenter.GetSafeNormal();
+        const FVector TargetFocusUnitDir = Host->CellTopology->Cells[MoveEvent.ToCellId].UnitCenter.GetSafeNormal();
         if (TargetFocusUnitDir.IsNearlyZero())
         {
             continue;
@@ -298,38 +356,50 @@ void FPlanetCameraController::RequestC6ActionCameraTrackingForMoveEvents(const T
     }
 }
 
-float FPlanetCameraController::GetC6_5AnimationLengthSeconds(UAnimationAsset* AnimationAsset, float FallbackSeconds) const
+float UPlanetCameraComponent::GetC6_5AnimationLengthSeconds(UAnimationAsset* AnimationAsset, float FallbackSeconds) const
 {
     return AnimationAsset
         ? FMath::Max(AnimationAsset->GetPlayLength(), 0.001f)
         : FMath::Max(FallbackSeconds, 0.001f);
 }
 
-float FPlanetCameraController::GetC6_5AttackAnimationDurationSeconds(
+float UPlanetCameraComponent::GetC6_5AttackAnimationDurationSeconds(
     ETerraGameplayPieceType PieceType,
     UAnimationAsset* AttackAnimation,
     float FallbackSeconds) const
 {
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
+    {
+        return 0.0f;
+    }
+
     if (PieceType == ETerraGameplayPieceType::Commander)
     {
-        return FMath::Max(Host.P35CommanderAttackDurationSeconds, 0.001f)
-            / FMath::Max(Host.P35CommanderAttackPlayRateScale, 0.001f);
+        return FMath::Max(Host->P35CommanderAttackDurationSeconds, 0.001f)
+            / FMath::Max(Host->P35CommanderAttackPlayRateScale, 0.001f);
     }
 
     if (PieceType == ETerraGameplayPieceType::Archer)
     {
-        return FMath::Max(Host.P35ArcherAttackDurationSeconds, 0.001f)
-            / FMath::Max(Host.P35ArcherAttackPlayRateScale, 0.001f);
+        return FMath::Max(Host->P35ArcherAttackDurationSeconds, 0.001f)
+            / FMath::Max(Host->P35ArcherAttackPlayRateScale, 0.001f);
     }
 
-    return Host.P3AttackAnimationStartOffsetSeconds
+    return Host->P3AttackAnimationStartOffsetSeconds
         + GetC6_5AnimationLengthSeconds(AttackAnimation, FallbackSeconds);
 }
 
-float FPlanetCameraController::GetC6_5ActionPresentationDelaySeconds(
+float UPlanetCameraComponent::GetC6_5ActionPresentationDelaySeconds(
     const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents,
     const TArray<FTerraPiecePresentationCaptureEvent>& CaptureEvents) const
 {
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
+    {
+        return 0.0f;
+    }
+
     float MoveSeconds = 0.0f;
     int32 ValidMoveEventCount = 0;
     for (const FTerraPiecePresentationMoveEvent& MoveEvent : MoveEvents)
@@ -359,7 +429,7 @@ float FPlanetCameraController::GetC6_5ActionPresentationDelaySeconds(
 
     float CaptureSeconds = 0.0f;
     int32 ValidCaptureEventCount = 0;
-    const FTerraPieceVisualConfig VisualConfig = Host.BuildP1PieceVisualConfig_();
+    const FTerraPieceVisualConfig VisualConfig = Host->BuildP1PieceVisualConfig_();
     for (const FTerraPiecePresentationCaptureEvent& CaptureEvent : CaptureEvents)
     {
         if (!CaptureEvent.IsValidCapture())
@@ -373,7 +443,7 @@ float FPlanetCameraController::GetC6_5ActionPresentationDelaySeconds(
         }
         ++ValidCaptureEventCount;
 
-        float MaxAttackToHitSeconds = FMath::Max(Host.P3HitReactDelaySeconds, 0.0f);
+        float MaxAttackToHitSeconds = FMath::Max(Host->P3HitReactDelaySeconds, 0.0f);
         auto IncludeAttackToHit = [&VisualConfig, &MaxAttackToHitSeconds](const FTerraPiecePresentationCaptureParticipant& Participant)
         {
             if (Participant.IsValid())
@@ -413,19 +483,19 @@ float FPlanetCameraController::GetC6_5ActionPresentationDelaySeconds(
         }
 
         const float HitSeconds = MaxAttackToHitSeconds
-            + Host.P3HitAnimationStartOffsetSeconds
-            + GetC6_5AnimationLengthSeconds(Host.P3HitAnimation, 0.35f);
+            + Host->P3HitAnimationStartOffsetSeconds
+            + GetC6_5AnimationLengthSeconds(Host->P3HitAnimation, 0.35f);
         const float DeathSeconds = MaxAttackToHitSeconds
-            + Host.P3DeathAfterHitDelaySeconds
-            + Host.P3DeathAnimationStartOffsetSeconds
-            + GetC6_5AnimationLengthSeconds(Host.P3DeathAnimation, 0.75f);
+            + Host->P3DeathAfterHitDelaySeconds
+            + Host->P3DeathAnimationStartOffsetSeconds
+            + GetC6_5AnimationLengthSeconds(Host->P3DeathAnimation, 0.75f);
         AttackStepSeconds = FMath::Max(AttackStepSeconds, HitSeconds);
         AttackStepSeconds = FMath::Max(AttackStepSeconds, DeathSeconds);
 
         const float FinishSeconds = AttackStepSeconds
-            + FMath::Max(Host.P3MeleeReturnSeconds, Host.P3CapturedFadeSeconds);
-        const float CaptureEventSeconds = Host.P3FacingBlendSeconds
-            + FMath::Max(Host.P3MeleeRunInSeconds, 0.001f)
+            + FMath::Max(Host->P3MeleeReturnSeconds, Host->P3CapturedFadeSeconds);
+        const float CaptureEventSeconds = Host->P3FacingBlendSeconds
+            + FMath::Max(Host->P3MeleeRunInSeconds, 0.001f)
             + FinishSeconds;
         CaptureSeconds += CaptureEventSeconds;
 
@@ -455,13 +525,19 @@ float FPlanetCameraController::GetC6_5ActionPresentationDelaySeconds(
     return MoveSeconds + CaptureSeconds;
 }
 
-bool FPlanetCameraController::TryRequestC6_5DelayedTurnStartFocus(
+bool UPlanetCameraComponent::TryRequestC6_5DelayedTurnStartFocus(
     int32 ExpectedTurnIndex,
     int32 ExpectedFactionId,
     const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents,
     const TArray<FTerraPiecePresentationCaptureEvent>& CaptureEvents)
 {
-    if (!Host.bEnableC6_5DelayTurnStartFocusUntilActionPresentationEnds)
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
+    {
+        return false;
+    }
+
+    if (!bEnableC6_5DelayTurnStartFocusUntilActionPresentationEnds)
     {
         UE_LOG(LogPlanetCamera, Log,
             TEXT("[Tess][C6.5] Delay request rejected: disabled. Faction=%d Turn=%d MoveEvents=%d CaptureEvents=%d"),
@@ -472,7 +548,7 @@ bool FPlanetCameraController::TryRequestC6_5DelayedTurnStartFocus(
         return false;
     }
 
-    UWorld* World = Host.GetWorld();
+    UWorld* World = Host->GetWorld();
     if (!World || !World->IsGameWorld())
     {
         UE_LOG(LogPlanetCamera, Log,
@@ -499,9 +575,9 @@ bool FPlanetCameraController::TryRequestC6_5DelayedTurnStartFocus(
 
     const bool bHadExistingTimer = World->GetTimerManager().IsTimerActive(DelayedTurnStartFocusTimerHandle);
     World->GetTimerManager().ClearTimer(DelayedTurnStartFocusTimerHandle);
-    const float TotalDelaySeconds = DelaySeconds + FMath::Max(Host.C6_5TurnStartFocusDelayPaddingSeconds, 0.0f);
+    const float TotalDelaySeconds = DelaySeconds + FMath::Max(C6_5TurnStartFocusDelayPaddingSeconds, 0.0f);
     const FTimerDelegate Delegate = FTimerDelegate::CreateUObject(
-        &Host,
+        Host,
         &APlanetTessellatedMesh::ExecuteC6_5DelayedTurnStartFocus_,
         ExpectedTurnIndex,
         ExpectedFactionId);
@@ -517,16 +593,22 @@ bool FPlanetCameraController::TryRequestC6_5DelayedTurnStartFocus(
         ExpectedTurnIndex,
         TotalDelaySeconds,
         DelaySeconds,
-        FMath::Max(Host.C6_5TurnStartFocusDelayPaddingSeconds, 0.0f),
+        FMath::Max(C6_5TurnStartFocusDelayPaddingSeconds, 0.0f),
         MoveEvents.Num(),
         CaptureEvents.Num(),
         bHadExistingTimer ? 1 : 0);
     return true;
 }
 
-void FPlanetCameraController::ExecuteC6_5DelayedTurnStartFocus(int32 ExpectedTurnIndex, int32 ExpectedFactionId)
+void UPlanetCameraComponent::ExecuteC6_5DelayedTurnStartFocus(int32 ExpectedTurnIndex, int32 ExpectedFactionId)
 {
-    if (!Host.GameplayContainer.IsValid() || !Host.GameplayContainer->IsInitialized())
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
+    {
+        return;
+    }
+
+    if (!Host->GameplayContainer.IsValid() || !Host->GameplayContainer->IsInitialized())
     {
         UE_LOG(LogPlanetCamera, Log,
             TEXT("[Tess][C6.5] Delayed turn start focus fired but gameplay is unavailable. ExpectedFaction=%d ExpectedTurn=%d"),
@@ -535,15 +617,15 @@ void FPlanetCameraController::ExecuteC6_5DelayedTurnStartFocus(int32 ExpectedTur
         return;
     }
 
-    if (Host.GameplayContainer->GetTurnIndex() != ExpectedTurnIndex
-        || Host.GameplayContainer->GetCurrentFactionId() != ExpectedFactionId)
+    if (Host->GameplayContainer->GetTurnIndex() != ExpectedTurnIndex
+        || Host->GameplayContainer->GetCurrentFactionId() != ExpectedFactionId)
     {
         UE_LOG(LogPlanetCamera, Verbose,
             TEXT("[Tess][C6.5] Skip stale delayed turn start focus. ExpectedFaction=%d ExpectedTurn=%d CurrentFaction=%d CurrentTurn=%d"),
             ExpectedFactionId,
             ExpectedTurnIndex,
-            Host.GameplayContainer->GetCurrentFactionId(),
-            Host.GameplayContainer->GetTurnIndex());
+            Host->GameplayContainer->GetCurrentFactionId(),
+            Host->GameplayContainer->GetTurnIndex());
         return;
     }
 
@@ -554,14 +636,20 @@ void FPlanetCameraController::ExecuteC6_5DelayedTurnStartFocus(int32 ExpectedTur
     FocusCameraOnCurrentFactionBase();
 }
 
-void FPlanetCameraController::FocusCameraOnSelectedCellSmart(int32 CellId)
+void UPlanetCameraComponent::FocusCameraOnSelectedCellSmart(int32 CellId)
 {
-    if (!Host.bEnableG2_5CameraAssist)
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
     {
         return;
     }
 
-    if (!Host.bEnableC4SmartSelectionFocus)
+    if (!bEnableG2_5CameraAssist)
+    {
+        return;
+    }
+
+    if (!bEnableC4SmartSelectionFocus)
     {
         FocusCameraOnCell(CellId, false);
         return;
@@ -581,12 +669,18 @@ void FPlanetCameraController::FocusCameraOnSelectedCellSmart(int32 CellId)
 
     UE_LOG(LogPlanetCamera, Log, TEXT("[Tess][C4] Requested smart selection focus. Cell=%d Blend=%.2f"),
         CellId,
-        Host.C4SelectedPieceFocusBlendSeconds);
+        C4SelectedPieceFocusBlendSeconds);
 }
 
-void FPlanetCameraController::FocusCameraOnCurrentFactionBase()
+void UPlanetCameraComponent::FocusCameraOnCurrentFactionBase()
 {
-    if (!Host.GameplayContainer.IsValid() || !Host.GameplayContainer->IsInitialized())
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
+    {
+        return;
+    }
+
+    if (!Host->GameplayContainer.IsValid() || !Host->GameplayContainer->IsInitialized())
     {
         return;
     }
@@ -594,40 +688,46 @@ void FPlanetCameraController::FocusCameraOnCurrentFactionBase()
     if (!bGameStartCameraApplied)
     {
         bGameStartCameraApplied = true;
-        if (Host.bEnableC2GameStartWarZoneCamera && FocusCameraOnCurrentFactionWarZoneHard())
+        if (bEnableC2GameStartWarZoneCamera && FocusCameraOnCurrentFactionWarZoneHard())
         {
             return;
         }
     }
-    else if (Host.bEnableC2_5TurnStartWarZoneFocusBlend && BlendCameraFocusToCurrentFactionWarZone())
+    else if (bEnableC2_5TurnStartWarZoneFocusBlend && BlendCameraFocusToCurrentFactionWarZone())
     {
         return;
     }
 
-    FocusCameraOnCell(Host.GameplayContainer->GetCurrentFactionBaseCellId(), true);
+    FocusCameraOnCell(Host->GameplayContainer->GetCurrentFactionBaseCellId(), true);
 }
 
-bool FPlanetCameraController::TryBuildCurrentFactionWarZoneDirection(FVector& OutLocalWarZoneDir) const
+bool UPlanetCameraComponent::TryBuildCurrentFactionWarZoneDirection(FVector& OutLocalWarZoneDir) const
 {
-    if (!Host.GameplayContainer.IsValid() || !Host.GameplayContainer->IsInitialized() || !Host.CellTopology.IsValid())
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
     {
         return false;
     }
 
-    const int32 CurrentFactionId = Host.GameplayContainer->GetCurrentFactionId();
+    if (!Host->GameplayContainer.IsValid() || !Host->GameplayContainer->IsInitialized() || !Host->CellTopology.IsValid())
+    {
+        return false;
+    }
+
+    const int32 CurrentFactionId = Host->GameplayContainer->GetCurrentFactionId();
     FVector LocalDirSum = FVector::ZeroVector;
     int32 AlivePieceCount = 0;
 
-    for (const FTerraGameplayPieceState& Piece : Host.GameplayContainer->GetPieces())
+    for (const FTerraGameplayPieceState& Piece : Host->GameplayContainer->GetPieces())
     {
         if (!Piece.bAlive
             || Piece.OwnerFactionId != CurrentFactionId
-            || !Host.CellTopology->Cells.IsValidIndex(Piece.CellId))
+            || !Host->CellTopology->Cells.IsValidIndex(Piece.CellId))
         {
             continue;
         }
 
-        LocalDirSum += Host.CellTopology->Cells[Piece.CellId].UnitCenter.GetSafeNormal();
+        LocalDirSum += Host->CellTopology->Cells[Piece.CellId].UnitCenter.GetSafeNormal();
         ++AlivePieceCount;
     }
 
@@ -640,39 +740,51 @@ bool FPlanetCameraController::TryBuildCurrentFactionWarZoneDirection(FVector& Ou
     return !OutLocalWarZoneDir.IsNearlyZero();
 }
 
-bool FPlanetCameraController::TryBuildCurrentFactionCommanderDirection(FVector& OutLocalCommanderDir) const
+bool UPlanetCameraComponent::TryBuildCurrentFactionCommanderDirection(FVector& OutLocalCommanderDir) const
 {
-    if (!Host.GameplayContainer.IsValid() || !Host.GameplayContainer->IsInitialized() || !Host.CellTopology.IsValid())
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
     {
         return false;
     }
 
-    const int32 CurrentFactionId = Host.GameplayContainer->GetCurrentFactionId();
-    for (const FTerraGameplayPieceState& Piece : Host.GameplayContainer->GetPieces())
+    if (!Host->GameplayContainer.IsValid() || !Host->GameplayContainer->IsInitialized() || !Host->CellTopology.IsValid())
+    {
+        return false;
+    }
+
+    const int32 CurrentFactionId = Host->GameplayContainer->GetCurrentFactionId();
+    for (const FTerraGameplayPieceState& Piece : Host->GameplayContainer->GetPieces())
     {
         if (Piece.bAlive
             && Piece.OwnerFactionId == CurrentFactionId
             && Piece.PieceType == ETerraGameplayPieceType::Commander
-            && Host.CellTopology->Cells.IsValidIndex(Piece.CellId))
+            && Host->CellTopology->Cells.IsValidIndex(Piece.CellId))
         {
-            OutLocalCommanderDir = Host.CellTopology->Cells[Piece.CellId].UnitCenter.GetSafeNormal();
+            OutLocalCommanderDir = Host->CellTopology->Cells[Piece.CellId].UnitCenter.GetSafeNormal();
             return !OutLocalCommanderDir.IsNearlyZero();
         }
     }
 
-    const int32 BaseCellId = Host.GameplayContainer->GetCurrentFactionBaseCellId();
-    if (Host.CellTopology->Cells.IsValidIndex(BaseCellId))
+    const int32 BaseCellId = Host->GameplayContainer->GetCurrentFactionBaseCellId();
+    if (Host->CellTopology->Cells.IsValidIndex(BaseCellId))
     {
-        OutLocalCommanderDir = Host.CellTopology->Cells[BaseCellId].UnitCenter.GetSafeNormal();
+        OutLocalCommanderDir = Host->CellTopology->Cells[BaseCellId].UnitCenter.GetSafeNormal();
         return !OutLocalCommanderDir.IsNearlyZero();
     }
 
     return false;
 }
 
-bool FPlanetCameraController::FocusCameraOnCurrentFactionWarZoneHard()
+bool UPlanetCameraComponent::FocusCameraOnCurrentFactionWarZoneHard()
 {
-    UWorld* World = Host.GetWorld();
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
+    {
+        return false;
+    }
+
+    UWorld* World = Host->GetWorld();
     if (!World || !World->IsGameWorld())
     {
         return false;
@@ -693,8 +805,8 @@ bool FPlanetCameraController::FocusCameraOnCurrentFactionWarZoneHard()
     FVector LocalCommanderDir = FVector::ZeroVector;
     TryBuildCurrentFactionCommanderDirection(LocalCommanderDir);
 
-    const FTransform ActorTransform = Host.GetActorTransform();
-    const FVector TargetWorldPosition = ActorTransform.TransformPosition(LocalWarZoneDir * Host.GlobeRadiusCM);
+    const FTransform ActorTransform = Host->GetActorTransform();
+    const FVector TargetWorldPosition = ActorTransform.TransformPosition(LocalWarZoneDir * Host->GlobeRadiusCM);
     const FVector WorldUp = ActorTransform.TransformVectorNoScale(LocalWarZoneDir).GetSafeNormal();
     if (WorldUp.IsNearlyZero())
     {
@@ -741,15 +853,15 @@ bool FPlanetCameraController::FocusCameraOnCurrentFactionWarZoneHard()
     }
 
     const float CameraDistance = FMath::Clamp(
-        FMath::Max(1.0f, Host.C3InitialDistanceToFocusCM),
-        Host.G8CameraMinHeightOffsetCM,
-        FMath::Max(Host.G8CameraMinHeightOffsetCM, Host.G8CameraMaxHeightOffsetCM));
-    const float TiltT = (Host.C3AutoTiltMaxDistanceCM > Host.C3AutoTiltMinDistanceCM)
-        ? (CameraDistance - Host.C3AutoTiltMinDistanceCM) / (Host.C3AutoTiltMaxDistanceCM - Host.C3AutoTiltMinDistanceCM)
+        FMath::Max(1.0f, C3InitialDistanceToFocusCM),
+        G8CameraMinHeightOffsetCM,
+        FMath::Max(G8CameraMinHeightOffsetCM, G8CameraMaxHeightOffsetCM));
+    const float TiltT = (C3AutoTiltMaxDistanceCM > C3AutoTiltMinDistanceCM)
+        ? (CameraDistance - C3AutoTiltMinDistanceCM) / (C3AutoTiltMaxDistanceCM - C3AutoTiltMinDistanceCM)
         : 0.0f;
     const float CameraTiltDeg = FMath::Lerp(
-        Host.C3AutoTiltAtMinDistanceDeg,
-        Host.C3AutoTiltAtMaxDistanceDeg,
+        C3AutoTiltAtMinDistanceDeg,
+        C3AutoTiltAtMaxDistanceDeg,
         FMath::Clamp(TiltT, 0.0f, 1.0f));
     const float TiltRad = FMath::DegreesToRadians(CameraTiltDeg);
     const float HorizontalDistance = CameraDistance * FMath::Cos(TiltRad);
@@ -785,8 +897,8 @@ bool FPlanetCameraController::FocusCameraOnCurrentFactionWarZoneHard()
 
             UE_LOG(LogPlanetCamera, Log,
                 TEXT("[Tess][C2] Game start focus war zone camera via C3 state Faction=%d Turn=%d Camera=(%.1f, %.1f, %.1f) Target=(%.1f, %.1f, %.1f) Distance=%.1f Tilt=%.1f Yaw=%.1f"),
-                Host.GameplayContainer.IsValid() ? Host.GameplayContainer->GetCurrentFactionId() : INDEX_NONE,
-                Host.GameplayContainer.IsValid() ? Host.GameplayContainer->GetTurnIndex() : INDEX_NONE,
+                Host->GameplayContainer.IsValid() ? Host->GameplayContainer->GetCurrentFactionId() : INDEX_NONE,
+                Host->GameplayContainer.IsValid() ? Host->GameplayContainer->GetTurnIndex() : INDEX_NONE,
                 CameraWorldPosition.X,
                 CameraWorldPosition.Y,
                 CameraWorldPosition.Z,
@@ -810,8 +922,8 @@ bool FPlanetCameraController::FocusCameraOnCurrentFactionWarZoneHard()
 
     UE_LOG(LogPlanetCamera, Log,
         TEXT("[Tess][C2] Game start focus war zone camera fallback Faction=%d Turn=%d Camera=(%.1f, %.1f, %.1f) Target=(%.1f, %.1f, %.1f) Distance=%.1f Tilt=%.1f"),
-        Host.GameplayContainer.IsValid() ? Host.GameplayContainer->GetCurrentFactionId() : INDEX_NONE,
-        Host.GameplayContainer.IsValid() ? Host.GameplayContainer->GetTurnIndex() : INDEX_NONE,
+        Host->GameplayContainer.IsValid() ? Host->GameplayContainer->GetCurrentFactionId() : INDEX_NONE,
+        Host->GameplayContainer.IsValid() ? Host->GameplayContainer->GetTurnIndex() : INDEX_NONE,
         CameraWorldPosition.X,
         CameraWorldPosition.Y,
         CameraWorldPosition.Z,
@@ -824,9 +936,15 @@ bool FPlanetCameraController::FocusCameraOnCurrentFactionWarZoneHard()
     return true;
 }
 
-bool FPlanetCameraController::BlendCameraFocusToCurrentFactionWarZone()
+bool UPlanetCameraComponent::BlendCameraFocusToCurrentFactionWarZone()
 {
-    if (!Host.GameplayContainer.IsValid() || !Host.GameplayContainer->IsInitialized() || !Host.CellTopology.IsValid())
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
+    {
+        return false;
+    }
+
+    if (!Host->GameplayContainer.IsValid() || !Host->GameplayContainer->IsInitialized() || !Host->CellTopology.IsValid())
     {
         return false;
     }
@@ -837,7 +955,7 @@ bool FPlanetCameraController::BlendCameraFocusToCurrentFactionWarZone()
         return false;
     }
 
-    UWorld* World = Host.GetWorld();
+    UWorld* World = Host->GetWorld();
     if (!World || !World->IsGameWorld())
     {
         return false;
@@ -852,23 +970,29 @@ bool FPlanetCameraController::BlendCameraFocusToCurrentFactionWarZone()
 
     const bool bRequested = InteractionController->RequestC2_5FocusOnUnitDir(
         LocalWarZoneDir,
-        FMath::Max(0.0f, Host.C2_5TurnStartFocusBlendSeconds));
+        FMath::Max(0.0f, C2_5TurnStartFocusBlendSeconds));
     if (bRequested)
     {
         UE_LOG(LogPlanetCamera, Log,
             TEXT("[Tess][C2.5] Requested turn start war zone focus blend Faction=%d Turn=%d Blend=%.2f"),
-            Host.GameplayContainer->GetCurrentFactionId(),
-            Host.GameplayContainer->GetTurnIndex(),
-            Host.C2_5TurnStartFocusBlendSeconds);
+            Host->GameplayContainer->GetCurrentFactionId(),
+            Host->GameplayContainer->GetTurnIndex(),
+            C2_5TurnStartFocusBlendSeconds);
     }
     return bRequested;
 }
 
 
-bool FPlanetCameraController::SyncOrbitCameraStateFromWorldPosition(const FVector& CameraWorldPosition, float& InOutLongitudeDeg, float& InOutLatitudeDeg, float& InOutHeightOffsetCM) const
+bool UPlanetCameraComponent::SyncOrbitCameraStateFromWorldPosition(const FVector& CameraWorldPosition, float& InOutLongitudeDeg, float& InOutLatitudeDeg, float& InOutHeightOffsetCM) const
 {
-    const FVector PlanetCenterWorld = Host.GetPlanetCenterWorld_();
-    FVector LocalOffset = Host.GetActorTransform().InverseTransformPosition(CameraWorldPosition);
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
+    {
+        return false;
+    }
+
+    const FVector PlanetCenterWorld = Host->GetPlanetCenterWorld_();
+    FVector LocalOffset = Host->GetActorTransform().InverseTransformPosition(CameraWorldPosition);
     const float DistanceFromCenter = LocalOffset.Length();
     if (DistanceFromCenter <= KINDA_SMALL_NUMBER)
     {
@@ -881,14 +1005,20 @@ bool FPlanetCameraController::SyncOrbitCameraStateFromWorldPosition(const FVecto
 
     InOutLatitudeDeg = FMath::RadiansToDegrees(LatitudeRad);
     InOutLongitudeDeg = FMath::RadiansToDegrees(LongitudeRad);
-    InOutHeightOffsetCM = DistanceFromCenter - Host.GlobeRadiusCM;
+    InOutHeightOffsetCM = DistanceFromCenter - Host->GlobeRadiusCM;
     return !PlanetCenterWorld.ContainsNaN();
 }
 
-bool FPlanetCameraController::ApplyOrbitCameraState(float LongitudeDeg, float LatitudeDeg, float HeightOffsetCM)
+bool UPlanetCameraComponent::ApplyOrbitCameraState(float LongitudeDeg, float LatitudeDeg, float HeightOffsetCM)
 {
-    UWorld* World = Host.GetWorld();
-    if (!World || !World->IsGameWorld() || !Host.bEnableG8ManualCameraControl)
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
+    {
+        return false;
+    }
+
+    UWorld* World = Host->GetWorld();
+    if (!World || !World->IsGameWorld() || !bEnableG8ManualCameraControl)
     {
         return false;
     }
@@ -901,14 +1031,14 @@ bool FPlanetCameraController::ApplyOrbitCameraState(float LongitudeDeg, float La
 
     const float LongitudeRad = FMath::DegreesToRadians(LongitudeDeg);
     const float LatitudeRad = FMath::DegreesToRadians(LatitudeDeg);
-    const float Radius = Host.GlobeRadiusCM + HeightOffsetCM;
+    const float Radius = Host->GlobeRadiusCM + HeightOffsetCM;
 
     const FVector LocalUnitDir(
         FMath::Cos(LatitudeRad) * FMath::Cos(LongitudeRad),
         FMath::Cos(LatitudeRad) * FMath::Sin(LongitudeRad),
         FMath::Sin(LatitudeRad));
-    const FVector CameraWorldPosition = Host.GetActorTransform().TransformPosition(LocalUnitDir * Radius);
-    const FVector PlanetCenterWorld = Host.GetPlanetCenterWorld_();
+    const FVector CameraWorldPosition = Host->GetActorTransform().TransformPosition(LocalUnitDir * Radius);
+    const FVector PlanetCenterWorld = Host->GetPlanetCenterWorld_();
     const FVector LookDirection = PlanetCenterWorld - CameraWorldPosition;
     if (LookDirection.IsNearlyZero())
     {
@@ -925,7 +1055,7 @@ bool FPlanetCameraController::ApplyOrbitCameraState(float LongitudeDeg, float La
     return true;
 }
 
-bool FPlanetCameraController::SyncFocusCameraStateFromView(
+bool UPlanetCameraComponent::SyncFocusCameraStateFromView(
     const FVector& CameraWorldPosition,
     const FRotator& CameraWorldRotation,
     FVector& OutFocusUnitDir,
@@ -933,7 +1063,13 @@ bool FPlanetCameraController::SyncFocusCameraStateFromView(
     float& OutTiltDeg,
     float& OutYawAroundFocusDeg) const
 {
-    const FTransform ActorTransform = Host.GetActorTransform();
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
+    {
+        return false;
+    }
+
+    const FTransform ActorTransform = Host->GetActorTransform();
     const FVector LocalCameraPosition = ActorTransform.InverseTransformPosition(CameraWorldPosition);
     const FVector LocalCameraForward = ActorTransform.InverseTransformVectorNoScale(CameraWorldRotation.Vector()).GetSafeNormal();
     if (LocalCameraForward.IsNearlyZero())
@@ -941,7 +1077,7 @@ bool FPlanetCameraController::SyncFocusCameraStateFromView(
         return false;
     }
 
-    const float Radius = FMath::Max(1.0f, Host.GlobeRadiusCM);
+    const float Radius = FMath::Max(1.0f, Host->GlobeRadiusCM);
     const float B = FVector::DotProduct(LocalCameraPosition, LocalCameraForward);
     const float C = FVector::DotProduct(LocalCameraPosition, LocalCameraPosition) - Radius * Radius;
     const float Discriminant = B * B - C;
@@ -1026,14 +1162,28 @@ bool FPlanetCameraController::SyncFocusCameraStateFromView(
     return true;
 }
 
-bool FPlanetCameraController::ApplyFocusCameraState(
+bool UPlanetCameraComponent::ApplyFocusCameraState(
     const FVector& FocusUnitDir,
     float DistanceToFocusCM,
     float TiltDeg,
     float YawAroundFocusDeg)
 {
-    UWorld* World = Host.GetWorld();
-    if (!World || !World->IsGameWorld() || !Host.bEnableG8ManualCameraControl)
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
+    {
+        return false;
+    }
+
+    UWorld* World = Host->GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+    if (!World->IsGameWorld())
+    {
+        return false;
+    }
+    if (!bEnableG8ManualCameraControl)
     {
         return false;
     }
@@ -1076,14 +1226,14 @@ bool FPlanetCameraController::ApplyFocusCameraState(
 
     const float Distance = FMath::Clamp(
         DistanceToFocusCM,
-        Host.G8CameraMinHeightOffsetCM,
-        FMath::Max(Host.G8CameraMinHeightOffsetCM, Host.G8CameraMaxHeightOffsetCM));
+        G8CameraMinHeightOffsetCM,
+        FMath::Max(G8CameraMinHeightOffsetCM, G8CameraMaxHeightOffsetCM));
     const float TiltRad = FMath::DegreesToRadians(FMath::Clamp(TiltDeg, 5.0f, 85.0f));
     const float HorizontalDistance = Distance * FMath::Cos(TiltRad);
     const float VerticalDistance = Distance * FMath::Sin(TiltRad);
 
-    const FTransform ActorTransform = Host.GetActorTransform();
-    const FVector FocusWorldPosition = ActorTransform.TransformPosition(LocalFocusDir * Host.GlobeRadiusCM);
+    const FTransform ActorTransform = Host->GetActorTransform();
+    const FVector FocusWorldPosition = ActorTransform.TransformPosition(LocalFocusDir * Host->GlobeRadiusCM);
     const FVector WorldUp = ActorTransform.TransformVectorNoScale(LocalFocusDir).GetSafeNormal();
     const FVector WorldForwardHint = ActorTransform.TransformVectorNoScale(LocalForwardHint).GetSafeNormal();
     if (WorldUp.IsNearlyZero() || WorldForwardHint.IsNearlyZero())
@@ -1108,7 +1258,7 @@ bool FPlanetCameraController::ApplyFocusCameraState(
     return true;
 }
 
-bool FPlanetCameraController::OffsetFocusCameraStateOnTangent(
+bool UPlanetCameraComponent::OffsetFocusCameraStateOnTangent(
     float RightDeltaDeg,
     float ForwardDeltaDeg,
     FVector& InOutFocusUnitDir,

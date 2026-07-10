@@ -4,9 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/EngineTypes.h"
-#include "Engine/TimerHandle.h"
 #include "GameFramework/Actor.h"
-#include "Render/PlanetCameraController.h"
 #include "Render/PlanetHISMTileRenderer.h"
 #include "TerraGameplayContainer.h"
 #include "TerraPiecePresentationTypes.h"
@@ -24,6 +22,7 @@ class UHierarchicalInstancedStaticMeshComponent;
 class UStaticMesh;
 class USkeletalMesh;
 class UTerraPiecePresentationManager;
+class UPlanetCameraComponent;
 struct FHitResult;
 
 enum class ETerraG1DebugPieceType : uint8
@@ -59,7 +58,7 @@ UCLASS()
 class TERRACIVILIZATION_API APlanetTessellatedMesh : public AActor
 {
     GENERATED_BODY()
-    friend class FPlanetCameraController;
+    friend class UPlanetCameraComponent;
 
 public:
     APlanetTessellatedMesh();
@@ -610,34 +609,6 @@ public:
     // SimpleGameplay G2.5：视角与当前阵营提示
     //----------------------------------------------------------
 
-    /** true：回合开始自动切到当前阵营大本营上方，选中棋子时自动旋转视角对准。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G2.5")
-    bool bEnableG2_5CameraAssist = true;
-
-    /** 回合开始时摄像机位于大本营球面外侧的额外高度（cm）。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G2.5", meta = (ClampMin = "0.0", ClampMax = "100000.0"))
-    float G2_5TurnStartCameraHeightCM = 8000.0f;
-
-    /** C2：true 时游戏开始硬设置到当前阵营活棋子的战区中心斜俯视。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C2 Camera", meta = (DisplayName = "Enable C2 Game Start War Zone Camera"))
-    bool bEnableC2GameStartWarZoneCamera = true;
-
-    /** C2.5：true 时每次回合开始平滑把 C3 视角中心切到当前阵营战区中心。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C2.5 Camera")
-    bool bEnableC2_5TurnStartWarZoneFocusBlend = true;
-
-    /** C2.5：回合开始平滑切换视角中心的 Blend 时长（秒），不改变当前距离。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C2.5 Camera", meta = (ClampMin = "0.0", ClampMax = "5.0"))
-    float C2_5TurnStartFocusBlendSeconds = 0.45f;
-
-    /** C2：已禁用。回合开始距离改由 C3InitialDistanceToFocusCM 控制。字段仅保留以兼容旧关卡序列化。 */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|SimpleGameplay C2 Camera|Deprecated", meta = (DeprecatedProperty, DeprecationMessage = "Disabled. Use C3InitialDistanceToFocusCM instead."))
-    float C2TurnStartCameraDistanceCM = 18000.0f;
-
-    /** C2：已禁用。回合开始倾角改由 C3.7 自动倾角逻辑根据距离派生。字段仅保留以兼容旧关卡序列化。 */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|SimpleGameplay C2 Camera|Deprecated", meta = (DeprecatedProperty, DeprecationMessage = "Disabled. C3.7 auto tilt derives tilt from distance."))
-    float C2TurnStartCameraTiltDeg = 55.0f;
-
     /** 当前阵营所有棋子脚下 Cell 的淡粉色提示。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G2.5")
     FLinearColor G2_5CurrentFactionPieceColor = FLinearColor(1.0f, 0.45f, 0.68f, 1.0f);
@@ -661,74 +632,6 @@ public:
     /** hover 到某个可吃子落点时，该落点对应可吃目标使用的加深红色。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G4")
     FLinearColor G4CaptureTargetHoverColor = FLinearColor(1.0f, 0.0f, 0.0f, 1.0f);
-
-    //----------------------------------------------------------
-    // SimpleGameplay G8：手动视角轨道控制
-    //----------------------------------------------------------
-
-    /** true：允许 PlayerController 通过 WSAD + 滚轮驱动球面轨道相机。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8")
-    bool bEnableG8ManualCameraControl = true;
-
-    /** G8：每秒经纬度变化速度（度 / 秒）。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "1.0", ClampMax = "360.0"))
-    float G8CameraOrbitDegreesPerSecond = 45.0f;
-
-    /** G8：每次滚轮缩放的高度步长（cm）。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "10.0", ClampMax = "100000.0"))
-    float G8CameraZoomStepCM = 800.0f;
-
-    /** G8：相机允许的最小离地高度（cm）。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "0.0", ClampMax = "100000.0"))
-    float G8CameraMinHeightOffsetCM = 2500.0f;
-
-    /** G8：相机允许的最大离地高度（cm）。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "0.0", ClampMax = "200000.0"))
-    float G8CameraMaxHeightOffsetCM = 30000.0f;
-
-    /** C3.7：自动倾角插值的最小距离（cm）。低于此距离时倾角固定为 C3AutoTiltAtMinDistanceDeg。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "0.0", ClampMax = "200000.0"))
-    float C3AutoTiltMinDistanceCM = 6000.0f;
-
-    /** C3.7：自动倾角插值的最大距离（cm）。高于此距离时倾角固定为 C3AutoTiltAtMaxDistanceDeg。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "0.0", ClampMax = "200000.0"))
-    float C3AutoTiltMaxDistanceCM = 20000.0f;
-
-    /** C3.7：最小距离时的视线倾角（度）。玩家拉到最近时接近平视地表。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "5.0", ClampMax = "85.0"))
-    float C3AutoTiltAtMinDistanceDeg = 30.0f;
-
-    /** C3.7：最大距离时的视线倾角（度）。玩家拉到最远时接近垂直俯瞰。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "5.0", ClampMax = "85.0"))
-    float C3AutoTiltAtMaxDistanceDeg = 85.0f;
-
-    /** C3：聚焦相机手动模式的 fallback 初始距离（cm）。仅在首次进入手动模式且 Sync 尚未完成时使用。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G8", meta = (ClampMin = "0.0", ClampMax = "200000.0"))
-    float C3InitialDistanceToFocusCM = 8000.0f;
-
-    /** C4：true 时点击选中棋子会先判断是否需要智能聚焦。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C4 Camera")
-    bool bEnableC4SmartSelectionFocus = true;
-
-    /** C4：选中单位与当前视角中心的球面角距离不超过该值时，认为已在舒适区内。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C4 Camera", meta = (ClampMin = "0.0", ClampMax = "180.0"))
-    float C4ComfortFocusAngleDeg = 9.0f;
-
-    /** C4：选中屏幕外/边缘棋子时 C3 焦点 Blend 时长（秒）。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C4 Camera", meta = (ClampMin = "0.0", ClampMax = "5.0"))
-    float C4SelectedPieceFocusBlendSeconds = 0.5f;
-
-    /** C6：true 时棋子行动落点离开 C4 舒适区会同步触发行动镜头追踪。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C6 Camera")
-    bool bEnableC6ActionCameraTracking = true;
-
-    /** C6.5：true 时行动确认换回合后，等待本次移动 / 攻击表现预计结束再执行 C2.5 回合战区回正。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C6.5 Camera")
-    bool bEnableC6_5DelayTurnStartFocusUntilActionPresentationEnds = true;
-
-    /** C6.5：延迟回正额外缓冲秒数，避免计时略早于动画 / timer 结束。 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay C6.5 Camera", meta = (ClampMin = "0.0", ClampMax = "2.0"))
-    float C6_5TurnStartFocusDelayPaddingSeconds = 0.1f;
 
     //----------------------------------------------------------
     // 生命周期
@@ -783,6 +686,9 @@ public:
     /** 获取最近一次 HISM click CellId。 */
     UFUNCTION(BlueprintCallable, Category = "PlanetTopology|Tess|HISM Highlight")
     int32 GetLastHISMClickedCellId() const { return HISMTileRenderer.GetLastClickedCellId(); }
+
+    UFUNCTION(BlueprintCallable, Category = "PlanetTopology|Tess|Camera")
+    UPlanetCameraComponent* GetPlanetCameraComponent() const { return PlanetCameraComponent; }
 
 private:
     /** 整体重建：Cell 拓扑 + WorldGen + HISM Tiles + Gameplay。 */
@@ -949,8 +855,9 @@ public:
     /** SimpleGameplay G2.5：上一次已刷新底色提示的当前阵营。 */
     int32 G2_5LastHighlightedFactionId = INDEX_NONE;
 
-    /** SimpleGameplay Camera：镜头行为与瞬态状态。配置字段暂留本 Actor 以兼容关卡序列化。 */
-    FPlanetCameraController CameraController;
+    /** SimpleGameplay Camera：独立相机组件，承载配置字段与镜头运行时状态。 */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|Camera", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UPlanetCameraComponent> PlanetCameraComponent;
 
     /** SimpleGameplay G1/G2：当前初始化出的调试棋子缓存。 */
     TArray<FTerraG1DebugPiece> G1DebugPieces;

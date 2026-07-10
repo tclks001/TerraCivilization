@@ -788,7 +788,8 @@ Gameplay 规则
 
 后续如果要实现，应先为对应阶段补充子设计稿，再改 C++。
 > Implementation note (2026-07-10): camera behavior code now lives in
-> `Source/TerraCivilization/Public/Render/PlanetCameraController.h` and
-> `Source/TerraCivilization/Private/Render/PlanetCameraController.cpp`.
-> `APlanetTessellatedMesh` keeps serialized camera UPROPERTY settings and public
-> compatibility wrappers, but gameplay triggers delegate to `FPlanetCameraController`.
+> `Source/TerraCivilization/Public/Render/PlanetCameraComponent.h` and
+> `Source/TerraCivilization/Private/Render/PlanetCameraComponent.cpp`.
+> `UPlanetCameraComponent` owns serialized camera UPROPERTY settings and runtime
+> camera state. `APlanetTessellatedMesh` keeps public compatibility wrappers and
+> gameplay/render triggers delegate to the component.

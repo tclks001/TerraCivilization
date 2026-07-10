@@ -304,7 +304,20 @@ C3 暂不实现：
 - Q/E 绕焦点旋转。已由 [C3_6QERollAroundFocusDesign.md](C3_6QERollAroundFocusDesign.md) 阶段落地。
 - 独立 Tilt 自由度。已由 [C3_7AutoTiltFromDistanceDesign.md](C3_7AutoTiltFromDistanceDesign.md) 阶段替换为每帧从距离自动插值派生。
 > Implementation note (2026-07-10): C3 focus-camera sync/apply/offset math
-> has moved from `APlanetTessellatedMesh` into `FPlanetCameraController`
-> (`Source/TerraCivilization/Public/Render/PlanetCameraController.h`,
-> `Source/TerraCivilization/Private/Render/PlanetCameraController.cpp`).
+> has moved from `APlanetTessellatedMesh` into `UPlanetCameraComponent`
+> (`Source/TerraCivilization/Public/Render/PlanetCameraComponent.h`,
+> `Source/TerraCivilization/Private/Render/PlanetCameraComponent.cpp`).
 > The old `APlanetTessellatedMesh` methods remain as compatibility wrappers.
+
+
+---
+
+## 9. Implementation Pitfall: Native Component Host Must Come From Owner
+
+2026-07-10 refactor note:
+
+- Symptom: after moving camera logic into `UPlanetCameraComponent`, existing/new `BP_PlanetTessellatedMesh` instances could initialize C3, but `ApplyFocusCameraState` failed because `Host->GetWorld()` was null.
+- Diagnostic signature: temporary logs showed `Host=Default__BP_PlanetTessellatedMesh_C` while the runtime component owner was the real `BP_PlanetTessellatedMesh_C_UAID...` instance.
+- Cause: the component was created as a native default subobject and `PlanetCameraComponent->Initialize(this)` was called in the actor constructor. For Blueprint classes, constructor-time `this` can be the class default object (CDO). Caching that pointer in the component can leak a CDO host into runtime instances after Blueprint serialization/reinstancing.
+- Fix: `UPlanetCameraComponent` must resolve its host from `GetOwner()` at runtime. Do not cache the owning `APlanetTessellatedMesh*` from the actor constructor. The old `HostOverride` / `Initialize(APlanetTessellatedMesh*)` path was removed.
+- Rule: native actor components that need their owning actor should prefer `GetOwner()` / `BeginPlay` runtime resolution. Constructor-time owner pointers are unsafe for Blueprint-derived actors unless the value is purely transient and never serialized/copied from CDO state.

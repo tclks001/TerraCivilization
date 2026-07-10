@@ -125,6 +125,6 @@ C6.5 暂不实现：
 - 多段攻击期间的动态镜头剪辑。
 - 玩家手动输入后是否取消“延迟回正”的长期偏好策略。
 > Implementation note (2026-07-10): C6.5 delay estimation, timer ownership and
-> stale-turn validation moved into `FPlanetCameraController`. The timer callback
+> stale-turn validation moved into `UPlanetCameraComponent`. The timer callback
 > entry remains on `APlanetTessellatedMesh` only as a UObject binding wrapper.
 

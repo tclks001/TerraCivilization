@@ -187,5 +187,5 @@ C6 暂不实现：
 - 根据棋子实际 Actor 插值位置每帧追踪。
 - 对手回合行动镜头与玩家偏好视角恢复。
 > Implementation note (2026-07-10): C6 action camera tracking is implemented in
-> `FPlanetCameraController`. `APlanetTessellatedMesh::HandleGameplayCellClick_`
+> `UPlanetCameraComponent`. `APlanetTessellatedMesh::HandleGameplayCellClick_`
 > and undo handling now delegate move-event tracking requests to that helper.

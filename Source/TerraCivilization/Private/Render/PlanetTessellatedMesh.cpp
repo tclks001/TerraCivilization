@@ -1,6 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Render/PlanetTessellatedMesh.h"
+#include "Render/PlanetCameraComponent.h"
 #include "TerraGameplayContainer.h"
 #include "TerraNpcMcpGameplayBridge.h"
 #include "TerraPiecePresentationManager.h"
@@ -94,7 +95,6 @@ namespace
 // ===================================================================
 
 APlanetTessellatedMesh::APlanetTessellatedMesh()
-    : CameraController(*this)
 {
     // 与 APlanetTopologyDebugMesh 一致：在编辑器中拖动属性即时刷新；Tick 仅在 HISM hover 防抖启用时打开。
     PrimaryActorTick.bCanEverTick = true;
@@ -128,6 +128,7 @@ APlanetTessellatedMesh::APlanetTessellatedMesh()
     MountainTileHISMComp->SetCollisionResponseToAllChannels(ECR_Block);
 
     PiecePresentationManager = CreateDefaultSubobject<UTerraPiecePresentationManager>(TEXT("PiecePresentationManager"));
+    PlanetCameraComponent = CreateDefaultSubobject<UPlanetCameraComponent>(TEXT("PlanetCameraComponent"));
 
     HISMTileRenderer.Initialize(PlainTileHISMComp, ForestTileHISMComp, MountainTileHISMComp);
     HISMTileRenderer.PrepareHighlightComponents(BuildHISMHighlightConfig_());
@@ -166,7 +167,6 @@ APlanetTessellatedMesh::~APlanetTessellatedMesh()
 // FVTableHelper 构造函数不能 = default（UE 编码规范，与基类 AActor 实现保持一致）。
 APlanetTessellatedMesh::APlanetTessellatedMesh(FVTableHelper& Helper)
     : Super(Helper)
-    , CameraController(*this)
 {
 }
 
@@ -201,7 +201,10 @@ void APlanetTessellatedMesh::Tick(float DeltaSeconds)
         BuildHISMHighlightConfig_(),
         GameplayContainer.Get());
 
-    CameraController.Tick(DeltaSeconds);
+    if (PlanetCameraComponent)
+    {
+        PlanetCameraComponent->TickCamera(DeltaSeconds);
+    }
 
     DrawG1DebugPieces_();
 }
@@ -341,7 +344,10 @@ void APlanetTessellatedMesh::RebuildGameplay_()
 {
     if (UWorld* World = GetWorld())
     {
-        CameraController.ClearDelayedTurnStartFocusTimer();
+        if (PlanetCameraComponent)
+        {
+            PlanetCameraComponent->ClearDelayedTurnStartFocusTimer();
+        }
     }
 
     if (!CellTopology.IsValid() || !Generator.IsValid())
@@ -354,7 +360,10 @@ void APlanetTessellatedMesh::RebuildGameplay_()
         GameplayContainer.Reset();
         ClearP1PiecePresentation_();
         G2_5LastHighlightedFactionId = INDEX_NONE;
-        CameraController.Reset();
+        if (PlanetCameraComponent)
+        {
+            PlanetCameraComponent->ResetCameraState();
+        }
         return;
     }
 
@@ -374,7 +383,10 @@ void APlanetTessellatedMesh::RebuildGameplay_()
         GameplayContainer.Reset();
         ClearP1PiecePresentation_();
         G2_5LastHighlightedFactionId = INDEX_NONE;
-        CameraController.Reset();
+        if (PlanetCameraComponent)
+        {
+            PlanetCameraComponent->ResetCameraState();
+        }
         return;
     }
 
@@ -420,7 +432,10 @@ void APlanetTessellatedMesh::RebuildGameplay_()
         });
 
     G2_5LastHighlightedFactionId = GameplayContainer->GetCurrentFactionId();
-    CameraController.Reset();
+    if (PlanetCameraComponent)
+        {
+            PlanetCameraComponent->ResetCameraState();
+        }
     RefreshCurrentFactionPieceHighlights_();
     SyncP1PiecePresentation_();
 }
@@ -1077,12 +1092,16 @@ FVector APlanetTessellatedMesh::GetPlanetCenterWorld_() const
 
 bool APlanetTessellatedMesh::SyncOrbitCameraStateFromWorldPosition(const FVector& CameraWorldPosition, float& InOutLongitudeDeg, float& InOutLatitudeDeg, float& InOutHeightOffsetCM) const
 {
-    return CameraController.SyncOrbitCameraStateFromWorldPosition(CameraWorldPosition, InOutLongitudeDeg, InOutLatitudeDeg, InOutHeightOffsetCM);
+    return PlanetCameraComponent
+        ? PlanetCameraComponent->SyncOrbitCameraStateFromWorldPosition(CameraWorldPosition, InOutLongitudeDeg, InOutLatitudeDeg, InOutHeightOffsetCM)
+        : false;
 }
 
 bool APlanetTessellatedMesh::ApplyOrbitCameraState(float LongitudeDeg, float LatitudeDeg, float HeightOffsetCM)
 {
-    return CameraController.ApplyOrbitCameraState(LongitudeDeg, LatitudeDeg, HeightOffsetCM);
+    return PlanetCameraComponent
+        ? PlanetCameraComponent->ApplyOrbitCameraState(LongitudeDeg, LatitudeDeg, HeightOffsetCM)
+        : false;
 }
 
 bool APlanetTessellatedMesh::SyncFocusCameraStateFromView(
@@ -1093,13 +1112,15 @@ bool APlanetTessellatedMesh::SyncFocusCameraStateFromView(
     float& OutTiltDeg,
     float& OutYawAroundFocusDeg) const
 {
-    return CameraController.SyncFocusCameraStateFromView(
+    return PlanetCameraComponent
+        ? PlanetCameraComponent->SyncFocusCameraStateFromView(
         CameraWorldPosition,
         CameraWorldRotation,
         OutFocusUnitDir,
         OutDistanceToFocusCM,
         OutTiltDeg,
-        OutYawAroundFocusDeg);
+        OutYawAroundFocusDeg)
+        : false;
 }
 
 bool APlanetTessellatedMesh::ApplyFocusCameraState(
@@ -1108,7 +1129,9 @@ bool APlanetTessellatedMesh::ApplyFocusCameraState(
     float TiltDeg,
     float YawAroundFocusDeg)
 {
-    return CameraController.ApplyFocusCameraState(FocusUnitDir, DistanceToFocusCM, TiltDeg, YawAroundFocusDeg);
+    return PlanetCameraComponent
+        ? PlanetCameraComponent->ApplyFocusCameraState(FocusUnitDir, DistanceToFocusCM, TiltDeg, YawAroundFocusDeg)
+        : false;
 }
 
 bool APlanetTessellatedMesh::OffsetFocusCameraStateOnTangent(
@@ -1117,16 +1140,21 @@ bool APlanetTessellatedMesh::OffsetFocusCameraStateOnTangent(
     FVector& InOutFocusUnitDir,
     float& InOutYawAroundFocusDeg) const
 {
-    return CameraController.OffsetFocusCameraStateOnTangent(
+    return PlanetCameraComponent
+        ? PlanetCameraComponent->OffsetFocusCameraStateOnTangent(
         RightDeltaDeg,
         ForwardDeltaDeg,
         InOutFocusUnitDir,
-        InOutYawAroundFocusDeg);
+        InOutYawAroundFocusDeg)
+        : false;
 }
 
 void APlanetTessellatedMesh::ExecuteC6_5DelayedTurnStartFocus_(int32 ExpectedTurnIndex, int32 ExpectedFactionId)
 {
-    CameraController.ExecuteC6_5DelayedTurnStartFocus(ExpectedTurnIndex, ExpectedFactionId);
+    if (PlanetCameraComponent)
+    {
+        PlanetCameraComponent->ExecuteC6_5DelayedTurnStartFocus(ExpectedTurnIndex, ExpectedFactionId);
+    }
 }
 
 bool APlanetTessellatedMesh::TryResolveHISMHitToCellId(const FHitResult& Hit, int32& OutCellId) const
@@ -1373,7 +1401,10 @@ bool APlanetTessellatedMesh::HandleGameplayCellClick_(int32 CellId, const TCHAR*
         }
         RefreshFactionPieceHighlights_(NewFactionId);
         G2_5LastHighlightedFactionId = NewFactionId;
-        CameraController.SetLastFocusedTurnIndex(NewTurnIndex);
+        if (PlanetCameraComponent)
+        {
+            PlanetCameraComponent->SetLastFocusedTurnIndex(NewTurnIndex);
+        }
     }
     else if (NewPhase != PrevPhase || bGameplayHandled)
     {
@@ -1386,22 +1417,25 @@ bool APlanetTessellatedMesh::HandleGameplayCellClick_(int32 CellId, const TCHAR*
         && NewPhase == ETerraGameplayInteractionPhase::PieceSelected)
     {
         int32 SelectedPieceCellId = INDEX_NONE;
-        if (GameplayContainer->TryGetPieceCellId(NewSelectedPieceId, SelectedPieceCellId))
+        if (PlanetCameraComponent && GameplayContainer->TryGetPieceCellId(NewSelectedPieceId, SelectedPieceCellId))
         {
-            CameraController.FocusCameraOnSelectedCellSmart(SelectedPieceCellId);
+            PlanetCameraComponent->FocusCameraOnSelectedCellSmart(SelectedPieceCellId);
         }
     }
 
     RebuildG1DebugPieces_();
-    CameraController.RequestC6ActionCameraTrackingForMoveEvents(P2MoveEvents);
+    if (PlanetCameraComponent)
+    {
+        PlanetCameraComponent->RequestC6ActionCameraTrackingForMoveEvents(P2MoveEvents);
+    }
     SyncP1PiecePresentation_(P2MoveEvents, P3CaptureEvents);
 
     if (bTurnChanged
-        && !CameraController.TryRequestC6_5DelayedTurnStartFocus(
+        && (!PlanetCameraComponent || !PlanetCameraComponent->TryRequestC6_5DelayedTurnStartFocus(
             NewTurnIndex,
             NewFactionId,
             P2MoveEvents,
-            P3CaptureEvents))
+            P3CaptureEvents)))
     {
         UE_LOG(LogPlanetTess, Log,
             TEXT("[Tess][C6.5] Falling back to immediate turn focus. Faction=%d Turn=%d FactionChanged=%d P2MoveEvents=%d P3CaptureEvents=%d"),
@@ -1410,7 +1444,10 @@ bool APlanetTessellatedMesh::HandleGameplayCellClick_(int32 CellId, const TCHAR*
             bFactionChanged ? 1 : 0,
             P2MoveEvents.Num(),
             P3CaptureEvents.Num());
-        CameraController.FocusCameraOnCurrentFactionBase();
+        if (PlanetCameraComponent)
+        {
+            PlanetCameraComponent->FocusCameraOnCurrentFactionBase();
+        }
     }
 
     UE_LOG(LogPlanetTess, Log,
@@ -1588,7 +1625,10 @@ bool APlanetTessellatedMesh::HandleHISMUndo()
     RefreshCurrentFactionPieceHighlights_();
     RefreshG4CapturePreviewCellsForActionTarget_(HISMTileRenderer.GetCurrentHoverCellId());
     RebuildG1DebugPieces_();
-    CameraController.RequestC6ActionCameraTrackingForMoveEvents(UndoMoveEvents);
+    if (PlanetCameraComponent)
+    {
+        PlanetCameraComponent->RequestC6ActionCameraTrackingForMoveEvents(UndoMoveEvents);
+    }
     SyncP1PiecePresentation_(UndoMoveEvents);
 
     UE_LOG(LogPlanetTess, Log,

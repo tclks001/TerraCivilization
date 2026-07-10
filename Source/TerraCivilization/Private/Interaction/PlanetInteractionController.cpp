@@ -3,6 +3,7 @@
 #include "Interaction/PlanetInteractionController.h"
 
 #include "Interaction/PlanetBinder.h"
+#include "Render/PlanetCameraComponent.h"
 #include "Render/PlanetTessellatedMesh.h"
 
 #include "Engine/World.h"
@@ -132,7 +133,16 @@ void APlanetInteractionController::PlayerTick(float DeltaTime)
 
 bool APlanetInteractionController::InitializeC3FocusCameraState_(APlanetTessellatedMesh* Tess)
 {
-    if (!Tess || !Tess->bEnableG8ManualCameraControl)
+    UPlanetCameraComponent* CameraComponent = Tess ? Tess->GetPlanetCameraComponent() : nullptr;
+    if (!Tess)
+    {
+        return false;
+    }
+    if (!CameraComponent)
+    {
+        return false;
+    }
+    if (!CameraComponent->bEnableG8ManualCameraControl)
     {
         return false;
     }
@@ -278,7 +288,16 @@ bool APlanetInteractionController::HasAutoCameraInterruptInput_() const
 
 void APlanetInteractionController::UpdateC3FocusCameraControl_(float DeltaTime, APlanetTessellatedMesh* Tess)
 {
-    if (!Tess || !Tess->bEnableG8ManualCameraControl)
+    UPlanetCameraComponent* CameraComponent = Tess ? Tess->GetPlanetCameraComponent() : nullptr;
+    if (!Tess)
+    {
+        return;
+    }
+    if (!CameraComponent)
+    {
+        return;
+    }
+    if (!CameraComponent->bEnableG8ManualCameraControl)
     {
         return;
     }
@@ -316,7 +335,7 @@ void APlanetInteractionController::UpdateC3FocusCameraControl_(float DeltaTime, 
         }
     }
 
-    const float OrbitDeltaDeg = Tess->G8CameraOrbitDegreesPerSecond * DeltaTime;
+    const float OrbitDeltaDeg = CameraComponent->G8CameraOrbitDegreesPerSecond * DeltaTime;
     float FocusRightDeltaDeg = 0.0f;
     float FocusForwardDeltaDeg = 0.0f;
 
@@ -351,11 +370,11 @@ void APlanetInteractionController::UpdateC3FocusCameraControl_(float DeltaTime, 
     }
     if (WasInputKeyJustPressed(EKeys::MouseScrollUp))
     {
-        C3DistanceToFocusCM -= Tess->G8CameraZoomStepCM;
+        C3DistanceToFocusCM -= CameraComponent->G8CameraZoomStepCM;
     }
     if (WasInputKeyJustPressed(EKeys::MouseScrollDown))
     {
-        C3DistanceToFocusCM += Tess->G8CameraZoomStepCM;
+        C3DistanceToFocusCM += CameraComponent->G8CameraZoomStepCM;
     }
 
     if (!FMath::IsNearlyZero(FocusRightDeltaDeg) || !FMath::IsNearlyZero(FocusForwardDeltaDeg))
@@ -376,17 +395,17 @@ void APlanetInteractionController::UpdateC3FocusCameraControl_(float DeltaTime, 
     // "沿纬线走 / 极点卡死"闭环。
     C3DistanceToFocusCM = FMath::Clamp(
         C3DistanceToFocusCM,
-        Tess->G8CameraMinHeightOffsetCM,
-        FMath::Max(Tess->G8CameraMinHeightOffsetCM, Tess->G8CameraMaxHeightOffsetCM));
+        CameraComponent->G8CameraMinHeightOffsetCM,
+        FMath::Max(CameraComponent->G8CameraMinHeightOffsetCM, CameraComponent->G8CameraMaxHeightOffsetCM));
 
     // C3.7：倾角不再独立维护，改为每帧从距离线性插值自动派生。
     // 详见 Docs/SimpleGameplay/C3_7AutoTiltFromDistanceDesign.md。
-    const float TiltT = (Tess->C3AutoTiltMaxDistanceCM > Tess->C3AutoTiltMinDistanceCM)
-        ? (C3DistanceToFocusCM - Tess->C3AutoTiltMinDistanceCM) / (Tess->C3AutoTiltMaxDistanceCM - Tess->C3AutoTiltMinDistanceCM)
+    const float TiltT = (CameraComponent->C3AutoTiltMaxDistanceCM > CameraComponent->C3AutoTiltMinDistanceCM)
+        ? (C3DistanceToFocusCM - CameraComponent->C3AutoTiltMinDistanceCM) / (CameraComponent->C3AutoTiltMaxDistanceCM - CameraComponent->C3AutoTiltMinDistanceCM)
         : 0.0f;
     const float C3TiltDeg = FMath::Lerp(
-        Tess->C3AutoTiltAtMinDistanceDeg,
-        Tess->C3AutoTiltAtMaxDistanceDeg,
+        CameraComponent->C3AutoTiltAtMinDistanceDeg,
+        CameraComponent->C3AutoTiltAtMaxDistanceDeg,
         FMath::Clamp(TiltT, 0.0f, 1.0f));
     C3YawAroundFocusDeg = FRotator::NormalizeAxis(C3YawAroundFocusDeg);
     C3FocusUnitDir = C3FocusUnitDir.GetSafeNormal();
