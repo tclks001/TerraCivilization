@@ -1,4 +1,4 @@
-﻿# 球面拓扑结构参考稿（Sphere Topology Reference）
+# 球面拓扑结构参考稿（Sphere Topology Reference）
 
 > **本文档定位**：TerraCivilization 球面拓扑（[`FSphereTopology`](../Source/Grid/Public/FSphereTopology.h) 及其字段族）的**几何含义权威参考**。所有下游模块（[WorldGenDesign.md](WorldGenDesign.md) / [SphericalSDFTerrainDesign.md](SphericalSDFTerrainDesign.md) / [TechnicalDesign.md](TechnicalDesign.md) §6 Gameplay）在引用 `FCell` / `FCorner` / `FCellEdge` 等字段时，**必须以本稿为准**——避免凭头文件注释口口相传产生几何理解偏差。
 >

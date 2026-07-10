@@ -1,4 +1,4 @@
-﻿# R6：边界 3D 噪声扰动（让 cell 边变蜿蜒）
+# R6：边界 3D 噪声扰动（让 cell 边变蜿蜒）
 
 > 本文档是 [SphericalSDFTerrainDesign.md §6.4.1](SphericalSDFTerrainDesign.md#641-r6-落地方案在-r5-球面距离-δ-上叠加噪声扰动与-r4r5-几何兼容) 的独立落地文档，与 [R2_TopologyDebugMaterial.md](R2_TopologyDebugMaterial.md) / [R3_CellAttrLUTMaterial.md](R3_CellAttrLUTMaterial.md) / [R4_VoronoiBoundary.md](R4_VoronoiBoundary.md) / [R5_SharpenSoftEdge.md](R5_SharpenSoftEdge.md) 风格一致。
 >

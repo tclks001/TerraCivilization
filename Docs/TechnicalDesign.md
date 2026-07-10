@@ -1,4 +1,4 @@
-﻿# TerraCivilization 技术设计稿
+# TerraCivilization 技术设计稿
 
 > 一个基于正二十面体细分球面网格的、回合制战棋类文明 Demo。
 > 核心特征：**球面拓扑 + 程序化自然地理 + 回合制爆兵围吃 + SDF 多层地表渲染 + GameplayTag 驱动的玩法数据**。

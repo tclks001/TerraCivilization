@@ -1,4 +1,4 @@
-﻿# TerraCivilization SimpleGameplay HISM 球面瓦片渲染设计稿
+# TerraCivilization SimpleGameplay HISM 球面瓦片渲染设计稿
 
 > 本稿用于把当前 `APlanetTessellatedMesh` 的主地表渲染，从程序化整球网格切换为 **每个 Cell 一个烘焙 Static Mesh 实例** 的方案。
 >

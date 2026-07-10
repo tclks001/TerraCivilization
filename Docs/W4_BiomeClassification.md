@@ -1,4 +1,4 @@
-﻿# W4：生物群系分类（TerrainTags 模块 + DataAsset 驱动评分器）
+# W4：生物群系分类（TerrainTags 模块 + DataAsset 驱动评分器）
 
 > 上游主稿：[WorldGenDesign.md §5.6 / §6 / §11](WorldGenDesign.md)
 >

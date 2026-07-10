@@ -189,6 +189,17 @@ P1 的棋子 Transform 由 `APlanetTessellatedMesh` 计算：
 
 ```text
 Position = Cell.UnitCenter * (GlobeRadiusCM + PieceRadiusOffsetCM)
+
+---
+
+## 实现更新说明（2026-07-10）
+
+- `APlanetTessellatedMesh` 已不再直接承载 P1/P2/P2.5/P2.6/P3/P4/P5/P6/P7 的表现配置字段。
+- 相关配置、快照同步、球面站位计算、HISM 高度采样、吃子表现事件构建，现统一迁移到 `UPlanetPiecePresentationComponent`。
+- 当前运行时结构为：
+  - `APlanetTessellatedMesh`：持有 Gameplay / HISM / 球面拓扑运行态，并挂载 `PlanetPiecePresentationComponent`
+  - `UPlanetPiecePresentationComponent`：持有棋子表现配置与 `UTerraPiecePresentationManager`
+- 本稿中凡提到“在 `APlanetTessellatedMesh` Details 面板配置 P1 资产槽”的表述，现均应理解为：选中 `APlanetTessellatedMesh` 的 `PlanetPiecePresentationComponent` 后，在该组件 Details 面板中配置。
 Up       = Cell.UnitCenter
 Forward  = 投影到 Cell 切平面的稳定参考方向
 ```

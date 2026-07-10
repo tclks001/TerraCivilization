@@ -1,4 +1,4 @@
-﻿# HISM Cell Tile 高亮设计稿
+# HISM Cell Tile 高亮设计稿
 
 > 本稿用于实现当前 HISM 球面瓦片渲染模式下的点击 / 悬停高亮。
 >

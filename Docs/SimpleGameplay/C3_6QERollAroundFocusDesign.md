@@ -1,4 +1,4 @@
-﻿# TerraCivilization SimpleGameplay C3.6 Q/E 绕焦点法线旋转视角设计稿
+# TerraCivilization SimpleGameplay C3.6 Q/E 绕焦点法线旋转视角设计稿
 
 > 本稿从 [CameraTrackingAndInteractionDesign.md](CameraTrackingAndInteractionDesign.md) 的 C3.6 阶段拆出。
 >

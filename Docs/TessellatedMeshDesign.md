@@ -1,4 +1,4 @@
-﻿# 自研球面网格设计稿（TessellatedMesh）
+# 自研球面网格设计稿（TessellatedMesh）
 
 > 三步走 `R8 → T → W4` 中 **T 阶段（Tessellation）主稿**。本稿与 [SphericalSDFTerrainDesign.md](SphericalSDFTerrainDesign.md)（地形材质 SDF 路线，R1~R10）、[WorldGenDesign.md](WorldGenDesign.md)（程序化地理流水线，W1~W8）**三足鼎立**，由 [TechnicalDesign.md](TechnicalDesign.md) §1 模块图引用。
 >

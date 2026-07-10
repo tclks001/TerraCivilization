@@ -1,4 +1,4 @@
-﻿# TerraCivilization 球面地块 StaticMesh 资产生成插件设计稿
+# TerraCivilization 球面地块 StaticMesh 资产生成插件设计稿
 
 > 本稿属于 `Docs/SimpleGameplay` 下的简易玩法迭代文档，用于指导本次基于 `GeometryScript` / `DynamicMesh` 的编辑器资产生成插件实现。
 >

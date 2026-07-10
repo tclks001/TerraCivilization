@@ -1,4 +1,4 @@
-﻿# T3：TerrainMesh + WaterMesh 双子组件 + 5 张 LUT 材质对接（子里程碑设计稿）
+# T3：TerrainMesh + WaterMesh 双子组件 + 5 张 LUT 材质对接（子里程碑设计稿）
 
 > 父稿：[TessellatedMeshDesign.md](TessellatedMeshDesign.md) §5.1 子里程碑切分中的 **T3** 行展开。
 >

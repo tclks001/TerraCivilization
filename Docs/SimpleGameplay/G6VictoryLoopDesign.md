@@ -1,4 +1,4 @@
-﻿# TerraCivilization SimpleGameplay G6 胜负闭环设计稿
+# TerraCivilization SimpleGameplay G6 胜负闭环设计稿
 
 > 本稿承接 G5：当前已经支持普通移动、跳跃/连跳、基础二吃一、弓兵远程吃子、山脉增程、森林防远程，以及“点击自身结束回合后统一结算吃子”。
 >

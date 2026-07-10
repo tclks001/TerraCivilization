@@ -1,4 +1,4 @@
-﻿# W3：高程场 + 温湿度场（WorldGen 三标量场流水线）
+# W3：高程场 + 温湿度场（WorldGen 三标量场流水线）
 
 > **状态**：📝 **设计期（2026-06）**——W2 已验收（[W2_PlatesAndLandSea.md](W2_PlatesAndLandSea.md) §0 状态徽章）；本稿落实 W3 三个标量场的设计，cpp 落地待用户启动。
 >

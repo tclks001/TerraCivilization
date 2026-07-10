@@ -1,4 +1,4 @@
-﻿# 球面世界程序化生成（WorldGen）设计稿
+# 球面世界程序化生成（WorldGen）设计稿
 
 > 目标：在 [`FSphereTopology`](../Source/Grid/Public/FSphereTopology.h) 球面拓扑（Goldberg 多面体 / IsoSphere primal mesh）上，以**自然地理流水线**生成每 `FCell` 的地形分类、高程、温湿度、板块、河流、势力基地等属性，输出一份 `TArray<FCellGeoData>` 数据契约，供下游 `GridRender`（SDF 多层地表渲染）、`Gameplay`（移动/战斗/占领）、`SaveLoad`（存档）等模块**纯只读**消费。
 >

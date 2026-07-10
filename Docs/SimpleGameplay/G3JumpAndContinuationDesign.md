@@ -1,4 +1,4 @@
-﻿# TerraCivilization SimpleGameplay G3 跳跃与连跳设计稿
+# TerraCivilization SimpleGameplay G3 跳跃与连跳设计稿
 
 > 本稿承接 G2 / G2.5：`Gameplay` 模块已经负责棋子、Cell 逻辑、普通移动、回合结束、当前阵营棋子提示和相机辅助。
 >

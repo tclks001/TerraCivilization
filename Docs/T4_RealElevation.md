@@ -1,4 +1,4 @@
-﻿# T4：接入 FCellGeoData.Elevation 真实数据源（子里程碑设计稿）
+# T4：接入 FCellGeoData.Elevation 真实数据源（子里程碑设计稿）
 
 > 父稿：[TessellatedMeshDesign.md](TessellatedMeshDesign.md) §5.1 子里程碑切分中的 **T4** 行展开。
 >

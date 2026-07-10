@@ -1,4 +1,4 @@
-﻿# TerraCivilization SimpleGameplay G2 Gameplay 容器设计稿
+# TerraCivilization SimpleGameplay G2 Gameplay 容器设计稿
 
 > 本稿对应 [SimpleGameplayDesign.md](SimpleGameplayDesign.md) §14 的 **G2：选择与普通移动**。
 >

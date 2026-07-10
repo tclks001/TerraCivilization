@@ -1,4 +1,4 @@
-﻿# 球面 SDF 多层地表渲染设计稿
+# 球面 SDF 多层地表渲染设计稿
 
 > 目标：在球面拓扑（[`FSphereTopology`](../Source/Grid/Public/FSphereTopology.h)）上实现一种通用、可扩展的**符号距离场（Signed Distance Field, SDF）+ 多层地形材质混合**的渲染方案。
 >

@@ -1,4 +1,4 @@
-﻿# TerraCivilization 简易玩法设计稿
+# TerraCivilization 简易玩法设计稿
 
 > 本稿用于替代 [TechnicalDesign.md](TechnicalDesign.md) 中过重的首版玩法设想，作为当前阶段实现 **最小可玩回合制棋盘玩法** 的依据。
 >

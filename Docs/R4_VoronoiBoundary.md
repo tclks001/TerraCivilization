@@ -1,4 +1,4 @@
-﻿# R4：基于外心垂面的三角分割（球面 Voronoi 硬边）
+# R4：基于外心垂面的三角分割（球面 Voronoi 硬边）
 
 > 本文档是 [SphericalSDFTerrainDesign.md §11.3](SphericalSDFTerrainDesign.md#113-r4-阶段说明基于外心垂面的三角分割消除-hex-边折角) 的独立落地文档，与 [R2_TopologyDebugMaterial.md](R2_TopologyDebugMaterial.md) / [R3_CellAttrLUTMaterial.md](R3_CellAttrLUTMaterial.md) 风格一致。
 >

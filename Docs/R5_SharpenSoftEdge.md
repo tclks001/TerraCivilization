@@ -1,4 +1,4 @@
-﻿# R5：球面 Voronoi 软边控制（基于绝对弧度的 Sharpen）
+# R5：球面 Voronoi 软边控制（基于绝对弧度的 Sharpen）
 
 > 本文档是 [SphericalSDFTerrainDesign.md §6.3.1](SphericalSDFTerrainDesign.md#631-r5-落地方案基于球面角距离的绝对弧度软边路径-b) 的独立落地文档，与 [R2_TopologyDebugMaterial.md](R2_TopologyDebugMaterial.md) / [R3_CellAttrLUTMaterial.md](R3_CellAttrLUTMaterial.md) / [R4_VoronoiBoundary.md](R4_VoronoiBoundary.md) 风格一致。
 >

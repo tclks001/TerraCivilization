@@ -1,4 +1,4 @@
-﻿# R3 验收：argmax(λ) + Load(CellAttrLUT) → LayerIndex → 颜色
+# R3 验收：argmax(λ) + Load(CellAttrLUT) → LayerIndex → 颜色
 
 > 关联代码：
 > - C++：[PlanetTopologyDebugMesh.cpp](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp) `RebuildCellAttrLUT_()` / `Rebuild()` 末尾 MID 注入

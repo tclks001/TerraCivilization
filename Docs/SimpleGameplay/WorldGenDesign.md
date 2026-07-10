@@ -1,4 +1,4 @@
-﻿# TerraCivilization 简易玩法 WorldGen 设计稿
+# TerraCivilization 简易玩法 WorldGen 设计稿
 
 > 本稿属于 `Docs/SimpleGameplay` 下的简易玩法迭代文档，用于指导后续改造 `WorldGen` 模块。
 >

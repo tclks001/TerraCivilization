@@ -1,4 +1,4 @@
-﻿# TerraCivilization SimpleGameplay C3.7 自动倾角设计稿
+# TerraCivilization SimpleGameplay C3.7 自动倾角设计稿
 
 > 本稿从 [C3FocusCameraManualControlDesign.md](C3FocusCameraManualControlDesign.md) 的 $8 "暂不处理" 拆出。
 >

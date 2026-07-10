@@ -1,4 +1,4 @@
-﻿# TerraCivilization SimpleGameplay G4 基础二吃一设计稿
+# TerraCivilization SimpleGameplay G4 基础二吃一设计稿
 
 > 本稿承接 G3：当前已经支持选中棋子、普通行走、跳跃、骑兵特殊跳跃、跳跃连跳、回合开始棋子底色、HISM tile 高亮。
 >

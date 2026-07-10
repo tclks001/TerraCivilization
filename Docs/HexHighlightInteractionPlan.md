@@ -1,4 +1,4 @@
-﻿﻿# 球面 Hex/Pent 区域点选高亮 —— R11 交互流统稿
+﻿# 球面 Hex/Pent 区域点选高亮 —— R11 交互流统稿
 
 > **目标**：在 PIE 中给 [`APlanetTessellatedMesh`](../Source/TerraCivilization/Public/Render/PlanetTessellatedMesh.h)（T 阶段自研球面网格，默认 `CellSubdivisionLevel=3` 逻辑 / `MeshSubdivisionLevel=4` 渲染）加上**鼠标 hover + 点击 select** 的格子高亮交互。视觉表现：被 hover 或 selected 的 hex/pent 沿 cell 边沿出现一条**贴合 mesh 真实地表**的发光描边带——hover 与 select 两路共享同一套描边管线，仅靠 LUT 通道与全局颜色参数区分。
 >

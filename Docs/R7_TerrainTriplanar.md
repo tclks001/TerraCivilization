@@ -1,4 +1,4 @@
-﻿# R7：Triplanar 真实地表纹理（Texture2DArray 多层混合）
+# R7：Triplanar 真实地表纹理（Texture2DArray 多层混合）
 
 > 本文档是 [SphericalSDFTerrainDesign.md](SphericalSDFTerrainDesign.md) §6.5 / §6.5.1 的独立落地文档，与 [R2_TopologyDebugMaterial.md](R2_TopologyDebugMaterial.md) / [R3_CellAttrLUTMaterial.md](R3_CellAttrLUTMaterial.md) / [R4_VoronoiBoundary.md](R4_VoronoiBoundary.md) / [R5_SharpenSoftEdge.md](R5_SharpenSoftEdge.md) / [R6_BoundaryNoise.md](R6_BoundaryNoise.md) 风格一致。
 >

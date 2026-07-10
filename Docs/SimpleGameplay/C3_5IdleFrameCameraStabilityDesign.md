@@ -1,4 +1,4 @@
-﻿# TerraCivilization SimpleGameplay C3.5 无输入帧相机稳态设计稿
+# TerraCivilization SimpleGameplay C3.5 无输入帧相机稳态设计稿
 
 > 本稿从 [CameraTrackingAndInteractionDesign.md](CameraTrackingAndInteractionDesign.md) 的 C3.5 阶段拆出。
 >

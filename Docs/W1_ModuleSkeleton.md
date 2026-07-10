@@ -1,4 +1,4 @@
-﻿# W1：WorldGen 模块骨架（Source/WorldGen 新建 + 空 Generate 跑通）
+# W1：WorldGen 模块骨架（Source/WorldGen 新建 + 空 Generate 跑通）
 
 > **状态**：✅ **已验收（2026-06）**——用户在 PIE 中确认 Output Log 命中 `[WorldGen] Skeleton OK, 642 cells, no-op generate`、R7 视觉像素级零回归、Editor `WorldGen` 折叠组可见可编辑；11 项验收清单全部通过。本稿**封档为参考**，后续 W-step 的"骨架对照基线"。
 >

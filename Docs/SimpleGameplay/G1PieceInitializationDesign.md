@@ -1,4 +1,4 @@
-﻿# TerraCivilization SimpleGameplay G1 棋子初始化设计稿
+# TerraCivilization SimpleGameplay G1 棋子初始化设计稿
 
 > 本稿对应 [SimpleGameplayDesign.md](SimpleGameplayDesign.md) §14 的 **G1：棋盘状态与开局布阵**。
 >

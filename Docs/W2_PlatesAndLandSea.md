@@ -1,4 +1,4 @@
-﻿# W2：板块构造 + 海陆分离（Source/WorldGen 第一条真实流水线）
+# W2：板块构造 + 海陆分离（Source/WorldGen 第一条真实流水线）
 
 > **状态**：✅ **已验收（2026-06）**——用户在 PIE 中确认 Output Log 命中 `[WorldGen] W2 OK, 642 cells, 12 plates, ...`、12 板块色斑近似均等无飞地、海陆轮廓清晰、R7 视觉零回归；W2 阶段全部 12 项验收清单 ✅ 通过。本稿**封档为参考**，作为 W3+ 的"WorldGen 流水线 cpp 模板"基线（Generator 提升为 TUniquePtr 成员、DebugView 切换、LUT 写入分支等）。
 >

@@ -1,4 +1,4 @@
-﻿# R2 验收：UV1/UV2/UV3 顶点属性 + PS 端 argmax(λ) 硬边着色
+# R2 验收：UV1/UV2/UV3 顶点属性 + PS 端 argmax(λ) 硬边着色
 
 > 关联代码：[PlanetTopologyDebugMesh.cpp](../Source/TerraCivilization/Private/Render/PlanetTopologyDebugMesh.cpp)
 >

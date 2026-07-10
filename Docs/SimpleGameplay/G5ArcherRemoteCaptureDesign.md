@@ -1,4 +1,4 @@
-﻿# TerraCivilization SimpleGameplay G5 弓兵远程吃子设计稿
+# TerraCivilization SimpleGameplay G5 弓兵远程吃子设计稿
 
 > 本稿记录 G5 已落地的规则与当前 C++ 实现语义。
 >

@@ -1,4 +1,4 @@
-﻿# TerraCivilization SimpleGameplay G2.5 视角变化和选中逻辑优化设计稿
+# TerraCivilization SimpleGameplay G2.5 视角变化和选中逻辑优化设计稿
 
 > 本稿承接 G2：`Gameplay` 模块已经负责棋子、Cell 逻辑、普通移动和回合结束。
 >

@@ -1,4 +1,4 @@
-﻿# TerraCivilization SimpleGameplay 棋子动画表现设计稿
+# TerraCivilization SimpleGameplay 棋子动画表现设计稿
 
 > 本稿用于在当前 G6 胜负闭环已经跑通的基础上，为 SimpleGameplay 增加一套**独立于地形渲染模块**的棋子动画表现方案。
 >
