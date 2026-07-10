@@ -127,3 +127,7 @@ C4 暂不实现：
 - 屏幕边缘箭头提示。
 - 复杂相机 Blend 曲线。
 - 行动过程跟随。
+> Implementation note (2026-07-10): C4 selection comfort checks and focus
+> requests are implemented in `FPlanetCameraController`. `APlanetTessellatedMesh`
+> still triggers the behavior after Gameplay selection changes and keeps the
+> serialized C4 tuning fields.

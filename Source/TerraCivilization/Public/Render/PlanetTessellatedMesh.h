@@ -6,6 +6,7 @@
 #include "Engine/EngineTypes.h"
 #include "Engine/TimerHandle.h"
 #include "GameFramework/Actor.h"
+#include "Render/PlanetCameraController.h"
 #include "Render/PlanetHISMTileRenderer.h"
 #include "TerraGameplayContainer.h"
 #include "TerraPiecePresentationTypes.h"
@@ -58,6 +59,7 @@ UCLASS()
 class TERRACIVILIZATION_API APlanetTessellatedMesh : public AActor
 {
     GENERATED_BODY()
+    friend class FPlanetCameraController;
 
 public:
     APlanetTessellatedMesh();
@@ -826,56 +828,8 @@ private:
     /** SimpleGameplay G2.5：根据 CellId 计算球面 Cell 中心世界坐标。 */
     bool GetCellSurfaceWorldPosition_(int32 CellId, float RadiusOffsetCM, FVector& OutWorldPosition) const;
 
-    /** SimpleGameplay G2.5：回合开始时移动到 Cell 上方并朝向 Cell，或仅旋转当前视角对准 Cell。 */
-    void FocusCameraOnCell_(int32 CellId, bool bMoveCamera);
-
-    /** SimpleGameplay C4：选中棋子时按焦点角距离舒适区判断是否需要聚焦。 */
-    void FocusCameraOnSelectedCellSmart_(int32 CellId);
-
-    /** SimpleGameplay C4：判断 Cell 与当前视角中心的球面角距离是否在舒适阈值内。 */
-    bool IsCellInC4ComfortView_(int32 CellId) const;
-
-    /** SimpleGameplay C4：向当前 PlayerController 请求 C3 焦点 Blend。 */
-    bool RequestC4SelectionFocus_(int32 CellId) const;
-
-    /** SimpleGameplay C6：根据 P2 移动事件请求行动镜头追踪。 */
-    void RequestC6ActionCameraTrackingForMoveEvents_(const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents) const;
-
-    /** SimpleGameplay C6：按移动类型取与 P2 表现一致的镜头 Blend 时长。 */
-    float GetC6ActionCameraBlendSeconds_(ETerraPiecePresentationMoveType MoveType) const;
-
-    /** SimpleGameplay C6.5：如果本次确认行动正在播放移动 / 攻击表现，则延迟 C2.5 回合回正。返回 true 表示已接管本次回正。 */
-    bool TryRequestC6_5DelayedTurnStartFocus_(
-        int32 ExpectedTurnIndex,
-        int32 ExpectedFactionId,
-        const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents,
-        const TArray<FTerraPiecePresentationCaptureEvent>& CaptureEvents);
-
     /** SimpleGameplay C6.5：timer 到点后校验仍是同一回合，再调用既有 C2/C2.5 回合镜头入口。 */
     void ExecuteC6_5DelayedTurnStartFocus_(int32 ExpectedTurnIndex, int32 ExpectedFactionId);
-
-    /** SimpleGameplay C6.5：估算本次移动 / 攻击表现最长持续时间。 */
-    float GetC6_5ActionPresentationDelaySeconds_(
-        const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents,
-        const TArray<FTerraPiecePresentationCaptureEvent>& CaptureEvents) const;
-
-    float GetC6_5AttackAnimationDurationSeconds_(ETerraGameplayPieceType PieceType, UAnimationAsset* AttackAnimation, float FallbackSeconds) const;
-    float GetC6_5AnimationLengthSeconds_(UAnimationAsset* AnimationAsset, float FallbackSeconds) const;
-
-    /** SimpleGameplay C2：游戏开始时硬设置到当前阵营活棋子战区中心斜俯视。成功处理返回 true。 */
-    bool FocusCameraOnCurrentFactionWarZoneHard_();
-
-    /** SimpleGameplay C2.5：回合开始时平滑把 C3 视角中心切到当前阵营活棋子战区中心。成功处理返回 true。 */
-    bool BlendCameraFocusToCurrentFactionWarZone_();
-
-    /** SimpleGameplay C2：计算当前阵营活棋子的平均球面方向。 */
-    bool TryBuildCurrentFactionWarZoneDirection_(FVector& OutLocalWarZoneDir) const;
-
-    /** SimpleGameplay C2：计算当前阵营主将/大本营方向，供斜俯视方位参考。 */
-    bool TryBuildCurrentFactionCommanderDirection_(FVector& OutLocalCommanderDir) const;
-
-    /** SimpleGameplay G2.5：回合开始时视角切到当前阵营大本营正上方。 */
-    void FocusCameraOnCurrentFactionBase_();
 
     /** SimpleGameplay P1/P2：根据当前 Gameplay 快照增量同步真实棋子 Actor，可选播放 P2 移动事件。 */
     void SyncP1PiecePresentation_(
@@ -995,14 +949,8 @@ public:
     /** SimpleGameplay G2.5：上一次已刷新底色提示的当前阵营。 */
     int32 G2_5LastHighlightedFactionId = INDEX_NONE;
 
-    /** SimpleGameplay G2.5：上一次已经执行回合开始相机切换的 TurnIndex。 */
-    int32 G2_5LastCameraFocusedTurnIndex = INDEX_NONE;
-
-    /** SimpleGameplay C2：本局是否已经完成游戏开始硬设置镜头。 */
-    bool bC2GameStartCameraApplied = false;
-
-    /** SimpleGameplay C6.5：延迟回合回正 timer。 */
-    FTimerHandle C6_5DelayedTurnStartFocusTimerHandle;
+    /** SimpleGameplay Camera：镜头行为与瞬态状态。配置字段暂留本 Actor 以兼容关卡序列化。 */
+    FPlanetCameraController CameraController;
 
     /** SimpleGameplay G1/G2：当前初始化出的调试棋子缓存。 */
     TArray<FTerraG1DebugPiece> G1DebugPieces;

@@ -303,3 +303,8 @@ C3 暂不实现：
 - 极点穿越。C3 用 3D 单位向量作为焦点真值 + Yaw 平行运输后，极点穿越是自然行为，不再是需要单独处理的特殊情况。
 - Q/E 绕焦点旋转。已由 [C3_6QERollAroundFocusDesign.md](C3_6QERollAroundFocusDesign.md) 阶段落地。
 - 独立 Tilt 自由度。已由 [C3_7AutoTiltFromDistanceDesign.md](C3_7AutoTiltFromDistanceDesign.md) 阶段替换为每帧从距离自动插值派生。
+> Implementation note (2026-07-10): C3 focus-camera sync/apply/offset math
+> has moved from `APlanetTessellatedMesh` into `FPlanetCameraController`
+> (`Source/TerraCivilization/Public/Render/PlanetCameraController.h`,
+> `Source/TerraCivilization/Private/Render/PlanetCameraController.cpp`).
+> The old `APlanetTessellatedMesh` methods remain as compatibility wrappers.

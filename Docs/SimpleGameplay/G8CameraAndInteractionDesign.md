@@ -362,3 +362,9 @@ G8CameraZoomStepCM          = 800
 - 视角平滑插值 / 缓动。
 - 相机碰撞。
 - 多相机模式切换。
+> Implementation note (2026-07-10): G8/C3 camera math and apply/sync behavior
+> are implemented in `FPlanetCameraController`
+> (`Source/TerraCivilization/Public/Render/PlanetCameraController.h`,
+> `Source/TerraCivilization/Private/Render/PlanetCameraController.cpp`).
+> `APlanetTessellatedMesh` retains the serialized tuning fields and wrapper
+> methods used by `APlanetInteractionController`.
