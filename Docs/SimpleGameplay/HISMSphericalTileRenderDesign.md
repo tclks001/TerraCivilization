@@ -4,7 +4,7 @@
 >
 > 资产来源：`/Game/Generated/SphericalTiles` 中已经烘焙好的平原、森林、山脉 `StaticMesh` 与对应 `MaterialInstance`。
 >
-> 目标：主视觉使用 `HISM`；旧球面 `ProceduralMesh` 暂时保留为 debug / 鼠标拾取兜底。
+> 目标：主视觉和交互拾取都使用 `HISM`；旧球面 `ProceduralMesh` / LUT / SDF 材质链路不再属于 SimpleGameplay 主线。
 
 ---
 
@@ -26,7 +26,7 @@ SimpleGameplay 当前只需要三种地形：
 - **每个 Cell 一个实例**，实例由 `WorldGen` 输出的地形类型决定。
 - **空间指向正确**：烘焙瓦片资产的局部 `+Z` 指向该 Cell 的 `UnitCenter`。
 - **偏转不重要**：绕法线方向的 roll/yaw 不参与初版验收。
-- **旧渲染保留**：原 `TerrainMeshComp` / `WaterMeshComp` 仍可打开，用作 debug 对照。
+- **HISM-only**：SimpleGameplay 只保留 HISM 拼出球面的逻辑，不再保留旧整球 `ProceduralMesh` debug 对照。
 
 ---
 
@@ -96,22 +96,6 @@ UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|HISM Tiles")
 float HISMTileAdditionalUniformScale = 1.0f;
 ```
 
-旧 debug 渲染控制：
-
-```cpp
-UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|Debug Render")
-bool bShowDebugProceduralSurface = false;
-
-UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|Debug Render")
-bool bUseDebugProceduralCollision = true;
-```
-
-说明：
-
-- `bShowDebugProceduralSurface=false` 时，旧整球地表默认不可见。
-- `bUseDebugProceduralCollision=true` 时，即使旧地表不可见，也继续保留复杂碰撞，作为鼠标拾取稳定兜底。
-- 如果确认 HISM 静态网格碰撞足够稳定，可以把 `bUseDebugProceduralCollision=false`，只依赖 HISM 碰撞。
-
 ---
 
 ## 4. 构建流程
@@ -120,12 +104,11 @@ bool bUseDebugProceduralCollision = true;
 
 ```text
 RebuildTopologies_()
-Build Displacement debug 数据
 Run WorldGen
-Rebuild old LUT/debug ProceduralMesh
-Rebuild water debug mesh
 RebuildHISMTileInstances_()
 ApplyRenderModeVisibility_()
+RebuildGameplay_()
+RebuildG1DebugPieces_()
 LogTopologyStats_()
 ```
 
@@ -188,35 +171,6 @@ bEnableHISMTileRendering = true
 bEnableHISMTileCollision = true
 ```
 
-### 5.4 旧渲染 debug 开关
-
-默认推荐：
-
-```text
-bShowDebugProceduralSurface = false
-bUseDebugProceduralCollision = true
-```
-
-含义：
-
-- 主视觉只看 HISM 瓦片。
-- 鼠标 hover / click 仍可通过隐藏的旧整球复杂碰撞稳定拾取 Cell。
-
-如果你想对照旧整球渲染：
-
-```text
-bShowDebugProceduralSurface = true
-```
-
-如果你想验证 HISM 自己的碰撞：
-
-```text
-bUseDebugProceduralCollision = false
-bEnableHISMTileCollision = true
-```
-
----
-
 ## 6. 验收步骤
 
 ### 6.1 编译验收
@@ -227,7 +181,6 @@ bEnableHISMTileCollision = true
 
 ```text
 PlanetTopology | Tess | HISM Tiles
-PlanetTopology | Tess | Debug Render
 ```
 
 ### 6.2 资产挂载验收
@@ -248,7 +201,7 @@ PlanetTopology | Tess | Debug Render
    - 基地保护区附近大面积平原。
    - 山脉呈条状。
    - 森林呈块状。
-3. 不应再主要看到旧 `TerrainMaterial` 的整球颜色分层。
+3. 不应再看到旧 `TerrainMaterial` 的整球颜色分层。
 4. 如果瓦片整体半径不对，优先检查：
    - `HISMTileSourceRadiusCM` 是否等于生成资产时的 `BaseRadius`。
    - `GlobeRadiusCM` 是否是目标星球半径。
@@ -271,15 +224,8 @@ Position = RawDir * radius
 2. 鼠标移动到球面上，应继续出现 hover cell 调试信息。
 3. 点击 cell，应进入 G2 Gameplay 点击流程：点击当前阵营棋子会选中并高亮黄色，移动后脚下 Cell 高亮蓝色，再次点击脚下 Cell 结束回合。
 4. 如果 hover / click 不稳定：
-   - 先设置 `bUseDebugProceduralCollision=false`，确保 HISM 实例优先被 trace 命中。
    - 确认 HISM StaticMesh 有可用碰撞。
    - 再排查 HISM 碰撞资产设置。
-
-### 6.6 Debug 对照验收
-
-1. 设置 `bShowDebugProceduralSurface=true`。
-2. 应能看到旧整球 `ProceduralMesh` 渲染与 HISM 瓦片同时存在。
-3. 设置 `bShowDebugProceduralSurface=false` 后，旧整球视觉隐藏，HISM 仍显示。
 
 ---
 
@@ -292,4 +238,4 @@ Position = RawDir * radius
 - 每个实例的材质参数随机化。
 - HISM LOD 分组或运行时流送。
 - Nanite HISM 的性能 profiling。
-- 用 HISM 完全替代高亮描边材质。当前高亮仍以旧 debug 渲染链路和 `CellHighlightLUT` 为主。
+- ProceduralMesh / SDF / LUT 整球材质回退链路。

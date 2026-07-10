@@ -46,12 +46,12 @@ UV 圆心 = (0.5, 0.5)
 - `UCellHighlightComponent` 的 `CellHighlightLUT` 高亮绘制。
 - 旧整球 `ProceduralMesh` 材质中的 `ComputeHighlight` HLSL 描边。
 
-但保留：
+仍保留：
 
 - `APlanetBinder` 作为关卡中的交互桥接 Actor。
 - `APlanetBinder::TessellatedMeshRef` 指向当前 `APlanetTessellatedMesh`。
-- 旧 `PlanetBinder` / `CellHighlightComponent` 作为 debug fallback，不删除。
-- `HighlightHoverColor`、`HighlightSelectColor`、`HighlightStrength` 等现有颜色参数语义。
+- `PlanetBinder` 到 `APlanetTessellatedMesh` 的桥接关系。
+- `HighlightHoverColor`、`HighlightStrength` 等 HISM 高亮参数语义。
 
 ---
 
@@ -260,7 +260,6 @@ GetHitResultUnderCursorByChannel
 这样可以保证：
 
 - 新 HISM 高亮优先生效。
-- 旧 debug ProceduralMesh / LUT 路径仍可保留。
 - 不需要让 `PlanetBinder` 用旧射线方式解 Cell。
 
 ---
@@ -523,12 +522,6 @@ Custom.MF_HISM_FinalHighlightTintedBaseColor
 - `bEnableHISMInstanceHighlight = true`
 - 平原 / 森林 / 山脉三个 StaticMesh 已挂载
 
-建议如果只验证 HISM 点击，先临时关闭旧碰撞：
-
-- `bUseDebugProceduralCollision = false`
-
-避免旧整球 ProceduralMesh 抢在 HISM 前被 trace 命中。
-
 ### Step 4：配置 HISM tile 材质
 
 给 Plain / Forest / Mountain 三个 StaticMesh 使用的材质都接入：
@@ -584,7 +577,6 @@ Custom.MF_HISM_FinalHighlightTintedBaseColor
 - 材质必须读取 `PerInstanceCustomData`，否则 C++ 写入数据也不会有视觉变化。
 - StaticMesh 必须有可 trace 的碰撞；若没有简单碰撞，可临时使用复杂碰撞验证，但长期建议做合理简单碰撞。
 - `Hit.Item` 是当前 HISM 内部实例索引，只在下一次 `ClearInstances()` 前有效。
-- 如果旧 debug ProceduralMesh 碰撞打开且比 HISM 先被命中，HISM 路径可能拿不到实例命中；验证阶段建议关闭 `bUseDebugProceduralCollision`。
 - 如果 tile UV 不是中心对称，`UV(0.5,0.5)` 半径环不会正好贴边，需要修正资产 UV 或材质 mask。
 
 ---
