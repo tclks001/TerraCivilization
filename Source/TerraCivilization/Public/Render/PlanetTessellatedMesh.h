@@ -40,6 +40,11 @@ struct FTerraG1DebugPiece
     ETerraG1DebugPieceType PieceType = ETerraG1DebugPieceType::Infantry;
 };
 
+static const FRotator EditorXYZRotator(double XRoll, double YPitch, double ZYaw)
+{
+    return FRotator(YPitch, ZYaw, XRoll);
+}
+
 /**
  * APlanetTessellatedMesh
  *
@@ -196,7 +201,7 @@ public:
 
     /** P1 模型组件相对棋子 Actor 根节点的导入朝向修正。默认 Yaw=90，用于修正当前人物模型"逻辑朝前实际朝右"的资源坐标差异。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
-    FRotator P1MeshRelativeRotation = FRotator(0.0f, 0.0f, -90.0f);
+    FRotator P1MeshRelativeRotation = EditorXYZRotator(0.0f, 0.0f, -90.0f);
 
     /** 主将模型。推荐挂 Content/Animations/Adventurers/Characters/Mage1。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
@@ -309,7 +314,7 @@ public:
 
     /** P4.1 马相对骑兵 Actor 根节点的导入朝向修正。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
-    FRotator P4HorseRelativeRotation = FRotator(0.0f, 0.0f, -90.0f);
+    FRotator P4HorseRelativeRotation = EditorXYZRotator(0.0f, 0.0f, -90.0f);
 
     /** P4.1 马模型统一缩放。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
@@ -321,7 +326,7 @@ public:
 
     /** P4.1 骑手相对 RiderAnchor / 马背锚点的旋转。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
-    FRotator P4RiderRelativeRotation = FRotator(0.0f, 0.0f, -90.0f);
+    FRotator P4RiderRelativeRotation = EditorXYZRotator(0.0f, 0.0f, -90.0f);
 
     /** P4.1 骑手相对缩放。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
@@ -373,7 +378,7 @@ public:
 
     /** P5 弓兵弓相对挂点旋转。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
-    FRotator P5ArcherBowRelativeRotation = FRotator(0.0f, 180.0f, 0.0f);
+    FRotator P5ArcherBowRelativeRotation = EditorXYZRotator(0.0f, 180.0f, 0.0f);
 
     /** P5 弓兵弓相对缩放。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
@@ -397,7 +402,7 @@ public:
 
     /** P5 步兵盾相对挂点旋转。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
-    FRotator P5InfantryShieldRelativeRotation = FRotator(0.0f, 90.0f, 180.0f);
+    FRotator P5InfantryShieldRelativeRotation = EditorXYZRotator(0.0f, 90.0f, 180.0f);
 
     /** P5 步兵盾相对缩放。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
@@ -437,7 +442,7 @@ public:
 
     /** P6 箭矢相对飞行朝向的旋转。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
-    FRotator P6ArrowRelativeRotation = FRotator(0.0f, 0.0f, -90.0f);
+    FRotator P6ArrowRelativeRotation = EditorXYZRotator(0.0f, 0.0f, -90.0f);
 
     /** P6 箭矢相对缩放。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
@@ -453,7 +458,7 @@ public:
 
     /** P6 法术 Actor 相对飞行朝向的旋转。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
-    FRotator P6SpellRelativeRotation = FRotator(0.0f, 90.0f, 0.0f);
+    FRotator P6SpellRelativeRotation = EditorXYZRotator(0.0f, 90.0f, 0.0f);
 
     /** P6 法术 Actor 相对缩放。 */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
