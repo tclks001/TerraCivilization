@@ -1,8 +1,8 @@
 #include "Render/PlanetCameraComponent.h"
 
 #include "Render/PlanetTessellatedMesh.h"
+#include "Render/PlanetPiecePresentationComponent.h"
 #include "TerraGameplayContainer.h"
-#include "TerraPiecePresentationManager.h"
 #include "FSphereTopology.h"
 #include "FCell.h"
 
@@ -290,14 +290,15 @@ bool UPlanetCameraComponent::RequestC4SelectionFocus(int32 CellId) const
 float UPlanetCameraComponent::GetC6ActionCameraBlendSeconds(ETerraPiecePresentationMoveType MoveType) const
 {
     APlanetTessellatedMesh* Host = GetHost();
-    if (!Host)
+    UPlanetPiecePresentationComponent* PiecePresentation = Host ? Host->GetPlanetPiecePresentationComponent() : nullptr;
+    if (!Host || !PiecePresentation)
     {
         return 0.001f;
     }
 
     return MoveType == ETerraPiecePresentationMoveType::Jump
-        ? FMath::Max(Host->P2JumpDurationSeconds, 0.001f)
-        : FMath::Max(Host->P2MoveDurationSeconds, 0.001f);
+        ? FMath::Max(PiecePresentation->P2JumpDurationSeconds, 0.001f)
+        : FMath::Max(PiecePresentation->P2MoveDurationSeconds, 0.001f);
 }
 
 void UPlanetCameraComponent::RequestC6ActionCameraTrackingForMoveEvents(const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents) const
@@ -369,24 +370,25 @@ float UPlanetCameraComponent::GetC6_5AttackAnimationDurationSeconds(
     float FallbackSeconds) const
 {
     APlanetTessellatedMesh* Host = GetHost();
-    if (!Host)
+    UPlanetPiecePresentationComponent* PiecePresentation = Host ? Host->GetPlanetPiecePresentationComponent() : nullptr;
+    if (!Host || !PiecePresentation)
     {
         return 0.0f;
     }
 
     if (PieceType == ETerraGameplayPieceType::Commander)
     {
-        return FMath::Max(Host->P35CommanderAttackDurationSeconds, 0.001f)
-            / FMath::Max(Host->P35CommanderAttackPlayRateScale, 0.001f);
+        return FMath::Max(PiecePresentation->P35CommanderAttackDurationSeconds, 0.001f)
+            / FMath::Max(PiecePresentation->P35CommanderAttackPlayRateScale, 0.001f);
     }
 
     if (PieceType == ETerraGameplayPieceType::Archer)
     {
-        return FMath::Max(Host->P35ArcherAttackDurationSeconds, 0.001f)
-            / FMath::Max(Host->P35ArcherAttackPlayRateScale, 0.001f);
+        return FMath::Max(PiecePresentation->P35ArcherAttackDurationSeconds, 0.001f)
+            / FMath::Max(PiecePresentation->P35ArcherAttackPlayRateScale, 0.001f);
     }
 
-    return Host->P3AttackAnimationStartOffsetSeconds
+    return PiecePresentation->P3AttackAnimationStartOffsetSeconds
         + GetC6_5AnimationLengthSeconds(AttackAnimation, FallbackSeconds);
 }
 
@@ -395,7 +397,8 @@ float UPlanetCameraComponent::GetC6_5ActionPresentationDelaySeconds(
     const TArray<FTerraPiecePresentationCaptureEvent>& CaptureEvents) const
 {
     APlanetTessellatedMesh* Host = GetHost();
-    if (!Host)
+    UPlanetPiecePresentationComponent* PiecePresentation = Host ? Host->GetPlanetPiecePresentationComponent() : nullptr;
+    if (!Host || !PiecePresentation)
     {
         return 0.0f;
     }
@@ -429,7 +432,7 @@ float UPlanetCameraComponent::GetC6_5ActionPresentationDelaySeconds(
 
     float CaptureSeconds = 0.0f;
     int32 ValidCaptureEventCount = 0;
-    const FTerraPieceVisualConfig VisualConfig = Host->BuildP1PieceVisualConfig_();
+    const FTerraPieceVisualConfig VisualConfig = PiecePresentation->BuildVisualConfig();
     for (const FTerraPiecePresentationCaptureEvent& CaptureEvent : CaptureEvents)
     {
         if (!CaptureEvent.IsValidCapture())
@@ -443,7 +446,7 @@ float UPlanetCameraComponent::GetC6_5ActionPresentationDelaySeconds(
         }
         ++ValidCaptureEventCount;
 
-        float MaxAttackToHitSeconds = FMath::Max(Host->P3HitReactDelaySeconds, 0.0f);
+        float MaxAttackToHitSeconds = FMath::Max(PiecePresentation->P3HitReactDelaySeconds, 0.0f);
         auto IncludeAttackToHit = [&VisualConfig, &MaxAttackToHitSeconds](const FTerraPiecePresentationCaptureParticipant& Participant)
         {
             if (Participant.IsValid())
@@ -483,19 +486,19 @@ float UPlanetCameraComponent::GetC6_5ActionPresentationDelaySeconds(
         }
 
         const float HitSeconds = MaxAttackToHitSeconds
-            + Host->P3HitAnimationStartOffsetSeconds
-            + GetC6_5AnimationLengthSeconds(Host->P3HitAnimation, 0.35f);
+            + PiecePresentation->P3HitAnimationStartOffsetSeconds
+            + GetC6_5AnimationLengthSeconds(PiecePresentation->P3HitAnimation, 0.35f);
         const float DeathSeconds = MaxAttackToHitSeconds
-            + Host->P3DeathAfterHitDelaySeconds
-            + Host->P3DeathAnimationStartOffsetSeconds
-            + GetC6_5AnimationLengthSeconds(Host->P3DeathAnimation, 0.75f);
+            + PiecePresentation->P3DeathAfterHitDelaySeconds
+            + PiecePresentation->P3DeathAnimationStartOffsetSeconds
+            + GetC6_5AnimationLengthSeconds(PiecePresentation->P3DeathAnimation, 0.75f);
         AttackStepSeconds = FMath::Max(AttackStepSeconds, HitSeconds);
         AttackStepSeconds = FMath::Max(AttackStepSeconds, DeathSeconds);
 
         const float FinishSeconds = AttackStepSeconds
-            + FMath::Max(Host->P3MeleeReturnSeconds, Host->P3CapturedFadeSeconds);
-        const float CaptureEventSeconds = Host->P3FacingBlendSeconds
-            + FMath::Max(Host->P3MeleeRunInSeconds, 0.001f)
+            + FMath::Max(PiecePresentation->P3MeleeReturnSeconds, PiecePresentation->P3CapturedFadeSeconds);
+        const float CaptureEventSeconds = PiecePresentation->P3FacingBlendSeconds
+            + FMath::Max(PiecePresentation->P3MeleeRunInSeconds, 0.001f)
             + FinishSeconds;
         CaptureSeconds += CaptureEventSeconds;
 
