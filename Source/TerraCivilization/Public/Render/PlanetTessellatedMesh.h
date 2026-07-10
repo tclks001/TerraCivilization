@@ -40,11 +40,6 @@ struct FTerraG1DebugPiece
     ETerraG1DebugPieceType PieceType = ETerraG1DebugPieceType::Infantry;
 };
 
-static const FRotator EditorXYZRotator(double XRoll, double YPitch, double ZYaw)
-{
-    return FRotator(YPitch, ZYaw, XRoll);
-}
-
 /**
  * APlanetTessellatedMesh
  *
