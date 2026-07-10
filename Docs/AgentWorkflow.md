@@ -1,4 +1,4 @@
-﻿# AI Agent 工作流报告（TerraCivilization R1~R7 阶段总结）
+# AI Agent 工作流报告（TerraCivilization R1~R7 阶段总结）
 
 > 本文档基于 TerraCivilization 项目 R1（纯白材质）→ R7（Triplanar 真实地表）阶段中累积的协作经验，沉淀适合后续 R8+ 及自研球面网格（T 阶段+ TessellatedMesh）生产路线的 AI Agent 工作流规范。
 >
@@ -1697,3 +1697,41 @@ R8+ 要预算下一期的 ms 增量、显存占用、Sampler 资源占用。
 - 创建于：R7 完成后（19 个真实地表 layer 的 Triplanar 通路验收通过）
 - 下次更新：T 阶段完成后（自研球面网格与 PTG 路线废弃需補充新章节）
 - 长期目标：作为 T6/R11 阶段的 "AI 协作 baseline"
+
+
+
+---
+
+## Pitfall: Native component constructor-time owner cache can point to Blueprint CDO
+
+### Symptom
+
+After moving `APlanetTessellatedMesh` camera behavior into `UPlanetCameraComponent`, runtime `BP_PlanetTessellatedMesh` instances existed, `PlanetBinder.TessellatedMeshRef` was set, and `APlanetInteractionController` could initialize C3, but WSAD camera control did not move the camera.
+
+Temporary diagnostics showed:
+
+```text
+ApplyFocusCameraState failed: World is null Host=Default__BP_PlanetTessellatedMesh_C CameraComp=PlanetCameraComponent
+```
+
+### Cause
+
+`PlanetCameraComponent` is a native default subobject. The broken version called this from the actor constructor:
+
+```cpp
+PlanetCameraComponent = CreateDefaultSubobject<UPlanetCameraComponent>(TEXT("PlanetCameraComponent"));
+PlanetCameraComponent->Initialize(this);
+```
+
+For Blueprint-derived actors, constructor-time `this` can be the class default object (`Default__BP_...`) during CDO construction/reinstancing. Caching that pointer in the component as long-lived state made runtime instances resolve their host to the CDO. `Host->GetWorld()` was then null, so `ApplyFocusCameraState` returned false.
+
+### Fix
+
+- Remove `UPlanetCameraComponent::Initialize(APlanetTessellatedMesh*)`.
+- Remove cached host state such as `HostOverride`.
+- Implement `UPlanetCameraComponent::GetHost()` as `Cast<APlanetTessellatedMesh>(GetOwner())`.
+- Let `APlanetTessellatedMesh` constructor only create the default subobject; do not write an owner pointer into the component.
+
+### Rule
+
+A native `UActorComponent` that needs its owning actor should resolve it from `GetOwner()` at runtime. Do not cache actor-constructor `this` inside a component as persistent state, especially for Blueprint-derived actors where the constructor also runs for the CDO.
