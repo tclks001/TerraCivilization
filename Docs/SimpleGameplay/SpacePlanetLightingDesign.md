@@ -249,16 +249,79 @@ Cast Shadow = false
 
 ### SL1：清除开放世界天空遗留
 
-**工作内容**
+**阶段目标**
 
-- 在 `TessellatedMeshTestMap` 删除、禁用或隐藏体积云、高度雾、模板天空球、天空散射和地平线资产。
-- 保留现有行星、相机、HISM、棋子与交互 Actor。
+把 `TessellatedMeshTestMap` 从开放世界模板环境还原为“只有行星和玩法对象的黑色舞台”。本阶段故意不加入星空、太阳、环境补光或大气壳；清理后星球发黑、背景全黑是预期中间状态，不能用模板天空或自动曝光把它重新“补亮”。
+
+**范围与保护对象**
+
+| 类别 | SL1 处理方式 | 典型名称 / 搜索词 | 说明 |
+| --- | --- | --- | --- |
+| 体积云 | 删除或隐藏 | `VolumetricCloud` | 完全不属于太空场景 |
+| 高度雾 | 删除或隐藏 | `ExponentialHeightFog` | 去除蓝灰距离雾与地平线雾带 |
+| 大气散射 | 删除或隐藏 | `SkyAtmosphere` | 去除蓝天、太阳散射与天空地平线 |
+| 模板天空球 | 删除或隐藏 | `BP_SkySphere`、`SkySphere` | 去除蓝色天空贴图和云层材质 |
+| 日夜天空控制器 | 禁用或移出本地图 | `Sky`、`TimeOfDay`、`SunSky` | 防止运行时重新驱动天空 / 太阳 |
+| 远景地平线 | 删除或隐藏 | `Landscape`、`Ocean`、`WaterBody`、`Backdrop` | 只处理为模板天空服务的资产 |
+| 行星与玩法对象 | 必须保留 | `Planet`、`TessellatedMesh`、`HISM`、`Piece`、`Interaction`、`Camera` | 这些不属于环境清理范围 |
+
+> 名称只是 Outliner 搜索起点。最终依据是 Actor 的类型与可见效果，不依据名称猜测；例如项目自定义 `BP_SpaceSky` 不应因名称含 `Sky` 被误删。
+
+**编辑器操作步骤**
+
+1. 打开 `/Game/Map/TessellatedMeshTestMap`，先 `Save Current`，确保本次修改只发生在该地图。
+2. 在 World Outliner 依次搜索 `VolumetricCloud`、`ExponentialHeightFog`、`SkyAtmosphere`、`SkySphere`、`SunSky`、`Landscape`、`Ocean`、`WaterBody` 和 `Backdrop`。每次只处理一个搜索结果，便于确认对应的可见效果。
+3. 对来源明确、只在本地图服务于天空的 Actor，优先用 `Delete` 删除；若无法判断是否被其他地图、Level Instance 或运行时蓝图依赖，先在 Details 中关闭 `Actor Hidden In Game`，并在 Outliner 关闭可见性，记录名称后再做 PIE 验证。
+4. 对 `SkyAtmosphere`，确认场景里不存在第二个同类 Actor 后再删除 / 隐藏。保留多个大气 Actor 会使排错失去意义。
+5. 对 `Directional Light` 不在本阶段做最终调参：若它是模板太阳，可暂时保留但不要删除；SL2 会统一命名、设置方向与强度。若其勾选了 `Atmosphere Sun Light`，可先取消该勾选，避免剩余大气 Actor 继续响应它。
+6. 不删除 `APlanetTessellatedMesh` / `BP_PlanetTessellatedMesh`、HISM 组件、棋子 Actor、相机 Actor、交互控制器、`Post Process Volume` 或为棋子 / 高亮服务的材质资产。它们即使在黑色环境下看起来不美观，也不属于 SL1。
+7. 清理完成后保存地图，关闭并重新打开该地图一次，确认不是通过临时 Editor 视口状态才看起来正确。
+
+**建议的安全操作顺序**
+
+```text
+先隐藏一个候选环境 Actor
+        ↓
+观察编辑器视口：蓝天 / 云 / 雾是否消失
+        ↓
+PIE 验证：是否有蓝图在 BeginPlay 重新生成或重新显示它
+        ↓
+确认只影响模板环境后，删除该 Actor 并保存地图
+```
+
+若地图使用 World Partition 或 External Actors，删除后需要在 Outliner 中确认对应 Actor 不再出现，并保存所有提示保存的 External Actor 包；不要只保存 `.umap` 后忽略未保存项。
+
+**清理后的预期画面**
+
+| 画面元素 | SL1 完成后的预期 | 是否异常 |
+| --- | --- | --- |
+| 行星外背景 | 纯黑或接近纯黑 | 正常；SL2 才加入星空 |
+| 体积云、云影 | 完全不存在 | 正常 |
+| 蓝色天空 / 地平线 | 完全不存在 | 正常 |
+| 高度雾造成的远处洗灰 | 完全不存在 | 正常 |
+| 地表背光侧 | 可能很暗甚至接近黑 | 正常；SL3 才解决可读性补光 |
+| 地表受光侧 | 可能仍受旧 Directional Light 影响 | 允许；SL2 再统一太阳参数 |
+| 自动曝光造成的暂时变亮 | 可能仍存在 | 允许；SL3 再锁定曝光 |
+
+**验收步骤**
+
+1. 在编辑器默认视口将相机绕行星旋转一周，并拉远到能同时看到完整球体和背景的距离。
+2. 确认任意方向均没有蓝色天空、云层、雾带、海平线或远景地面；背景允许是纯黑。
+3. 在 Outliner 分别搜索 `VolumetricCloud`、`ExponentialHeightFog`、`SkyAtmosphere` 和 `SkySphere`，当前地图不应存在处于可见状态的模板环境 Actor。
+4. PIE 启动后重复第 1、2 步。若天空在 PIE 才恢复，检查 Level Blueprint、`BeginPlay`、`SunSky` 或其他天空控制蓝图是否在运行时 Spawn / Unhide 了环境 Actor。
+5. 在 PIE 中完成一次现有的 hover、选中棋子、显示可行动 Cell、移动或结束回合操作；确认鼠标射线仍命中 HISM 瓦片，棋子与交互高亮逻辑没有失效。
+6. 退出 PIE 后再次检查编辑器视口，确认没有因 PIE 退出导致行星材质、HISM 实例或棋子变为默认棋盘格；若发生，按现有材质 / OnConstruction 恢复链路排查，不把它归因为天空清理。
 
 **验收成果**
 
-- 关卡中不存在蓝色天空、云层、雾带或地平线。
-- 任意相机方位下，星球外空间为纯黑或未布置背景的黑色。
-- HISM 地表、棋子、Cell hover 与点击拾取均未受影响。
+- `TessellatedMeshTestMap` 在编辑器与 PIE 中都不再呈现蓝天、体积云、高度雾、地平线或任何开放世界模板环境特征。
+- 摄像机可在行星四周移动，行星以外空间始终是黑色舞台；尚无星空、太阳重调或补光是符合阶段边界的。
+- HISM 球面瓦片、碰撞、Cell hover、棋子选择、行动范围高亮和基本移动流程可照常运行。
+- 没有其他地图或共用资产被修改；本阶段变更仅保存在 `TessellatedMeshTestMap` 及其 External Actor 数据中。
+
+**本阶段退出条件**
+
+仅当“模板环境已彻底退出当前地图”与“玩法回归无误”同时成立，才能进入 SL2。若仍能看到任何一条蓝色地平线或云层，应先完成本阶段排错，不能用星空盒覆盖它。
 
 ### SL2：星空背景与单太阳定向光
 
