@@ -5,7 +5,11 @@
   "type": "module",
   "scripts": {
     "run-once": "node src/run-once.js",
-    "run-llm-choice": "node src/run-llm-choice.js"
+    "run-llm-choice": "node src/run-llm-choice.js",
+    "run-interactive-review-once": "node src/run-interactive-review-once.js",
+    "run-llm-basic-tools": "node src/run-llm-basic-tools.js",
+    "run-llm-interactive-tools": "node src/run-llm-interactive-tools.js",
+    "run-llm-interactive-think": "node src/run-llm-interactive-think.js"
   },
   "engines": {
     "node": ">=18"

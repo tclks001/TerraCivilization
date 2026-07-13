@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "TerraGameplayContainer.h"
+#include "TerraNpcMcpGameplayBridge.h"
 #include "PlanetGameplayComponent.generated.h"
 
 class APlanetTessellatedMesh;
@@ -60,6 +61,11 @@ public:
     void RefreshGameplayHighlights(const TArray<int32>& DirtyCellIds);
     bool HandleGameplayCellClick(int32 CellId, const TCHAR* SourceLabel, int32 InstanceIndex, const FString& ComponentName);
     bool TryExecuteNpcMcpValidatedAction(int32 ExpectedTurnIndex, int32 ExpectedFactionId, int32 PieceId, int32 ToCellId, FTerraGameplayContainer::FValidatedActionExecutionResult& OutResult);
+    bool TryNpcMcpUiBeginTurnReview(FTerraNpcMcpGameplayBridge::FUiReviewResult& OutResult);
+    bool TryNpcMcpUiSelectPiece(int32 PieceId, FTerraNpcMcpGameplayBridge::FUiReviewResult& OutResult);
+    bool TryNpcMcpUiPreviewMove(int32 PieceId, int32 ToCellId, FTerraNpcMcpGameplayBridge::FUiReviewResult& OutResult);
+    bool TryNpcMcpUiCancelSelection(FTerraNpcMcpGameplayBridge::FUiReviewResult& OutResult);
+    bool TryNpcMcpUiConfirmAction(FTerraNpcMcpGameplayBridge::FUiReviewResult& OutResult, FTerraGameplayContainer::FValidatedActionExecutionResult& OutExecutionResult);
     void RefreshFactionPieceHighlights(int32 FactionId);
     void RefreshCurrentFactionPieceHighlights();
     void ExecuteC6_5DelayedTurnStartFocus(int32 ExpectedTurnIndex, int32 ExpectedFactionId);
@@ -75,6 +81,8 @@ public:
 
 private:
     APlanetTessellatedMesh* GetHost() const;
+    void BuildNpcMcpInteractionState_(FTerraNpcMcpGameplayBridge::FInteractionStateSnapshot& OutState) const;
+    void FillNpcMcpReviewResult_(FTerraNpcMcpGameplayBridge::FUiReviewResult& OutResult, bool bOk, const FString& Error) const;
 
     TUniquePtr<FTerraGameplayContainer> GameplayContainer;
     int32 G2_5LastHighlightedFactionId = INDEX_NONE;

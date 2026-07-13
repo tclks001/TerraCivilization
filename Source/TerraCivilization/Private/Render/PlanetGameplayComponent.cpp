@@ -4,6 +4,7 @@
 #include "Render/PlanetCameraComponent.h"
 #include "Render/PlanetHISMInteractionComponent.h"
 #include "Render/PlanetPiecePresentationComponent.h"
+#include "NpcMcp.h"
 #include "TerraNpcMcpGameplayBridge.h"
 
 #include "FCell.h"
@@ -30,6 +31,70 @@ namespace
 DEFINE_LOG_CATEGORY_STATIC(LogPlanetGameplayComponent, Log, All);
 }
 
+void UPlanetGameplayComponent::BuildNpcMcpInteractionState_(FTerraNpcMcpGameplayBridge::FInteractionStateSnapshot& OutState) const
+{
+    OutState = FTerraNpcMcpGameplayBridge::FInteractionStateSnapshot();
+    if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
+    {
+        return;
+    }
+
+    OutState.TurnIndex = GameplayContainer->GetTurnIndex();
+    OutState.CurrentFactionId = GameplayContainer->GetCurrentFactionId();
+    OutState.InteractionPhase = GameplayContainer->GetInteractionPhase();
+    OutState.SelectedPieceId = GameplayContainer->GetSelectedPieceId();
+    if (OutState.SelectedPieceId != INDEX_NONE)
+    {
+        GameplayContainer->TryGetPieceCellId(OutState.SelectedPieceId, OutState.SelectedPieceCellId);
+    }
+
+    switch (OutState.InteractionPhase)
+    {
+    case ETerraGameplayInteractionPhase::Idle:
+        OutState.bCanSelectPieceNow = true;
+        break;
+    case ETerraGameplayInteractionPhase::PieceSelected:
+        OutState.bCanSelectPieceNow = true;
+        OutState.bCanPreviewTargetNow = true;
+        OutState.bCanCancelNow = true;
+        break;
+    case ETerraGameplayInteractionPhase::PieceMovedCanEndTurn:
+        OutState.bCanConfirmNow = true;
+        OutState.bCanCancelNow = true;
+        break;
+    case ETerraGameplayInteractionPhase::PieceJumpingCanContinue:
+        OutState.bCanPreviewTargetNow = true;
+        OutState.bCanConfirmNow = true;
+        OutState.bCanCancelNow = true;
+        break;
+    default:
+        break;
+    }
+
+    if (OutState.InteractionPhase == ETerraGameplayInteractionPhase::PieceJumpingCanContinue)
+    {
+        TArray<FTerraGameplayContainer::FLegalActionQuery> Actions;
+        if (GameplayContainer->CollectSelectedPieceLegalActions(Actions))
+        {
+            for (const FTerraGameplayContainer::FLegalActionQuery& Action : Actions)
+            {
+                if (Action.PieceId == OutState.SelectedPieceId && Action.bIsJump)
+                {
+                    OutState.ContinueJumpTargetCellIds.AddUnique(Action.ToCellId);
+                }
+            }
+        }
+    }
+}
+
+void UPlanetGameplayComponent::FillNpcMcpReviewResult_(FTerraNpcMcpGameplayBridge::FUiReviewResult& OutResult, bool bOk, const FString& Error) const
+{
+    OutResult = FTerraNpcMcpGameplayBridge::FUiReviewResult();
+    OutResult.bOk = bOk;
+    OutResult.Error = Error;
+    BuildNpcMcpInteractionState_(OutResult.InteractionState);
+}
+
 void UPlanetGameplayComponent::RebuildGameplay()
 {
     APlanetTessellatedMesh* Host = GetHost();
@@ -48,6 +113,7 @@ void UPlanetGameplayComponent::RebuildGameplay()
         if (GameplayContainer.IsValid())
         {
             FTerraNpcMcpGameplayBridge::UnregisterExecuteValidatedActionDelegate();
+            FTerraNpcMcpGameplayBridge::UnregisterUiReviewDelegates();
             FTerraNpcMcpGameplayBridge::UnregisterGameplayContainer(GameplayContainer.Get());
         }
         GameplayContainer.Reset();
@@ -71,6 +137,7 @@ void UPlanetGameplayComponent::RebuildGameplay()
         if (GameplayContainer.IsValid())
         {
             FTerraNpcMcpGameplayBridge::UnregisterExecuteValidatedActionDelegate();
+            FTerraNpcMcpGameplayBridge::UnregisterUiReviewDelegates();
             FTerraNpcMcpGameplayBridge::UnregisterGameplayContainer(GameplayContainer.Get());
         }
         GameplayContainer.Reset();
@@ -112,6 +179,7 @@ void UPlanetGameplayComponent::RebuildGameplay()
     if (GameplayContainer.IsValid())
     {
         FTerraNpcMcpGameplayBridge::UnregisterExecuteValidatedActionDelegate();
+        FTerraNpcMcpGameplayBridge::UnregisterUiReviewDelegates();
         FTerraNpcMcpGameplayBridge::UnregisterGameplayContainer(GameplayContainer.Get());
     }
 
@@ -124,6 +192,32 @@ void UPlanetGameplayComponent::RebuildGameplay()
         {
             return TryExecuteNpcMcpValidatedAction(ExpectedTurnIndex, ExpectedFactionId, PieceId, ToCellId, OutResult);
         });
+    FTerraNpcMcpGameplayBridge::RegisterUiBeginTurnReviewDelegate(
+        [this](FTerraNpcMcpGameplayBridge::FUiReviewResult& OutResult)
+        {
+            return TryNpcMcpUiBeginTurnReview(OutResult);
+        });
+    FTerraNpcMcpGameplayBridge::RegisterUiSelectPieceDelegate(
+        [this](int32 PieceId, FTerraNpcMcpGameplayBridge::FUiReviewResult& OutResult)
+        {
+            return TryNpcMcpUiSelectPiece(PieceId, OutResult);
+        });
+    FTerraNpcMcpGameplayBridge::RegisterUiPreviewMoveDelegate(
+        [this](int32 PieceId, int32 ToCellId, FTerraNpcMcpGameplayBridge::FUiReviewResult& OutResult)
+        {
+            return TryNpcMcpUiPreviewMove(PieceId, ToCellId, OutResult);
+        });
+    FTerraNpcMcpGameplayBridge::RegisterUiCancelSelectionDelegate(
+        [this](FTerraNpcMcpGameplayBridge::FUiReviewResult& OutResult)
+        {
+            return TryNpcMcpUiCancelSelection(OutResult);
+        });
+    FTerraNpcMcpGameplayBridge::RegisterUiConfirmActionDelegate(
+        [this](FTerraNpcMcpGameplayBridge::FUiReviewResult& OutResult, FTerraGameplayContainer::FValidatedActionExecutionResult& OutExecutionResult)
+        {
+            return TryNpcMcpUiConfirmAction(OutResult, OutExecutionResult);
+        });
+    FNpcMcpModule::RefreshInteractiveToolAvailability();
 
     G2_5LastHighlightedFactionId = GameplayContainer->GetCurrentFactionId();
     if (UPlanetCameraComponent* Camera = Host->GetPlanetCameraComponent())
@@ -967,5 +1061,207 @@ bool UPlanetGameplayComponent::TryExecuteNpcMcpValidatedAction(
     OutResult.RejectReason.Reset();
     OutResult.TurnIndexAfter = GameplayContainer->GetTurnIndex();
     OutResult.FactionIdAfter = GameplayContainer->GetCurrentFactionId();
+    return true;
+}
+
+bool UPlanetGameplayComponent::TryNpcMcpUiBeginTurnReview(FTerraNpcMcpGameplayBridge::FUiReviewResult& OutResult)
+{
+    if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("gameplay_unavailable"));
+        return false;
+    }
+    if (GameplayContainer->IsMatchEnded())
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("match_ended"));
+        return false;
+    }
+    if (GameplayContainer->GetInteractionPhase() != ETerraGameplayInteractionPhase::Idle)
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("not_idle"));
+        return false;
+    }
+
+    FillNpcMcpReviewResult_(OutResult, true, FString());
+    return true;
+}
+
+bool UPlanetGameplayComponent::TryNpcMcpUiSelectPiece(int32 PieceId, FTerraNpcMcpGameplayBridge::FUiReviewResult& OutResult)
+{
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host || !GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("gameplay_unavailable"));
+        return false;
+    }
+
+    const ETerraGameplayInteractionPhase Phase = GameplayContainer->GetInteractionPhase();
+    if (Phase != ETerraGameplayInteractionPhase::Idle && Phase != ETerraGameplayInteractionPhase::PieceSelected)
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("invalid_phase_for_select"));
+        return false;
+    }
+    if (Phase == ETerraGameplayInteractionPhase::PieceSelected && GameplayContainer->GetSelectedPieceId() == PieceId)
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("piece_already_selected"));
+        return false;
+    }
+
+    TArray<int32> SelectablePieceIds;
+    GameplayContainer->CollectCurrentFactionSelectablePieceIds(SelectablePieceIds);
+    if (!SelectablePieceIds.Contains(PieceId))
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("piece_not_current_faction_or_not_selectable"));
+        return false;
+    }
+
+    int32 CellId = INDEX_NONE;
+    if (!GameplayContainer->TryGetPieceCellId(PieceId, CellId))
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("piece_cell_unavailable"));
+        return false;
+    }
+
+    Host->HISMTileRenderer.SetLastClickedCellId(CellId);
+    if (!HandleGameplayCellClick(CellId, TEXT("NPC MCP UI Select"), INDEX_NONE, TEXT("NpcMcp")))
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("select_click_failed"));
+        return false;
+    }
+    if (GameplayContainer->GetSelectedPieceId() != PieceId || GameplayContainer->GetInteractionPhase() != ETerraGameplayInteractionPhase::PieceSelected)
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("select_state_mismatch"));
+        return false;
+    }
+
+    FillNpcMcpReviewResult_(OutResult, true, FString());
+    return true;
+}
+
+bool UPlanetGameplayComponent::TryNpcMcpUiPreviewMove(int32 PieceId, int32 ToCellId, FTerraNpcMcpGameplayBridge::FUiReviewResult& OutResult)
+{
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host || !GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("gameplay_unavailable"));
+        return false;
+    }
+
+    const ETerraGameplayInteractionPhase Phase = GameplayContainer->GetInteractionPhase();
+    if (Phase != ETerraGameplayInteractionPhase::PieceSelected
+        && Phase != ETerraGameplayInteractionPhase::PieceJumpingCanContinue)
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("invalid_phase_for_preview"));
+        return false;
+    }
+    if (GameplayContainer->GetSelectedPieceId() != PieceId)
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("piece_mismatch"));
+        return false;
+    }
+
+    FTerraGameplayContainer::FLegalActionQuery LegalAction;
+    if (!GameplayContainer->GetSelectedPieceLegalAction(ToCellId, LegalAction))
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("not_current_selected_piece_action"));
+        return false;
+    }
+
+    Host->HISMTileRenderer.SetLastClickedCellId(ToCellId);
+    if (!HandleGameplayCellClick(ToCellId, TEXT("NPC MCP UI Preview"), INDEX_NONE, TEXT("NpcMcp")))
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("preview_click_failed"));
+        return false;
+    }
+
+    const ETerraGameplayInteractionPhase NewPhase = GameplayContainer->GetInteractionPhase();
+    if (NewPhase != ETerraGameplayInteractionPhase::PieceMovedCanEndTurn
+        && NewPhase != ETerraGameplayInteractionPhase::PieceJumpingCanContinue)
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("preview_state_mismatch"));
+        return false;
+    }
+
+    FillNpcMcpReviewResult_(OutResult, true, FString());
+    return true;
+}
+
+bool UPlanetGameplayComponent::TryNpcMcpUiCancelSelection(FTerraNpcMcpGameplayBridge::FUiReviewResult& OutResult)
+{
+    if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("gameplay_unavailable"));
+        return false;
+    }
+
+    if (GameplayContainer->GetInteractionPhase() == ETerraGameplayInteractionPhase::Idle)
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("nothing_to_cancel"));
+        return false;
+    }
+
+    if (!HandleHISMUndo())
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("cancel_failed"));
+        return false;
+    }
+
+    FillNpcMcpReviewResult_(OutResult, true, FString());
+    return true;
+}
+
+bool UPlanetGameplayComponent::TryNpcMcpUiConfirmAction(FTerraNpcMcpGameplayBridge::FUiReviewResult& OutResult, FTerraGameplayContainer::FValidatedActionExecutionResult& OutExecutionResult)
+{
+    APlanetTessellatedMesh* Host = GetHost();
+    OutExecutionResult = FTerraGameplayContainer::FValidatedActionExecutionResult();
+    if (!Host || !GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("gameplay_unavailable"));
+        return false;
+    }
+
+    const ETerraGameplayInteractionPhase Phase = GameplayContainer->GetInteractionPhase();
+    if (Phase != ETerraGameplayInteractionPhase::PieceMovedCanEndTurn
+        && Phase != ETerraGameplayInteractionPhase::PieceJumpingCanContinue)
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("invalid_phase_for_confirm"));
+        return false;
+    }
+
+    const int32 PieceId = GameplayContainer->GetSelectedPieceId();
+    int32 CellId = INDEX_NONE;
+    if (PieceId == INDEX_NONE || !GameplayContainer->TryGetPieceCellId(PieceId, CellId))
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("selected_piece_unavailable"));
+        return false;
+    }
+
+    OutExecutionResult.TurnIndexBefore = GameplayContainer->GetTurnIndex();
+    OutExecutionResult.FactionIdBefore = GameplayContainer->GetCurrentFactionId();
+    OutExecutionResult.PieceId = PieceId;
+    OutExecutionResult.FromCellId = CellId;
+    OutExecutionResult.ToCellId = CellId;
+
+    Host->HISMTileRenderer.SetLastClickedCellId(CellId);
+    if (!HandleGameplayCellClick(CellId, TEXT("NPC MCP UI Confirm"), INDEX_NONE, TEXT("NpcMcp")))
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("confirm_click_failed"));
+        OutExecutionResult.RejectReason = TEXT("confirm_click_failed");
+        return false;
+    }
+
+    if (GameplayContainer->GetInteractionPhase() != ETerraGameplayInteractionPhase::Idle)
+    {
+        FillNpcMcpReviewResult_(OutResult, false, TEXT("execute_failed"));
+        OutExecutionResult.RejectReason = TEXT("execute_failed");
+        return false;
+    }
+
+    OutExecutionResult.bAccepted = true;
+    OutExecutionResult.bExecuted = true;
+    OutExecutionResult.TurnIndexAfter = GameplayContainer->GetTurnIndex();
+    OutExecutionResult.FactionIdAfter = GameplayContainer->GetCurrentFactionId();
+
+    FillNpcMcpReviewResult_(OutResult, true, FString());
     return true;
 }

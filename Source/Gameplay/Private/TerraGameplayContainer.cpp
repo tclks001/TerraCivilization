@@ -196,6 +196,221 @@ bool FTerraGameplayContainer::TryGetPieceCellId(int32 PieceId, int32& OutCellId)
     return true;
 }
 
+bool FTerraGameplayContainer::GetCellTerrainType(int32 CellId, ETerraGameplayTerrainType& OutTerrainType) const
+{
+    OutTerrainType = ETerraGameplayTerrainType::Plain;
+    if (!IsValidCellId_(CellId))
+    {
+        return false;
+    }
+
+    OutTerrainType = Cells[CellId].TerrainType;
+    return true;
+}
+
+bool FTerraGameplayContainer::CollectAdjacentPieceIds(int32 CellId, int32 PerspectiveFactionId, TArray<int32>& OutFriendlyPieceIds, TArray<int32>& OutEnemyPieceIds) const
+{
+    OutFriendlyPieceIds.Reset();
+    OutEnemyPieceIds.Reset();
+
+    if (!IsValidCellId_(CellId))
+    {
+        return false;
+    }
+
+    for (int32 I = 0; I < 6; ++I)
+    {
+        const int32 NeighborCellId = Cells[CellId].NeighborCellIds[I];
+        if (!IsValidCellId_(NeighborCellId))
+        {
+            continue;
+        }
+
+        const int32 NeighborPieceId = GetPieceIdAtCell_(NeighborCellId);
+        const FTerraGameplayPieceState* NeighborPiece = GetPiece_(NeighborPieceId);
+        if (!NeighborPiece || !NeighborPiece->bAlive)
+        {
+            continue;
+        }
+
+        if (NeighborPiece->OwnerFactionId == PerspectiveFactionId)
+        {
+            OutFriendlyPieceIds.AddUnique(NeighborPieceId);
+        }
+        else
+        {
+            OutEnemyPieceIds.AddUnique(NeighborPieceId);
+        }
+    }
+
+    OutFriendlyPieceIds.Sort();
+    OutEnemyPieceIds.Sort();
+    return OutFriendlyPieceIds.Num() > 0 || OutEnemyPieceIds.Num() > 0;
+}
+
+bool FTerraGameplayContainer::FindNearestEnemyDistance(int32 CellId, int32 PerspectiveFactionId, int32& OutDistance) const
+{
+    OutDistance = INDEX_NONE;
+    if (!IsValidCellId_(CellId))
+    {
+        return false;
+    }
+
+    if (const int32 PieceIdAtOrigin = GetPieceIdAtCell_(CellId);
+        PieceIdAtOrigin != INDEX_NONE)
+    {
+        const FTerraGameplayPieceState* OriginPiece = GetPiece_(PieceIdAtOrigin);
+        if (OriginPiece && OriginPiece->bAlive && OriginPiece->OwnerFactionId != PerspectiveFactionId)
+        {
+            OutDistance = 0;
+            return true;
+        }
+    }
+
+    TArray<int32> Queue;
+    Queue.Add(CellId);
+
+    TArray<int32> Distances;
+    Distances.Init(INDEX_NONE, Cells.Num());
+    Distances[CellId] = 0;
+
+    for (int32 QueueIndex = 0; QueueIndex < Queue.Num(); ++QueueIndex)
+    {
+        const int32 CurrentCellId = Queue[QueueIndex];
+        const int32 CurrentDistance = Distances[CurrentCellId];
+
+        for (int32 I = 0; I < 6; ++I)
+        {
+            const int32 NeighborCellId = Cells[CurrentCellId].NeighborCellIds[I];
+            if (!IsValidCellId_(NeighborCellId) || Distances[NeighborCellId] != INDEX_NONE)
+            {
+                continue;
+            }
+
+            Distances[NeighborCellId] = CurrentDistance + 1;
+            Queue.Add(NeighborCellId);
+
+            const int32 NeighborPieceId = GetPieceIdAtCell_(NeighborCellId);
+            const FTerraGameplayPieceState* NeighborPiece = GetPiece_(NeighborPieceId);
+            if (NeighborPiece && NeighborPiece->bAlive && NeighborPiece->OwnerFactionId != PerspectiveFactionId)
+            {
+                OutDistance = Distances[NeighborCellId];
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool FTerraGameplayContainer::QueryCurrentFactionPieceTurnSurvey(int32 PieceId, FPieceTurnSurvey& OutSurvey) const
+{
+    OutSurvey = FPieceTurnSurvey();
+
+    if (!bInitialized || bMatchEnded || CurrentFactionId == INDEX_NONE)
+    {
+        return false;
+    }
+
+    const FTerraGameplayPieceState* Piece = GetPiece_(PieceId);
+    if (!Piece || !Piece->bAlive || !IsPieceSelectable_(*Piece))
+    {
+        return false;
+    }
+
+    TMap<int32, int32> BestCaptureCountByLandingCell;
+
+    TSet<int32> OrdinaryTargets;
+    CollectOrdinaryMoveTargets_(*Piece, OrdinaryTargets);
+    for (const int32 TargetCellId : OrdinaryTargets)
+    {
+        TMap<int32, FTerraGameplayCaptureEntry> CaptureEntriesByCellId;
+        CollectCaptureEntriesAfterHypotheticalMove_(*Piece, TargetCellId, CaptureEntriesByCellId);
+        BestCaptureCountByLandingCell.FindOrAdd(TargetCellId) = FMath::Max(BestCaptureCountByLandingCell.FindRef(TargetCellId), CaptureEntriesByCellId.Num());
+    }
+
+    TArray<int32> RootBoard = CellToPieceId;
+
+    TFunction<void(int32, int32, const TArray<int32>&, TSet<int32>&)> ExploreJumpChains;
+    ExploreJumpChains = [this, Piece, &BestCaptureCountByLandingCell, &ExploreJumpChains](int32 CurrentCellId, int32 BlockedReturnCellId, const TArray<int32>& HypotheticalBoard, TSet<int32>& VisitedLandingCells)
+    {
+        FTerraGameplayPieceState HypotheticalPiece = *Piece;
+        HypotheticalPiece.CellId = CurrentCellId;
+
+        TSet<int32> JumpTargets;
+        CollectJumpTargetsForHypotheticalBoard_(HypotheticalPiece, CurrentFactionId, CurrentCellId, BlockedReturnCellId, HypotheticalBoard, JumpTargets);
+        for (const int32 TargetCellId : JumpTargets)
+        {
+            if (VisitedLandingCells.Contains(TargetCellId))
+            {
+                continue;
+            }
+
+            TArray<int32> NextBoard = HypotheticalBoard;
+            if (IsValidCellId_(CurrentCellId))
+            {
+                NextBoard[CurrentCellId] = INDEX_NONE;
+            }
+            if (IsValidCellId_(TargetCellId))
+            {
+                NextBoard[TargetCellId] = Piece->PieceId;
+            }
+
+            TMap<int32, FTerraGameplayCaptureEntry> CaptureEntriesByCellId;
+            CollectCaptureEntriesAfterHypotheticalMove_(HypotheticalPiece, TargetCellId, CaptureEntriesByCellId);
+            BestCaptureCountByLandingCell.FindOrAdd(TargetCellId) = FMath::Max(BestCaptureCountByLandingCell.FindRef(TargetCellId), CaptureEntriesByCellId.Num());
+
+            VisitedLandingCells.Add(TargetCellId);
+            ExploreJumpChains(TargetCellId, CurrentCellId, NextBoard, VisitedLandingCells);
+            VisitedLandingCells.Remove(TargetCellId);
+        }
+    };
+
+    TSet<int32> VisitedLandingCells;
+    VisitedLandingCells.Add(Piece->CellId);
+    ExploreJumpChains(Piece->CellId, INDEX_NONE, RootBoard, VisitedLandingCells);
+
+    for (const TPair<int32, int32>& Pair : BestCaptureCountByLandingCell)
+    {
+        OutSurvey.ReachableActionCount++;
+        OutSurvey.MaxCaptureCount = FMath::Max(OutSurvey.MaxCaptureCount, Pair.Value);
+        if (Pair.Value > 0)
+        {
+            OutSurvey.bCanCaptureNow = true;
+        }
+    }
+
+    for (const FTerraGameplayFactionState& Faction : Factions)
+    {
+        if (!Faction.bAlive || Faction.FactionId == CurrentFactionId)
+        {
+            continue;
+        }
+
+        for (const FTerraGameplayPieceState& EnemyPiece : Pieces)
+        {
+            if (!EnemyPiece.bAlive || EnemyPiece.OwnerFactionId != Faction.FactionId)
+            {
+                continue;
+            }
+
+            TSet<int32> EnemyOrdinaryTargets;
+            CollectOrdinaryMoveTargetsForFaction_(EnemyPiece, Faction.FactionId, EnemyOrdinaryTargets);
+            TSet<int32> JumpTargets;
+            CollectJumpTargetsForFaction_(EnemyPiece, Faction.FactionId, INDEX_NONE, JumpTargets);
+            if (EnemyOrdinaryTargets.Contains(Piece->CellId) || JumpTargets.Contains(Piece->CellId))
+            {
+                OutSurvey.bThreatenedIfHold = true;
+                OutSurvey.HoldThreatCount++;
+                OutSurvey.ThreateningPieceIds.AddUnique(EnemyPiece.PieceId);
+            }
+        }
+    }
+
+    OutSurvey.ThreateningPieceIds.Sort();
+    return true;
+}
+
 bool FTerraGameplayContainer::CollectCurrentFactionLegalActions(TArray<FLegalActionQuery>& OutActions) const
 {
     OutActions.Reset();
@@ -268,6 +483,88 @@ bool FTerraGameplayContainer::CollectCurrentFactionLegalActions(TArray<FLegalAct
     });
 
     return OutActions.Num() > 0;
+}
+
+bool FTerraGameplayContainer::CollectSelectedPieceLegalActions(TArray<FLegalActionQuery>& OutActions) const
+{
+    OutActions.Reset();
+    if (!bInitialized || bMatchEnded || CurrentFactionId == INDEX_NONE)
+    {
+        return false;
+    }
+
+    const FTerraGameplayPieceState* Piece = GetPiece_(SelectedPieceId);
+    if (!Piece || !Piece->bAlive || !IsCurrentFactionPiece_(*Piece))
+    {
+        return false;
+    }
+
+    auto AppendActionForTarget = [this, &OutActions, Piece](int32 TargetCellId, bool bIsJump)
+    {
+        FLegalActionQuery& Action = OutActions.AddDefaulted_GetRef();
+        Action.PieceId = Piece->PieceId;
+        Action.FromCellId = Piece->CellId;
+        Action.ToCellId = TargetCellId;
+        Action.bIsJump = bIsJump;
+
+        TMap<int32, FTerraGameplayCaptureEntry> CaptureEntriesByCellId;
+        CollectCaptureEntriesAfterHypotheticalMove_(*Piece, TargetCellId, CaptureEntriesByCellId);
+        CaptureEntriesByCellId.GenerateValueArray(Action.CaptureEntries);
+        Action.CaptureEntries.Sort([](const FTerraGameplayCaptureEntry& A, const FTerraGameplayCaptureEntry& B)
+        {
+            return A.CapturedPieceId < B.CapturedPieceId;
+        });
+    };
+
+    for (const int32 TargetCellId : OrdinaryMoveTargetCellIds)
+    {
+        AppendActionForTarget(TargetCellId, false);
+    }
+    for (const int32 TargetCellId : JumpTargetCellIds)
+    {
+        AppendActionForTarget(TargetCellId, true);
+    }
+
+    OutActions.Sort([](const FLegalActionQuery& A, const FLegalActionQuery& B)
+    {
+        if (A.PieceId != B.PieceId)
+        {
+            return A.PieceId < B.PieceId;
+        }
+        if (A.FromCellId != B.FromCellId)
+        {
+            return A.FromCellId < B.FromCellId;
+        }
+        if (A.ToCellId != B.ToCellId)
+        {
+            return A.ToCellId < B.ToCellId;
+        }
+        return static_cast<int32>(A.bIsJump) < static_cast<int32>(B.bIsJump);
+    });
+
+    return OutActions.Num() > 0;
+}
+
+bool FTerraGameplayContainer::GetSelectedPieceLegalAction(int32 ToCellId, FLegalActionQuery& OutAction) const
+{
+    OutAction = FLegalActionQuery();
+
+    TArray<FLegalActionQuery> Actions;
+    if (!CollectSelectedPieceLegalActions(Actions))
+    {
+        return false;
+    }
+
+    for (const FLegalActionQuery& Action : Actions)
+    {
+        if (Action.ToCellId == ToCellId)
+        {
+            OutAction = Action;
+            return true;
+        }
+    }
+
+    return false;
 }
 
 bool FTerraGameplayContainer::IsCurrentFactionLegalAction(int32 PieceId, int32 ToCellId, FLegalActionQuery& OutAction) const
@@ -1173,6 +1470,79 @@ void FTerraGameplayContainer::CollectCaptureEntriesAfterHypotheticalMoveForFacti
 
         ScanArcherRemoteCapture(TargetCellId, FirstCellId);
         ScanArcherRemoteCapture(FirstCellId, TargetCellId);
+    }
+}
+
+void FTerraGameplayContainer::CollectJumpTargetsForHypotheticalBoard_(const FTerraGameplayPieceState& Piece, int32 ActingFactionId, int32 CurrentCellId, int32 BlockedReturnCellId, const TArray<int32>& HypotheticalCellToPieceId, TSet<int32>& OutTargetCellIds) const
+{
+    OutTargetCellIds.Reset();
+    if (!IsPieceSelectableForFaction_(Piece, ActingFactionId) || !IsValidCellId_(CurrentCellId))
+    {
+        return;
+    }
+
+    auto IsHypotheticalEmpty = [this, &HypotheticalCellToPieceId](int32 CellId) -> bool
+    {
+        return IsValidCellId_(CellId) && HypotheticalCellToPieceId.IsValidIndex(CellId) && HypotheticalCellToPieceId[CellId] == INDEX_NONE;
+    };
+
+    auto HasHypotheticalPiece = [this, &HypotheticalCellToPieceId](int32 CellId) -> bool
+    {
+        return IsValidCellId_(CellId) && HypotheticalCellToPieceId.IsValidIndex(CellId) && HypotheticalCellToPieceId[CellId] != INDEX_NONE;
+    };
+
+    for (int32 I = 0; I < 6; ++I)
+    {
+        const int32 MiddleCellId = Cells[CurrentCellId].NeighborCellIds[I];
+        if (!IsValidCellId_(MiddleCellId) || !HasHypotheticalPiece(MiddleCellId))
+        {
+            continue;
+        }
+
+        if (Piece.PieceType == ETerraGameplayPieceType::Cavalry
+            && Cells[MiddleCellId].TerrainType == ETerraGameplayTerrainType::Mountain)
+        {
+            continue;
+        }
+
+        TArray<int32> FirstLandingCandidates;
+        if (!StepForwardBranches_(CurrentCellId, MiddleCellId, FirstLandingCandidates))
+        {
+            continue;
+        }
+
+        for (const int32 FirstLandingCellId : FirstLandingCandidates)
+        {
+            if (FirstLandingCellId == BlockedReturnCellId
+                || !IsHypotheticalEmpty(FirstLandingCellId)
+                || !CanEnterTerrain_(Piece, FirstLandingCellId))
+            {
+                continue;
+            }
+
+            OutTargetCellIds.Add(FirstLandingCellId);
+
+            if (Piece.PieceType != ETerraGameplayPieceType::Cavalry)
+            {
+                continue;
+            }
+
+            TArray<int32> SecondLandingCandidates;
+            if (!StepForwardBranches_(MiddleCellId, FirstLandingCellId, SecondLandingCandidates))
+            {
+                continue;
+            }
+
+            for (const int32 SecondLandingCellId : SecondLandingCandidates)
+            {
+                if (SecondLandingCellId != BlockedReturnCellId
+                    && IsHypotheticalEmpty(SecondLandingCellId)
+                    && CanEnterTerrain_(Piece, SecondLandingCellId))
+                {
+                    OutTargetCellIds.Add(SecondLandingCellId);
+                }
+            }
+        }
     }
 }
 

@@ -41,6 +41,16 @@ public:
         TArray<int32> DirtyCellIds;
     };
 
+    struct FPieceTurnSurvey
+    {
+        int32 ReachableActionCount = 0;
+        bool bCanCaptureNow = false;
+        int32 MaxCaptureCount = 0;
+        bool bThreatenedIfHold = false;
+        int32 HoldThreatCount = 0;
+        TArray<int32> ThreateningPieceIds;
+    };
+
     struct FInteractionUndoSnapshot
     {
         TArray<FTerraGameplayPieceState> Pieces;
@@ -83,10 +93,16 @@ public:
     bool CollectCurrentFactionSelectablePieceIds(TArray<int32>& OutPieceIds) const;
     bool CollectPendingCaptureEntries(TArray<FTerraGameplayCaptureEntry>& OutCaptureEntries) const;
     bool CollectCurrentFactionLegalActions(TArray<FLegalActionQuery>& OutActions) const;
+    bool CollectSelectedPieceLegalActions(TArray<FLegalActionQuery>& OutActions) const;
+    bool GetSelectedPieceLegalAction(int32 ToCellId, FLegalActionQuery& OutAction) const;
     bool EvaluateCurrentFactionActionRisk(int32 PieceId, int32 ToCellId, FActionRiskQuery& OutRisk) const;
     bool IsCurrentFactionLegalAction(int32 PieceId, int32 ToCellId, FLegalActionQuery& OutAction) const;
     bool TryExecuteValidatedAction(int32 ExpectedTurnIndex, int32 ExpectedFactionId, int32 PieceId, int32 ToCellId, FValidatedActionExecutionResult& OutResult);
     bool TryGetPieceCellId(int32 PieceId, int32& OutCellId) const;
+    bool GetCellTerrainType(int32 CellId, ETerraGameplayTerrainType& OutTerrainType) const;
+    bool CollectAdjacentPieceIds(int32 CellId, int32 PerspectiveFactionId, TArray<int32>& OutFriendlyPieceIds, TArray<int32>& OutEnemyPieceIds) const;
+    bool FindNearestEnemyDistance(int32 CellId, int32 PerspectiveFactionId, int32& OutDistance) const;
+    bool QueryCurrentFactionPieceTurnSurvey(int32 PieceId, FPieceTurnSurvey& OutSurvey) const;
     const TArray<FTerraGameplayPieceState>& GetPieces() const { return Pieces; }
     const TArray<FTerraGameplayFactionState>& GetFactions() const { return Factions; }
     const TArray<int32>& GetCellToPieceId() const { return CellToPieceId; }
@@ -115,6 +131,7 @@ private:
     void CollectOrdinaryMoveTargetsForFaction_(const FTerraGameplayPieceState& Piece, int32 ActingFactionId, TSet<int32>& OutTargetCellIds) const;
     void CollectJumpTargets_(const FTerraGameplayPieceState& Piece, TSet<int32>& OutTargetCellIds) const;
     void CollectJumpTargetsForFaction_(const FTerraGameplayPieceState& Piece, int32 ActingFactionId, int32 BlockedReturnCellId, TSet<int32>& OutTargetCellIds) const;
+    void CollectJumpTargetsForHypotheticalBoard_(const FTerraGameplayPieceState& Piece, int32 ActingFactionId, int32 CurrentCellId, int32 BlockedReturnCellId, const TArray<int32>& HypotheticalCellToPieceId, TSet<int32>& OutTargetCellIds) const;
     void CollectCaptureEntriesAfterHypotheticalMove_(const FTerraGameplayPieceState& Piece, int32 TargetCellId, TMap<int32, FTerraGameplayCaptureEntry>& OutCaptureEntriesByCellId) const;
     void CollectCaptureEntriesAfterHypotheticalMoveForFaction_(const FTerraGameplayPieceState& Piece, int32 TargetCellId, int32 ActingFactionId, TMap<int32, FTerraGameplayCaptureEntry>& OutCaptureEntriesByCellId) const;
     void CollectCaptureCellsAfterHypotheticalMove_(const FTerraGameplayPieceState& Piece, int32 TargetCellId, TSet<int32>& OutCaptureCellIds) const;

@@ -5,8 +5,11 @@
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Modules/ModuleManager.h"
+#include "TerraNpcMcpGameplayBridge.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogTerraNpcMcp, Log, All);
+
+static FNpcMcpModule* GTerraNpcMcpModule = nullptr;
 
 TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpPingGameplayTool();
 TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpGetTurnContextTool();
@@ -14,6 +17,11 @@ TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpListLegalActionsTool();
 TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpEvaluateActionRiskTool();
 TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpSubmitActionProposalTool();
 TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpExecuteValidatedActionTool();
+TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpUiBeginTurnReviewTool();
+TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpUiSelectPieceTool();
+TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpUiPreviewMoveTool();
+TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpUiCancelSelectionTool();
+TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpUiConfirmActionTool();
 
 IMPLEMENT_MODULE(FNpcMcpModule, NpcMcp)
 
@@ -27,6 +35,7 @@ namespace
 
 void FNpcMcpModule::StartupModule()
 {
+    GTerraNpcMcpModule = this;
     RegisterTools_();
     StartServerIfRequested_();
 }
@@ -34,6 +43,15 @@ void FNpcMcpModule::StartupModule()
 void FNpcMcpModule::ShutdownModule()
 {
     UnregisterTools_();
+    GTerraNpcMcpModule = nullptr;
+}
+
+void FNpcMcpModule::RefreshInteractiveToolAvailability()
+{
+    if (GTerraNpcMcpModule)
+    {
+        GTerraNpcMcpModule->RefreshInteractiveToolAvailability_();
+    }
 }
 
 void FNpcMcpModule::RegisterTools_()
@@ -45,17 +63,112 @@ void FNpcMcpModule::RegisterTools_()
         return;
     }
 
-    RegisteredTools.Add(MakeTerraNpcMcpPingGameplayTool());
-    RegisteredTools.Add(MakeTerraNpcMcpGetTurnContextTool());
-    RegisteredTools.Add(MakeTerraNpcMcpListLegalActionsTool());
-    RegisteredTools.Add(MakeTerraNpcMcpEvaluateActionRiskTool());
-    RegisteredTools.Add(MakeTerraNpcMcpSubmitActionProposalTool());
-    RegisteredTools.Add(MakeTerraNpcMcpExecuteValidatedActionTool());
+    AllToolsByName.Add(TEXT("terra.ping_gameplay"), MakeTerraNpcMcpPingGameplayTool());
+    AllToolsByName.Add(TEXT("terra.get_turn_context"), MakeTerraNpcMcpGetTurnContextTool());
+    AllToolsByName.Add(TEXT("terra.list_legal_actions"), MakeTerraNpcMcpListLegalActionsTool());
+    AllToolsByName.Add(TEXT("terra.evaluate_action_risk"), MakeTerraNpcMcpEvaluateActionRiskTool());
+    AllToolsByName.Add(TEXT("terra.submit_action_proposal"), MakeTerraNpcMcpSubmitActionProposalTool());
+    AllToolsByName.Add(TEXT("terra.execute_validated_action"), MakeTerraNpcMcpExecuteValidatedActionTool());
+    AllToolsByName.Add(TEXT("terra.ui_begin_turn_review"), MakeTerraNpcMcpUiBeginTurnReviewTool());
+    AllToolsByName.Add(TEXT("terra.ui_select_piece"), MakeTerraNpcMcpUiSelectPieceTool());
+    AllToolsByName.Add(TEXT("terra.ui_preview_move"), MakeTerraNpcMcpUiPreviewMoveTool());
+    AllToolsByName.Add(TEXT("terra.ui_cancel_selection"), MakeTerraNpcMcpUiCancelSelectionTool());
+    AllToolsByName.Add(TEXT("terra.ui_confirm_action"), MakeTerraNpcMcpUiConfirmActionTool());
 
-    for (const TSharedRef<IModelContextProtocolTool>& Tool : RegisteredTools)
+    const TArray<FString> AlwaysOnToolNames = {
+        TEXT("terra.ping_gameplay"),
+        TEXT("terra.get_turn_context"),
+        TEXT("terra.list_legal_actions"),
+        TEXT("terra.evaluate_action_risk"),
+        TEXT("terra.submit_action_proposal"),
+        TEXT("terra.execute_validated_action")
+    };
+
+    for (const FString& ToolName : AlwaysOnToolNames)
     {
-        const bool bAdded = McpModule->AddTool(Tool);
-        UE_LOG(LogTerraNpcMcp, Log, TEXT("[NpcMcp] Register tool %s: %s"), *Tool->GetName(), bAdded ? TEXT("ok") : TEXT("duplicate"));
+        const TSharedRef<IModelContextProtocolTool>* Tool = AllToolsByName.Find(ToolName);
+        if (!Tool)
+        {
+            continue;
+        }
+        RegisteredTools.Add(*Tool);
+        RegisteredToolNames.Add(ToolName);
+        const bool bAdded = McpModule->AddTool(*Tool);
+        UE_LOG(LogTerraNpcMcp, Log, TEXT("[NpcMcp] Register tool %s: %s"), *ToolName, bAdded ? TEXT("ok") : TEXT("duplicate"));
+    }
+
+    RefreshInteractiveToolAvailability_();
+}
+
+void FNpcMcpModule::RefreshInteractiveToolAvailability_()
+{
+    IModelContextProtocolModule* McpModule = LoadModelContextProtocolModule_();
+    if (!McpModule)
+    {
+        return;
+    }
+
+    TSet<FString> DesiredInteractiveToolNames;
+    if (const FTerraGameplayContainer* GameplayContainer = FTerraNpcMcpGameplayBridge::GetGameplayContainer();
+        GameplayContainer && GameplayContainer->IsInitialized() && !GameplayContainer->IsMatchEnded())
+    {
+        switch (GameplayContainer->GetInteractionPhase())
+        {
+        case ETerraGameplayInteractionPhase::Idle:
+            DesiredInteractiveToolNames.Add(TEXT("terra.ui_begin_turn_review"));
+            DesiredInteractiveToolNames.Add(TEXT("terra.ui_select_piece"));
+            break;
+        case ETerraGameplayInteractionPhase::PieceSelected:
+            DesiredInteractiveToolNames.Add(TEXT("terra.ui_select_piece"));
+            DesiredInteractiveToolNames.Add(TEXT("terra.ui_preview_move"));
+            DesiredInteractiveToolNames.Add(TEXT("terra.ui_cancel_selection"));
+            break;
+        case ETerraGameplayInteractionPhase::PieceMovedCanEndTurn:
+            DesiredInteractiveToolNames.Add(TEXT("terra.ui_confirm_action"));
+            DesiredInteractiveToolNames.Add(TEXT("terra.ui_cancel_selection"));
+            break;
+        case ETerraGameplayInteractionPhase::PieceJumpingCanContinue:
+            DesiredInteractiveToolNames.Add(TEXT("terra.ui_preview_move"));
+            DesiredInteractiveToolNames.Add(TEXT("terra.ui_confirm_action"));
+            DesiredInteractiveToolNames.Add(TEXT("terra.ui_cancel_selection"));
+            break;
+        default:
+            break;
+        }
+    }
+
+    const TArray<FString> InteractiveToolNames = {
+        TEXT("terra.ui_begin_turn_review"),
+        TEXT("terra.ui_select_piece"),
+        TEXT("terra.ui_preview_move"),
+        TEXT("terra.ui_cancel_selection"),
+        TEXT("terra.ui_confirm_action")
+    };
+
+    for (const FString& ToolName : InteractiveToolNames)
+    {
+        const bool bShouldBeRegistered = DesiredInteractiveToolNames.Contains(ToolName);
+        const bool bIsRegistered = RegisteredToolNames.Contains(ToolName);
+        const TSharedRef<IModelContextProtocolTool>* Tool = AllToolsByName.Find(ToolName);
+        if (!Tool)
+        {
+            continue;
+        }
+
+        if (bShouldBeRegistered && !bIsRegistered)
+        {
+            RegisteredTools.Add(*Tool);
+            RegisteredToolNames.Add(ToolName);
+            const bool bAdded = McpModule->AddTool(*Tool);
+            UE_LOG(LogTerraNpcMcp, Log, TEXT("[NpcMcp] Enable interactive tool %s: %s"), *ToolName, bAdded ? TEXT("ok") : TEXT("duplicate"));
+        }
+        else if (!bShouldBeRegistered && bIsRegistered)
+        {
+            McpModule->RemoveTool(*Tool);
+            RegisteredToolNames.Remove(ToolName);
+            RegisteredTools.RemoveSingle(*Tool);
+            UE_LOG(LogTerraNpcMcp, Log, TEXT("[NpcMcp] Disable interactive tool %s"), *ToolName);
+        }
     }
 }
 
@@ -71,6 +184,8 @@ void FNpcMcpModule::UnregisterTools_()
     }
 
     RegisteredTools.Reset();
+    RegisteredToolNames.Reset();
+    AllToolsByName.Reset();
 }
 
 void FNpcMcpModule::StartServerIfRequested_()
