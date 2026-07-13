@@ -1,6 +1,7 @@
 # L1 Interactive Tactical Review Tools 最小闭环设计稿
 
 日期：2026-07-10
+状态：已实现、已验收；实现范围已超过最小闭环。
 
 ## 目标
 
@@ -20,19 +21,30 @@ LLM Agent 像真人玩家一样开始回合观察
 
 L1 的核心价值是把“操作即信息，信息即操作”的交互方式跑通，让后续战略语义工具、两回合战术工具、真正的 tool-calling Agent 有一个可见、可控、可验证的执行面。
 
-## 当前实现约束
+## 完成状态与范围
 
-当前 UE 侧正在重构 `APlanetTessellatedMesh` 结构，并把各个逻辑部分拆成独立组件。因此本阶段先只实现设计稿，不直接修改 UE C++。
-
-后续实现 C++ 时，需要先查询当时的真实接口位置，再决定落点：
+L1 的最小闭环已经在 MCP Inspector 和 `run-interactive-review-once.js` 中验收通过。实际落地范围也已经超过最初只验证 UI 调用顺序的目标：
 
 ```text
-不要假设仍然由 APlanetTessellatedMesh 直接承载所有点击、高亮、同步逻辑。
-不要凭记忆写跨组件访问字段。
-实现前必须重新读取当前 header/cpp，确认 Gameplay、Selection、Highlight、Presentation、MCP Bridge 的边界。
+已完成：
+  真实 Gameplay 点击路径的 MCP 拆分。
+  Gameplay phase 驱动的动态 tools/list 暴露。
+  Inspector 的合法、非法时机和非法参数校验。
+  当前阵营棋子和落点的局部确定性情报。
+  无 LLM 的 L1 验收 Agent。
+  仅基础工具、仅交互工具、交互工具 + 结构化思考三类 LLM 实验 Agent。
+
+尚未完成：
+  战略语义工具。
+  通用兵种/地形协同与多回合战术分析工具。
+  每阵营长期记忆、active plan 和生产级回合调度。
 ```
 
-本设计稿只说明实现思路、工具契约、状态机、数据结构和验收方式。
+L1 的后续角色不再是“待实现方案”，而是后续战略和战术工具的已验证执行底座。总体进度同步见 [LLM Agent 战略思考与交互式战术工具设计稿](LlmAgentStrategicInteractiveDesign.md)。
+
+## 实现原则
+
+实现时已重新查询重构后的接口，而不是假设 `APlanetTessellatedMesh` 仍承载全部逻辑。当前边界保持为：Gameplay 负责权威规则和 phase，`UPlanetGameplayComponent` 负责真实点击与表现同步，NpcMcp bridge 只做窄转发，MCP tools 只做参数校验、调用和结构化返回。
 
 ## 当前重构后交互源码位置
 
@@ -847,9 +859,9 @@ terra.ui_confirm_action
 
 因此二者不能互相替代。
 
-## L1 内部数据结构建议
+## L1 状态镜像
 
-后续 C++ 可按真实组件边界调整。概念上需要一个 session 结构：
+概念上，MCP bridge/Agent 可以持有如下 session 镜像；它不是第二套权威状态机，也不参与 Gameplay 规则判断：
 
 ```cpp
 struct FTerraNpcMcpReviewSession
@@ -874,15 +886,7 @@ ReviewSession 是 MCP/交互编排状态缓存。
 它只镜像当前 Gameplay 的真实 interaction phase 和当前 selected piece 等摘要。
 ```
 
-可能落点：
-
-```text
-NpcMcp 模块中的 bridge/session manager。
-TerraCivilization 交互组件。
-重构后的 selection/interaction 组件。
-```
-
-具体位置等 C++ 实现时再读取当前代码决定。
+当前实现以 `FInteractionStateSnapshot` 和每次 tool 返回的 `interaction_state` 为准。Agent 必须覆盖自身缓存，不能自行推演 phase。
 
 ## 信息摘要生成
 
@@ -925,18 +929,27 @@ ContinueJumpTargetCellIds
 
 然后构造统一的 `interaction_state` 返回给 Agent。
 
-地形、附近敌我、summary_tags 第一版可以保守：
+实际实现已提供局部确定性情报，而不是只返回 action/risk：
 
 ```text
-如果已有地形/邻接查询 API：
-  返回真实 terrain_tags、nearby_piece_ids。
+ui_begin_turn_review.pieces[]：
+  terrain_tags
+  nearby_enemy_piece_ids / nearby_friendly_piece_ids
+  summary_tags
+  legal_action_count（递归计入本回合多跳可达终点）
+  can_capture_now / max_capture_count
+  threatened_if_hold / hold_threat_count / threatening_piece_ids
 
-如果接口暂未稳定：
-  L1 可以先只返回 legal action、capture、risk。
-  在输出中保留 terrain_tags: []、summary_tags: []。
+ui_select_piece.move_options[] 与 ui_preview_move.preview：
+  destination_threatened / threat_count
+  terrain_tags
+  nearby_enemy_piece_ids / nearby_friendly_piece_ids
+  summary_tags
+  nearest_enemy_distance_from / nearest_enemy_distance_to
+  approach_to_enemy
 ```
 
-不要为了 L1 硬写不稳定的地形推断逻辑。
+`approach_to_enemy = nearest_enemy_distance_from - nearest_enemy_distance_to`；正值表示靠近敌人，负值表示远离敌人，无法找到任一距离时为 `null`。这些字段是局部观察事实，不等于战略评分或战术结论。
 
 ## 表现层接口需求
 
@@ -995,25 +1008,26 @@ terra.ui_preview_move
 terra.ui_cancel_selection
 ```
 
-`terra.ui_confirm_action` 建议先由 Agent 代理调用，或者至少在 Agent 侧二次确认。
+当前 Inspector 和交互式 LLM 实验 Agent 已直接暴露 `terra.ui_confirm_action`。它只在 `PieceMovedCanEndTurn` 或 `PieceJumpingCanContinue` phase 可见，并且只能确认当前真实点击状态机中已经形成的 pending action；UE 仍做最终校验和执行。
 
-推荐权限：
-
-```text
-LLM:
-  可以观察、选择、预览、取消。
-
-Agent:
-  负责确认是否允许提交。
-  负责调用 ui_confirm_action。
-
-UE:
-  负责最终 validator 和执行。
-```
-
-如果为了 Inspector 验收，`ui_confirm_action` 可以作为 MCP tool 暴露，但在真正 LLM Agent 白名单里仍建议作为 Agent-controlled tool。
+生产级 Agent 可以再在其外层增加确认策略、预算或人工观察开关，但这属于 Agent permission gateway，不应改变 L1 的 MCP 工具契约。
 
 Agent 不需要发明自己的状态机，只需要保存最近一次 tool 返回的 `interaction_state`。
+
+## 已实现 Agent 归档
+
+所有 Agent 均位于 [Tools/NpcAgent](C:/workspace/TerraCivilization/Tools/NpcAgent)，统一作为外部 MCP HTTP client，先 `initialize`、发送 `notifications/initialized`，再通过 `tools/list` 或调用 tools 完成一回合。它们是开发、验收与行为研究脚本，不是 11 个 NPC 的生产级调度器。
+
+| 脚本 | 工具面 | 当前用途 |
+| --- | --- | --- |
+| [run-once.js](C:/workspace/TerraCivilization/Tools/NpcAgent/src/run-once.js) | A2/A3 基础工具 | 无 LLM 基线。取第一个合法行动，提交并执行。 |
+| [run-llm-choice.js](C:/workspace/TerraCivilization/Tools/NpcAgent/src/run-llm-choice.js) | 基础工具由 Agent 调用 | A3 Step B。LLM 只从候选 `piece_id/to_cell_id` 中选择，脚本负责校验、fallback 和执行。 |
+| [run-interactive-review-once.js](C:/workspace/TerraCivilization/Tools/NpcAgent/src/run-interactive-review-once.js) | 当前 phase 可见的 `ui_` 工具 | L1 无 LLM 验收。`begin -> select -> preview -> confirm`，每步重新检查 `tools/list`。 |
+| [run-llm-basic-tools.js](C:/workspace/TerraCivilization/Tools/NpcAgent/src/run-llm-basic-tools.js) | 仅 A2/A3 基础工具 | 对照实验。LLM 自主选基础工具，每次输出调用目的；用于观察“表格式查询 + 最终执行”的行为。 |
+| [run-llm-interactive-tools.js](C:/workspace/TerraCivilization/Tools/NpcAgent/src/run-llm-interactive-tools.js) | 仅当前可见的 `ui_` 工具 | 对照实验。LLM 通过真实点选、预览、取消和确认完成回合。 |
+| [run-llm-interactive-think.js](C:/workspace/TerraCivilization/Tools/NpcAgent/src/run-llm-interactive-think.js) | 仅当前可见的 `ui_` 工具 | 当前主要研究脚本。每一步输出目标、战术焦点、假设、证据、放弃上一方案的理由和调用目的；默认最多 32 步，且只有 `ui_confirm_action` 成功才算本回合完成。 |
+
+运行命令、环境变量和行为说明维护在 [Tools/NpcAgent/README.md](C:/workspace/TerraCivilization/Tools/NpcAgent/README.md)。
 
 ## Agent 最小流程
 
@@ -1038,8 +1052,7 @@ LLM choose a piece to inspect
 LLM call ui_select_piece
 LLM choose a move option to preview
 LLM call ui_preview_move
-Agent asks LLM for final decision: confirm or cancel
-Agent calls ui_confirm_action or ui_cancel_selection
+LLM calls ui_confirm_action or ui_cancel_selection
 ```
 
 注意：L1 不是要求 LLM 多聪明，而是要求工具调用在画面上产生连贯反馈。
@@ -1067,7 +1080,7 @@ Agent calls ui_confirm_action or ui_cancel_selection
 
 ## 脚本验收流程
 
-后续实现 C++ 后，可新增一个 Agent 脚本，例如：
+已实现的验收脚本：
 
 ```text
 Tools/NpcAgent/src/run-interactive-review-once.js
@@ -1082,12 +1095,11 @@ pick first actionable piece
 call ui_select_piece
 pick first move option
 call ui_preview_move
-sleep 300ms
 call ui_confirm_action
 print execution result
 ```
 
-这个脚本可以先不接 LLM。它的目的和 A3 Step 0 一样：先验证工具和表现链路。
+该脚本不接 LLM。它的目的和 A3 Step 0 一样：验证 tools/list phase 暴露、工具契约和表现链路。
 
 ## 日志与复盘
 
@@ -1186,7 +1198,7 @@ confirm 前对比当前 Gameplay snapshot。
 不一致则拒绝并清理 session。
 ```
 
-### 4. 重构期间接口漂移
+### 4. 后续重构期间接口漂移
 
 风险：
 
@@ -1197,9 +1209,8 @@ PlanetTessellatedMesh 重构导致旧函数位置变化。
 处理：
 
 ```text
-本阶段不写 C++。
-后续实现前重新 rg 相关接口。
-只依赖 public/narrow bridge，不跨组件硬访问字段。
+L1 C++ 已实现并通过验收。
+后续扩展时重新查询接口，只依赖 public/narrow bridge，不跨组件硬访问字段。
 ```
 
 ### 5. 工具调用太多拖慢回合
@@ -1219,7 +1230,7 @@ L1 先只验证单 NPC。
   远处 NPC 只后台执行。
 ```
 
-## 后续 C++ 实现前的代码查询清单
+## 后续扩展前的代码查询清单
 
 实现 C++ 前先查询：
 
@@ -1241,9 +1252,9 @@ rg "NpcMcp|GameplayBridge" Source
 当前是否已有可复用的“取消当前选择”或“结束当前行动”接口。
 ```
 
-## 最小交付
+## 已交付内容
 
-L1 的实现最小交付应包含：
+L1 已交付：
 
 ```text
 1. 五个 MCP tools。
@@ -1253,14 +1264,14 @@ L1 的实现最小交付应包含：
 5. 统一 interaction_state 解包与返回。
 6. confirm 复用现有“确认当前行动/结束回合”路径。
 7. Inspector 验收步骤。
-8. 可选 deterministic review agent 脚本。
+8. deterministic review agent 脚本，以及多种 LLM 对照实验 Agent。
 ```
 
-当前本次只交付设计稿。C++ 等 `PlanetTessellatedMesh` 重构稳定后再按真实接口实现。
+当前不将“独立 AI Preview State”列为 L1 后续补全项。若将来因回放、并发 NPC 或更复杂撤销需求需要与真实 Gameplay 分离，应作为独立架构阶段重新设计。
 
 ## 验收标准
 
-设计稿验收：
+设计与实现验收：
 
 ```text
 1. L1 范围明确，不混入战略语义工具和 Step C。

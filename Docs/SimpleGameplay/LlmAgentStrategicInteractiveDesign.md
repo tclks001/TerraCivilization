@@ -1,6 +1,7 @@
 # LLM Agent 战略思考与交互式战术工具设计稿
 
 日期：2026-07-09
+状态：总体设计持续维护中；A1/A2/A3 与 L1 已实现并验证。
 
 ## 目标
 
@@ -14,7 +15,7 @@ LLM Agent 应该拥有识别局势、战略思考、战术分析、可视化试�
 玩家应该能看到 NPC 像真人一样点选棋子、观察局部、预览落点、比较风险，最后确认行动。
 ```
 
-本文讨论的是长期设计方向和工具分层，不直接替代已经完成的 A1/A2/A3 实现。
+本文讨论长期设计方向、已验证能力和后续分层，不替代 A1/A2/A3/L1 的具体实现设计稿。
 
 ## 已实现并验证的基础
 
@@ -39,7 +40,14 @@ LLM Agent 应该拥有识别局势、战略思考、战术分析、可视化试�
 4. [A3 LLM Agent 与 MCP 连接操作手册](A3LlmAgentMcpConnectionGuide.md)
    - 已说明 Step 0 deterministic Agent。
    - 已实现并说明 Step B：LLM 只从候选行动里选择，Agent 执行校验和 fallback。
-   - 已讨论 Step C：LLM 使用 MCP tool calling，但还未作为最终方向直接推进。
+   - 已讨论 Step C：LLM 使用 MCP tool calling 的 Agent gateway、白名单与日志边界。
+
+5. [L1 Interactive Tactical Review Tools 最小闭环设计稿](L1InteractiveTacticalReviewToolsDesign.md)
+   - 已实现并验收 `terra.ui_begin_turn_review`、`terra.ui_select_piece`、`terra.ui_preview_move`、`terra.ui_cancel_selection`、`terra.ui_confirm_action`。
+   - UI tools 复用真实 Gameplay 点击、高亮、镜头和确认路径，不维护独立 AI Preview 棋盘。
+   - `tools/list` 按 Gameplay phase 动态只暴露当前可用的 UI tools；非法时机和非法参数会被拒绝且返回原因。
+   - 已提供局部确定性情报：地形、邻近敌我、局部摘要、递归多跳可达数量、当前可吃与驻留威胁、敌人最近距离和接近/撤退幅度。
+   - MCP Inspector、无 LLM review Agent 与交互式 LLM Agent 均已完成验证。
 
 这些阶段证明了：
 
@@ -50,6 +58,8 @@ Gameplay 可以向外部 Agent 提供确定性信息。
 Agent 可以提交并执行合法 NPC 行动。
 LLM 可以参与行动选择，但执行权仍由 Agent 和 UE validator 控制。
 ```
+
+当前 Agent 脚本已归档在 [L1 设计稿](L1InteractiveTacticalReviewToolsDesign.md#已实现-agent-归档)，运行说明在 [Tools/NpcAgent/README.md](C:/workspace/TerraCivilization/Tools/NpcAgent/README.md)。
 
 本文在这些基础上继续讨论：如何让 LLM Agent 从“会选一个合法行动”升级为“像玩家一样观察、计划和执行”。
 
@@ -269,13 +279,12 @@ terra.find_capture_setups
 
 这些工具让 LLM 像真人玩家一样通过操作获得信息，同时把操作过程展示给玩家。
 
-推荐的最小工具集：
+当前已实现的工具集：
 
 ```text
 terra.ui_begin_turn_review
 terra.ui_select_piece
 terra.ui_preview_move
-terra.ui_undo_preview
 terra.ui_cancel_selection
 terra.ui_confirm_action
 ```
@@ -285,8 +294,8 @@ terra.ui_confirm_action
 作用：
 
 ```text
-高亮当前阵营所有棋子。
-返回每个棋子的概要。
+不额外触发表现层行为；回合开始已有的阵营高亮保持不变。
+返回当前阵营每个棋子的概要。
 帮助 LLM 决定先看哪个棋子。
 ```
 
@@ -301,10 +310,14 @@ terra.ui_confirm_action
       "piece_id": 12,
       "type": "archer",
       "cell_id": 101,
-      "nearby_terrain": ["forest", "hill"],
-      "nearby_enemy_count": 2,
-      "nearby_friendly_count": 1,
-      "suggested_focus": ["cover", "ranged_threat"]
+      "terrain_tags": ["forest", "hill"],
+      "nearby_enemy_piece_ids": [34],
+      "nearby_friendly_piece_ids": [7],
+      "legal_action_count": 4,
+      "can_capture_now": false,
+      "max_capture_count": 0,
+      "threatened_if_hold": false,
+      "summary_tags": ["forest_cover", "friendly_support"]
     }
   ]
 }
@@ -329,12 +342,16 @@ terra.ui_confirm_action
   "move_options": [
     {
       "to_cell_id": 118,
-      "terrain": "forest",
+      "terrain_tags": ["forest"],
       "is_jump": false,
       "capture_count": 0,
       "destination_threatened": false,
       "nearby_enemy_piece_ids": [34],
-      "tactical_tags": ["cover", "future_archer_lane"]
+      "nearby_friendly_piece_ids": [7],
+      "nearest_enemy_distance_from": 5,
+      "nearest_enemy_distance_to": 3,
+      "approach_to_enemy": 2,
+      "summary_tags": ["forest_cover", "friendly_support"]
     }
   ]
 }
@@ -345,10 +362,9 @@ terra.ui_confirm_action
 作用：
 
 ```text
-不正式提交行动。
-在 AI Preview State 中预览棋子到目标格。
-画面显示预览路径、目标格、威胁线或后续跳点。
-返回落点后的局部局势。
+通过真实 Gameplay 点击路径点击目标格，进入权威交互状态机中的中间状态。
+它不是从零执行 action，也不是独立 AI Preview State；高亮、镜头、继续跳候选和棋子中间位置均复用现有 Gameplay 行为。
+返回本次已点击行动和落点的局部局势。
 ```
 
 示例输出：
@@ -360,34 +376,16 @@ terra.ui_confirm_action
     "piece_id": 12,
     "from_cell_id": 101,
     "to_cell_id": 118,
-    "terrain": "forest",
+    "terrain_tags": ["forest"],
     "destination_threatened": false,
-    "next_turn_attack_options": [
-      {
-        "enemy_piece_id": 34,
-        "enemy_type": "cavalry",
-        "requires_screen": true
-      }
-    ],
-    "friendly_screen_candidates": [
-      {
-        "piece_id": 7,
-        "screen_cell_id": 117,
-        "reachable_next_turn": true
-      }
-    ]
+    "nearby_enemy_piece_ids": [34],
+    "nearby_friendly_piece_ids": [7],
+    "nearest_enemy_distance_from": 5,
+    "nearest_enemy_distance_to": 3,
+    "approach_to_enemy": 2,
+    "summary_tags": ["forest_cover", "friendly_support"]
   }
 }
-```
-
-#### `terra.ui_undo_preview`
-
-作用：
-
-```text
-回退上一个预览步骤。
-画面也恢复到上一个 preview 或 selection 状态。
-用于让 LLM 试探多个落点。
 ```
 
 #### `terra.ui_cancel_selection`
@@ -405,59 +403,17 @@ terra.ui_confirm_action
 作用：
 
 ```text
-把当前 preview 中的最终行动提交给 Gameplay validator。
-通过后调用真实执行路径。
-失败则不修改正式 Gameplay。
+确认当前真实点击状态机里已经形成的 pending action，并按现有 Gameplay 路径结束行动/推进回合。
+它不接受任意 `piece_id/to_cell_id`，不能绕过 `ui_select_piece` 和 `ui_preview_move`。
 ```
 
-它可以复用 A3 已验证的执行边界：
+## 当前 Gameplay 状态与未来 Preview State
 
-```text
-submit_action_proposal
-execute_validated_action
-```
+当前 L1 的唯一权威交互状态机是 Gameplay 的 `ETerraGameplayInteractionPhase`：`Idle`、`PieceSelected`、`PieceMovedCanEndTurn`、`PieceJumpingCanContinue`。Agent 只缓存每次工具返回的 `interaction_state`，下一步可调用的 tools 由 `tools/list` 按该 phase 决定。
 
-## Preview State 与正式 Gameplay State
+因此当前语义为：`ui_select_piece` 和 `ui_preview_move` 会进入真实的 Gameplay 中间状态，`ui_cancel_selection` 复用既有取消路径，`ui_confirm_action` 结束当前 pending action。非法调用不应改变 Gameplay。
 
-必须区分两种状态：
-
-```text
-正式 Gameplay State
-  当前权威棋盘。
-  只有 confirm_action 通过 validator 后才能修改。
-
-AI Preview State
-  LLM 正在点选、预览、试探、回退的临时状态。
-  可以驱动画面表现。
-  可以撤销。
-  不影响正式回合。
-```
-
-不建议让 `ui_preview_move` 直接修改正式 Gameplay。否则 LLM 的试错和回退会污染权威状态，也会让 replay、action log、胜负判断变复杂。
-
-推荐原则：
-
-```text
-select / preview / undo / cancel:
-  只修改 AI Preview State 和 UI 表现。
-
-confirm:
-  调 Gameplay validator。
-  通过后修改正式 Gameplay State。
-```
-
-非法操作处理：
-
-```text
-非法 select_piece:
-  不改变 UI，返回 error。
-
-非法 preview_move:
-  不改变 preview state，返回 error 和合法目标提示。
-
-非法 confirm_action:
-  不改变正式 Gameplay，返回 rejection reason。
-```
+独立 AI Preview State 是未来的可选架构方向，不是当前实现前提。只有当回放、并发 NPC 试探或复杂多层撤销确实需要与真实交互状态分离时，才应单独设计其同步、表现和提交边界。
 
 ## Agent 决策循环
 
@@ -473,7 +429,7 @@ confirm:
 7. LLM 调 ui_begin_turn_review。
 8. LLM 调 ui_select_piece。
 9. LLM 调 ui_preview_move。
-10. LLM 可根据结果 undo、cancel 或选择另一棋子。
+10. LLM 可根据结果 cancel、重新选择或继续跳。
 11. LLM 满意后调 ui_confirm_action。
 12. Agent 记录 decision log、active plan 和工具调用轨迹。
 ```
@@ -578,12 +534,11 @@ LLM 可直接调用：
   ui_begin_turn_review。
   ui_select_piece。
   ui_preview_move。
-  ui_undo_preview。
   ui_cancel_selection。
+  ui_confirm_action（仅在当前 Gameplay phase 可见，且只确认当前 pending action）。
 
-Agent 代理调用或二次确认：
+Agent 可选的代理调用或二次确认：
   submit_action_proposal。
-  ui_confirm_action。
 
 Agent-only：
   execute_validated_action。
@@ -597,7 +552,7 @@ execute_validated_action 是正式写操作。
 它应该保留在 Agent permission gateway 后面。
 ```
 
-## 与 Step C 的关系
+## 与 Step C 的关系和当前实验状态
 
 原 A3 手册中的 Step C 指的是：
 
@@ -606,7 +561,18 @@ LLM 使用 MCP tool calling。
 Agent 做工具白名单、执行确认、fallback 和日志。
 ```
 
-本文建议：不要把 Step C 简单理解成“把现有 A2/A3 tools 全部交给 LLM 调用”。
+当前已经完成两类 Step C 风格实验 Agent：
+
+```text
+run-llm-basic-tools.js：
+  LLM 自主调用基础工具；它容易退化为“找第一个安全合法行动”。
+
+run-llm-interactive-tools.js / run-llm-interactive-think.js：
+  LLM 只看到当前 phase 可用的 ui tools；会产生 select / preview / cancel / confirm 的可见观察过程。
+  think 版本额外记录 turn goal、假设、证据和放弃理由，且只以 confirm 成功作为回合完成。
+```
+
+这些实验验证了交互工具面对玩家体验和可复盘性更好，但也暴露出：仅增加步骤和提示词不足以让 LLM 自动发现复杂兵种、地形、多跳协同。后续不能只继续堆 prompt 或行动步数。
 
 更合理的 Step C 应该建立在本文工具体系上：
 
@@ -624,54 +590,48 @@ UE validator 保持权威。
 
 本文是总体设计稿。后续可以拆成单独实现阶段：
 
-1. Interactive Tactical Review 最小闭环
-   - `terra.ui_begin_turn_review`
-   - `terra.ui_select_piece`
-   - `terra.ui_preview_move`
-   - `terra.ui_cancel_selection`
-   - `terra.ui_confirm_action`
+1. L1 已完成：Interactive Tactical Review 与局部确定性情报
+   - 以真实 Gameplay phase 和点击路径为执行面。
+   - 继续保持 UI tools 与状态机一致，不新增平行 Agent phase。
 
-2. AI Preview State
-   - 与正式 Gameplay State 分离。
-   - 支持 preview、undo、cancel。
-   - 支持表现层高亮、路径、威胁线。
+2. [L2 局部战术情报卡](L2LocalTacticalSituationCardDesign.md)
+   - 在现有 terrain/nearby/distance 字段上补充落点前方拓扑、通行阻断、友军支援增量、跳跃锚点和后续机动潜力。
+   - 目标是表达通用事实，例如山前骑兵死角、可作为下一回合跳跃锚点、可形成友军屏障，而不是硬编码固定棋谱。
 
 3. 战略语义工具
-   - 阵营摘要。
-   - 地形控制点。
-   - 环形拓扑、前线、敌方压力。
+   - 阵营摘要、地形控制点、环形拓扑、前线、敌方压力、近期敌对事件。
 
-4. 两回合战术工具
-   - 弓兵进树林。
-   - 骑兵屏障。
-   - 跳跃突击。
-   - 远程狙杀窗口。
+4. 多回合协同分析工具
+   - 以确定性枚举输出可验证的两回合/多回合候选计划、屏障、远程火力窗口和多跳链机会。
+   - LLM 比较计划与上下文，不自行证明规则可行性。
 
 5. 阵营记忆与 active plan
    - 每个 NPC 阵营独立上下文。
    - 记录计划、敌对关系、近期攻击和被攻击事件。
 
-6. 真正的 Step C Tool Calling Agent
-   - LLM 可调用白名单工具。
-   - Agent 保留执行网关。
-   - 所有工具调用写入 decision log。
+6. 生产级多阵营 Agent 调度
+   - 12 个阵营各自拥有独立记忆和 active plan，不共享隐式对话上下文。
+   - Agent 按回合复用或重建会话均可，但每回合都以 Gameplay 返回的事实和该阵营持久记忆为准。
+   - 依据玩家可见性、重要性和预算决定展示完整 review 还是后台快速执行。
+
+独立 AI Preview State 保留为上述路线之外的可选重构项，不作为既定下一阶段。
 
 ## 验收标准
 
-第一轮验收不要求 NPC 真的很聪明，而要求体验闭环成立：
+L1 对应的第一轮验收已经完成；以下条目同时作为该能力回归验收：
 
 ```text
-1. NPC 回合开始后，Agent 能高亮当前阵营棋子。
+1. NPC 回合开始后，Agent 能读取当前阵营摘要，并保留现有回合开始高亮。
 2. LLM 能选择一个棋子并触发可见选中。
 3. LLM 能预览至少一个落点。
 4. 画面能显示落点相关信息，例如可达格、威胁、地形或后续机会。
-5. LLM 能取消或确认。
+5. LLM 能取消、重新选择、继续跳或确认。
 6. 确认后仍走 Gameplay validator。
 7. 非法操作不会污染正式 Gameplay。
 8. decision log 能复盘本次 NPC 为什么先看这个棋子、为什么预览这个落点、为什么最终确认。
 ```
 
-长期验收目标：
+下一阶段验收目标：
 
 ```text
 NPC 能基于地形、兵种协同和多回合 active plan 行动。
