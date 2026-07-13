@@ -22,6 +22,11 @@ TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpUiSelectPieceTool();
 TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpUiPreviewMoveTool();
 TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpUiCancelSelectionTool();
 TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpUiConfirmActionTool();
+TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpStrategicFactionStateTool();
+TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpStrategicFrontlineTool();
+TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpStrategicTerrainTool();
+TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpStrategicEnemyPressureTool();
+TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpStrategicOptionsTool();
 
 IMPLEMENT_MODULE(FNpcMcpModule, NpcMcp)
 
@@ -74,6 +79,11 @@ void FNpcMcpModule::RegisterTools_()
     AllToolsByName.Add(TEXT("terra.ui_preview_move"), MakeTerraNpcMcpUiPreviewMoveTool());
     AllToolsByName.Add(TEXT("terra.ui_cancel_selection"), MakeTerraNpcMcpUiCancelSelectionTool());
     AllToolsByName.Add(TEXT("terra.ui_confirm_action"), MakeTerraNpcMcpUiConfirmActionTool());
+    AllToolsByName.Add(TEXT("terra.strategy.summarize_faction_state"), MakeTerraNpcMcpStrategicFactionStateTool());
+    AllToolsByName.Add(TEXT("terra.strategy.describe_frontline"), MakeTerraNpcMcpStrategicFrontlineTool());
+    AllToolsByName.Add(TEXT("terra.strategy.find_terrain_control_points"), MakeTerraNpcMcpStrategicTerrainTool());
+    AllToolsByName.Add(TEXT("terra.strategy.find_enemy_pressure"), MakeTerraNpcMcpStrategicEnemyPressureTool());
+    AllToolsByName.Add(TEXT("terra.strategy.describe_strategic_options"), MakeTerraNpcMcpStrategicOptionsTool());
 
     const TArray<FString> AlwaysOnToolNames = {
         TEXT("terra.ping_gameplay"),
@@ -81,7 +91,12 @@ void FNpcMcpModule::RegisterTools_()
         TEXT("terra.list_legal_actions"),
         TEXT("terra.evaluate_action_risk"),
         TEXT("terra.submit_action_proposal"),
-        TEXT("terra.execute_validated_action")
+        TEXT("terra.execute_validated_action"),
+        TEXT("terra.strategy.summarize_faction_state"),
+        TEXT("terra.strategy.describe_frontline"),
+        TEXT("terra.strategy.find_terrain_control_points"),
+        TEXT("terra.strategy.find_enemy_pressure"),
+        TEXT("terra.strategy.describe_strategic_options")
     };
 
     for (const FString& ToolName : AlwaysOnToolNames)

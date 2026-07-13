@@ -1716,6 +1716,52 @@ R8+ 要预算下一期的 ms 增量、显存占用、Sampler 资源占用。
 
 ---
 
+### 3.18 Native default subobject refactor can break old Blueprints and PropertyEditor
+
+#### Symptom
+
+After `APlanetTessellatedMesh` was split into camera, gameplay, HISM interaction, and piece-presentation components, the failure did not appear immediately:
+
+- The Editor remained usable after the refactor, and several PIE or standalone runs completed successfully.
+- A later standalone launch crashed while loading the map. The crash stack ended in `SerializeUnversionedProperties` and `UBlueprintGeneratedClass::SerializeDefaultObject`.
+- Opening the old `BP_PlanetTessellatedMesh` then crashed the Editor. A newly created Blueprint that directly inherited `APlanetTessellatedMesh` also crashed. The Editor crash was `Unhandled Exception: EXCEPTION_STACK_OVERFLOW`, with repeated `UnrealEditor_PropertyEditor` frames while the Blueprint SCS/Details view was being built.
+
+These are two related compatibility failures, not a gameplay or input-loop recursion.
+
+#### Root cause and delayed appearance
+
+1. The old Blueprint asset had serialized component-template exports for removed native default subobjects, including `TerrainMeshComp`, `WaterMeshComp`, and the old `PiecePresentationManager`. After the C++ refactor removed those names from `Default__PlanetTessellatedMesh`, a fresh standalone process could no longer resolve the templates while asynchronously loading the Blueprint/map package. The subsequent null template path caused the serialization access violation.
+
+2. The original piece-presentation split created `UTerraPiecePresentationManager` (itself a `UActorComponent`) as a visible default subobject of `UPlanetPiecePresentationComponent`. PropertyEditor recursively expanded this nested native component object graph. Host-side `VisibleAnywhere` references without `NoEditInline` also made extracted component objects available for inline actor Details expansion. This can exhaust the stack while constructing the Blueprint editor even for a new Blueprint, because the issue belongs to the native class reflection tree rather than to the old asset alone.
+
+The delayed symptom is expected in UE:
+
+- Existing editor sessions and some PIE paths can operate on already loaded/duplicated class defaults and may not re-read the stale Blueprint exports from disk.
+- A standalone process starts with a fresh package load, so it exercises the missing-template path deterministically when the affected map is loaded.
+- Opening a Blueprint immediately constructs its CDO/SCS preview and Details tree, so the PropertyEditor recursion becomes visible independently of whether gameplay has begun.
+
+#### Fix
+
+1. Do not create an `UActorComponent` as a visible default subobject of another `UActorComponent`. `UPlanetPiecePresentationComponent` now creates `UTerraPiecePresentationManager` lazily with `NewObject` only when runtime presentation is required, and keeps the pointer transient and hidden from Details.
+
+2. Keep actor-owned native components as `VisibleAnywhere` references so the Blueprint Components panel can display their Details, but add `meta = (NoEditInline)` to prevent recursive inline expansion from the actor Details panel. Retain Blueprint read access and edit camera/gameplay/HISM/piece-presentation settings by selecting the corresponding native component in the Blueprint Components panel.
+
+3. Do not populate runtime HISM/Gameplay state in a Blueprint `EditorPreview` world. `APlanetTessellatedMesh::OnConstruction` returns for templates and `EWorldType::EditorPreview`; normal level-editor construction and `BeginPlay` retain their rebuild paths.
+
+4. Treat the old `BP_PlanetTessellatedMesh` as an incompatible asset after removed default-subobject names. Create a clean replacement Blueprint from the repaired C++ class, reapply only supported HISM and component settings, replace level instances, reconnect `PlanetBinder.TessellatedMeshRef`, save the affected maps/external actors, and only then retire the old asset. Do not restore ProceduralMesh/SDF components merely to keep obsolete data alive.
+
+#### Verification checklist
+
+- Build with the Editor closed and require `Result: Succeeded`.
+- Reset `Saved/Config/WindowsEditor/EditorPerProjectUserSettings.ini` only as a diagnostic control; it removes saved Details expansion state but cannot repair either C++ reflection recursion or stale Blueprint exports.
+- Create and open a fresh Blueprint directly derived from `APlanetTessellatedMesh`; it must open without `EXCEPTION_STACK_OVERFLOW`.
+- Confirm the Components panel still contains Camera, Gameplay, HISM Interaction, and Piece Presentation components, and that their settings remain editable there.
+- Launch the migrated map in a fresh standalone process and verify there are no `Could not find template object` messages for removed subobject names.
+
+#### Rule
+
+Native default-subobject names are serialized compatibility identifiers for Blueprint assets. Removing or relocating one is an asset migration, not a source-only refactor. Keep runtime-only nested helpers transient/lazy, and use `NoEditInline` when a native component reference must be visible in the Components panel but must not be recursively expanded in actor Details.
+
 ## Pitfall: Native component constructor-time owner cache can point to Blueprint CDO
 
 ### Symptom

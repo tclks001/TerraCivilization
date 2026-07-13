@@ -5,6 +5,13 @@ const DEFAULT_LLM_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_LLM_MODEL = "gpt-4.1-mini";
 const DEFAULT_MAX_STEPS = 32;
 const PROTOCOL_VERSION = "2025-06-18";
+const STRATEGIC_TOOL_NAMES = [
+  "terra.strategy.summarize_faction_state",
+  "terra.strategy.describe_frontline",
+  "terra.strategy.find_terrain_control_points",
+  "terra.strategy.find_enemy_pressure",
+  "terra.strategy.describe_strategic_options",
+];
 
 function parseArgs(argv) {
   const args = {
@@ -14,6 +21,9 @@ function parseArgs(argv) {
     llmModel: process.env.TERRA_NPC_LLM_MODEL || process.env.OPENAI_MODEL || DEFAULT_LLM_MODEL,
     maxSteps: parsePositiveInt(process.env.TERRA_NPC_LLM_MAX_STEPS, DEFAULT_MAX_STEPS),
     dryRunLlm: false,
+    exposeStrategicTools: false,
+    prefetchStrategicContext: true,
+    llmToolTakeaways: false,
   };
 
   for (let i = 2; i < argv.length; ++i) {
@@ -36,6 +46,12 @@ function parseArgs(argv) {
       args.maxSteps = parsePositiveInt(arg.slice("--max-steps=".length), DEFAULT_MAX_STEPS);
     } else if (arg === "--dry-run-llm") {
       args.dryRunLlm = true;
+    } else if (arg === "--allow-strategy-tools") {
+      args.exposeStrategicTools = true;
+    } else if (arg === "--no-strategy-prefetch") {
+      args.prefetchStrategicContext = false;
+    } else if (arg === "--llm-tool-takeaways") {
+      args.llmToolTakeaways = true;
     } else if (arg === "--help" || arg === "-h") {
       args.help = true;
     }
@@ -63,6 +79,9 @@ Environment:
 
 Options:
   --dry-run-llm                 Print the first LLM request payload and stop.
+  --allow-strategy-tools        Let the LLM call terra.strategy.* tools alongside current UI tools.
+  --no-strategy-prefetch        Do not have the supervisor prefetch strategic context at turn start.
+  --llm-tool-takeaways          Ask the LLM for one factual takeaway after every tool result.
 `);
 }
 
@@ -228,10 +247,28 @@ function filterInteractiveTools(toolsResult) {
     }));
 }
 
-function buildSystemPrompt() {
+function filterAvailableTools(toolsResult, exposeStrategicTools) {
+  const interactiveTools = filterInteractiveTools(toolsResult);
+  if (!exposeStrategicTools) {
+    return interactiveTools;
+  }
+
+  const strategicTools = (toolsResult?.tools || [])
+    .filter((tool) => STRATEGIC_TOOL_NAMES.includes(tool.name))
+    .map((tool) => ({
+      name: tool.name,
+      description: tool.description || "",
+      input_schema: tool.inputSchema || tool.input_schema || {},
+    }));
+  return [...interactiveTools, ...strategicTools];
+}
+
+function buildSystemPrompt(exposeStrategicTools) {
   return [
     "You are the NPC brain for TerraCivilization.",
-    "You operate through interactive MCP UI tools only.",
+    exposeStrategicTools
+      ? "You operate through stateful interactive MCP UI tools and idempotent strategic MCP query tools."
+      : "You operate through interactive MCP UI tools only.",
     "You must think explicitly in a structured way before each tool call.",
     "Do not assume hidden state. Use only returned interaction_state and tool payloads.",
     "",
@@ -252,6 +289,14 @@ function buildSystemPrompt() {
     "- terra.ui_preview_move: inspect a concrete move through the real gameplay click path and get preview data.",
     "- terra.ui_cancel_selection: cancel current selection or preview and return to a stable gameplay phase.",
     "- terra.ui_confirm_action: confirm the current already-previewed action and end the turn.",
+    "",
+    "Strategic context semantics:",
+    "- Before your first UI decision, the supervising agent may provide an idempotent strategic_context assembled in parallel from terra.strategy tools.",
+    "- Treat it as current-turn evidence for intent selection: faction material, frontline contacts, terrain control, enemy pressure, and transparent strategic options.",
+    "- Do not treat a strategic option as a legal action. Use UI tools and local tactical cards to validate a concrete piece and destination.",
+    exposeStrategicTools
+      ? "- terra.strategy.* tools are available in addition to UI tools. They are read-only, accept {}, and can be called in any interaction phase. Use them deliberately to choose or revise an intent; do not repeatedly request an unchanged strategic view without a new question."
+      : "",
     "",
     "Local tactical card semantics:",
     "- ui_select_piece move_options and ui_preview_move preview may include local_tactical_card.",
@@ -280,17 +325,24 @@ function buildSystemPrompt() {
     "- For a final decision after successful execution, return exactly:",
     '{"kind":"final","turn_goal":"string","decision_summary":"string","why_this_plan":"string"}',
     "- Do not wrap JSON in markdown fences.",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
-function buildUserPrompt(availableTools, history, currentState) {
+function buildUserPrompt(availableTools, history, currentState, strategicContext, exposeStrategicTools) {
   return JSON.stringify({
-    task: "Play exactly one NPC turn using only the currently visible interactive UI tools, with explicit structured reasoning before each tool call.",
+    task: exposeStrategicTools
+      ? "Play exactly one NPC turn using only the listed tools. Stateful terra.ui_* tools are dynamically exposed by Gameplay; read-only terra.strategy.* tools may be queried at any phase. Give explicit structured reasoning before each tool call."
+      : "Play exactly one NPC turn using only the currently visible interactive UI tools, with explicit structured reasoning before each tool call.",
     available_tools: availableTools,
     current_interaction_state: currentState,
+    strategic_context: strategicContext,
     interaction_rules: [
       "Call one tool at a time.",
       "Use exact tool names from available_tools only.",
+      ...(exposeStrategicTools ? [
+        "A terra.strategy.* call is an information-gathering step, not a move and does not change interaction phase.",
+        "Use strategy queries to answer a concrete question about material, frontline, terrain control, enemy pressure, or strategic alternatives before selecting or revising a UI line.",
+      ] : []),
       "Do not invent piece ids or destination cell ids.",
       "Base your reasoning on observed tool outputs, not on imagined topology.",
       "When a local_tactical_card is available, compare its mobility, friendly_synergy, enemy_interaction, and supporting raw fields before confirming a move.",
@@ -313,6 +365,49 @@ function buildUserPrompt(availableTools, history, currentState) {
       why_this_plan: "string when kind=final",
     },
   }, null, 2);
+}
+
+function filterStrategicTools(toolsResult) {
+  return (toolsResult?.tools || [])
+    .filter((tool) => STRATEGIC_TOOL_NAMES.includes(tool.name))
+    .map((tool) => tool.name);
+}
+
+function snapshotKey(result) {
+  const snapshot = result?.snapshot;
+  if (!snapshot || !Number.isInteger(snapshot.turn_index) || !Number.isInteger(snapshot.current_faction_id) || typeof snapshot.interaction_phase !== "string") {
+    return "";
+  }
+  return `${snapshot.turn_index}:${snapshot.current_faction_id}:${snapshot.interaction_phase}`;
+}
+
+async function collectStrategicContext(mcp, toolsResult) {
+  const visibleStrategicTools = filterStrategicTools(toolsResult);
+  const missing = STRATEGIC_TOOL_NAMES.filter((name) => !visibleStrategicTools.includes(name));
+  if (missing.length > 0) {
+    throw new Error(`Missing strategic MCP tools: ${missing.join(", ")}`);
+  }
+
+  const entries = await Promise.all(STRATEGIC_TOOL_NAMES.map(async (toolName) => ({
+    tool_name: toolName,
+    result: await mcp.callTool(toolName, {}),
+  })));
+  for (const entry of entries) {
+    if (!entry.result?.ok) {
+      throw new Error(`Strategic tool failed ${entry.tool_name}: ${JSON.stringify(entry.result)}`);
+    }
+  }
+
+  const snapshotKeys = new Set(entries.map((entry) => snapshotKey(entry.result)));
+  if (snapshotKeys.size !== 1 || !snapshotKeys.values().next().value) {
+    throw new Error(`Strategic snapshot mismatch across parallel tools: ${JSON.stringify(entries)}`);
+  }
+
+  return {
+    snapshot_key: snapshotKeys.values().next().value,
+    parallel_tool_names: STRATEGIC_TOOL_NAMES,
+    results: entries,
+  };
 }
 
 async function askLlmForStep(args, systemPrompt, userPrompt) {
@@ -360,6 +455,53 @@ async function askLlmForStep(args, systemPrompt, userPrompt) {
   }
 
   return JSON.parse(extractJsonObjectText(content));
+}
+
+async function askLlmForToolTakeaway(args, toolName, purpose, result) {
+  if (!args.llmApiKey) {
+    throw new Error("Missing LLM API key. Set TERRA_NPC_LLM_API_KEY or OPENAI_API_KEY.");
+  }
+
+  const requestBody = {
+    model: args.llmModel,
+    temperature: 0.2,
+    messages: [
+      {
+        role: "system",
+        content: "You summarize deterministic game-tool results for an NPC decision loop. Return exactly one concise natural-language sentence, maximum 40 words. State only the most decision-useful fact supported by the result. Do not invent hidden state, do not propose an action, and do not use markdown.",
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          tool_name: toolName,
+          tool_purpose: purpose,
+          result: sanitizeToolResult(result),
+        }),
+      },
+    ],
+  };
+
+  const response = await fetch(makeChatCompletionsUrl(args.llmBaseUrl), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "authorization": `Bearer ${args.llmApiKey}`,
+    },
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`LLM takeaway HTTP ${response.status} ${response.statusText}: ${text}`);
+  }
+
+  const body = await response.json();
+  const content = body?.choices?.[0]?.message?.content;
+  if (typeof content !== "string" || !content.trim()) {
+    throw new Error(`LLM takeaway response did not contain choices[0].message.content: ${JSON.stringify(body)}`);
+  }
+
+  return content.replace(/\s+/g, " ").trim().slice(0, 400);
 }
 
 function makeChatCompletionsUrl(baseUrl) {
@@ -449,31 +591,49 @@ async function main() {
   const init = await mcp.initialize();
   console.log(`[Agent] MCP initialized. Protocol=${init?.protocolVersion || "unknown"} Session=${mcp.sessionId}`);
 
-  const systemPrompt = buildSystemPrompt();
+  const systemPrompt = buildSystemPrompt(args.exposeStrategicTools);
   const history = [];
   let currentState = null;
   let executed = false;
   let finalResult = null;
   let confirmSucceeded = false;
+  let strategicContext = null;
 
   for (let stepIndex = 1; stepIndex <= args.maxSteps; ++stepIndex) {
     const toolsResult = await mcp.listTools();
-    const availableTools = filterInteractiveTools(toolsResult);
+    const interactiveTools = filterInteractiveTools(toolsResult);
+    const availableTools = filterAvailableTools(toolsResult, args.exposeStrategicTools);
     const allowedToolNames = new Set(availableTools.map((tool) => tool.name));
 
     if (availableTools.length <= 0) {
       throw new Error("No interactive UI tools are currently exposed by MCP.");
     }
 
-    console.log(`[Agent] Visible interactive tools: ${availableTools.map((tool) => tool.name).join(", ")}`);
+    console.log(`[Agent] Visible tools: ${availableTools.map((tool) => tool.name).join(", ")}`);
 
-    const userPrompt = buildUserPrompt(availableTools, history, currentState);
+    if (args.prefetchStrategicContext && !strategicContext && interactiveTools.some((tool) => tool.name === "terra.ui_begin_turn_review")) {
+      strategicContext = await collectStrategicContext(mcp, toolsResult);
+      console.log(`[Agent] Parallel strategic tools: ${strategicContext.parallel_tool_names.join(", ")}`);
+      console.log(`[Agent] Strategic snapshot: ${strategicContext.snapshot_key}`);
+    }
+
+    const userPrompt = buildUserPrompt(availableTools, history, currentState, strategicContext, args.exposeStrategicTools);
     const llmStep = await askLlmForStep(args, systemPrompt, userPrompt);
     validateLlmStep(llmStep, allowedToolNames);
 
     if (llmStep.kind === "final") {
       if (!confirmSucceeded) {
-        throw new Error("LLM returned kind=final before terra.ui_confirm_action succeeded.");
+        const rejection = "A turn is not complete until terra.ui_confirm_action succeeds. Return a currently visible tool_call instead of kind=final.";
+        console.log(`[Agent] Rejected premature final: ${rejection}`);
+        history.push({
+          step: stepIndex,
+          event: "supervisor_rejection",
+          reason: rejection,
+          llm_final: llmStep,
+          visible_tools: availableTools.map((tool) => tool.name),
+          interaction_state_after: currentState,
+        });
+        continue;
       }
       console.log(`[Agent] Turn Goal: ${llmStep.turn_goal}`);
       console.log(`[Agent] Final Summary: ${llmStep.decision_summary}`);
@@ -495,6 +655,13 @@ async function main() {
     console.log(`[Agent] Tool result ${llmStep.tool_name}:`);
     console.log(JSON.stringify(toolResult, null, 2));
 
+    const toolTakeaway = args.llmToolTakeaways
+      ? await askLlmForToolTakeaway(args, llmStep.tool_name, llmStep.purpose, toolResult)
+      : "";
+    if (toolTakeaway) {
+      console.log(`[Agent] LLM takeaway: ${toolTakeaway}`);
+    }
+
     currentState = extractInteractionState(toolResult, currentState);
     history.push({
       step: stepIndex,
@@ -508,6 +675,7 @@ async function main() {
       purpose: llmStep.purpose,
       arguments: llmStep.arguments,
       result: sanitizeToolResult(toolResult),
+      llm_tool_takeaway: toolTakeaway || undefined,
       interaction_state_after: currentState,
     });
 

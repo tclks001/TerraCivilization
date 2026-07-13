@@ -104,6 +104,79 @@ public:
         TArray<FString> SummaryTags;
     };
 
+    struct FStrategicSnapshot
+    {
+        int32 TurnIndex = INDEX_NONE;
+        int32 CurrentFactionId = INDEX_NONE;
+        ETerraGameplayInteractionPhase InteractionPhase = ETerraGameplayInteractionPhase::Idle;
+    };
+
+    struct FFactionStrategicSummary
+    {
+        int32 TotalAlivePieceCount = 0;
+        int32 CommanderCount = 0;
+        int32 ArcherCount = 0;
+        int32 CavalryCount = 0;
+        int32 InfantryCount = 0;
+        int32 MovablePieceCount = 0;
+        int32 NearestEnemyDistance = INDEX_NONE;
+        TArray<int32> FrontlinePieceIds;
+        TArray<int32> IsolatedMovablePieceIds;
+    };
+
+    struct FFrontlineContact
+    {
+        int32 FriendlyPieceId = INDEX_NONE;
+        int32 FriendlyCellId = INDEX_NONE;
+        int32 EnemyPieceId = INDEX_NONE;
+        int32 EnemyFactionId = INDEX_NONE;
+        int32 EnemyCellId = INDEX_NONE;
+        int32 Distance = INDEX_NONE;
+        ETerraGameplayTerrainType FriendlyTerrainType = ETerraGameplayTerrainType::Plain;
+        int32 FriendlyAdjacentSupportCount = 0;
+    };
+
+    struct FTerrainControlPoint
+    {
+        int32 CellId = INDEX_NONE;
+        ETerraGameplayTerrainType TerrainType = ETerraGameplayTerrainType::Plain;
+        int32 NearestFriendlyDistance = INDEX_NONE;
+        int32 NearestEnemyDistance = INDEX_NONE;
+        FString ControlStatus;
+        TArray<int32> NearbyFriendlyPieceIds;
+        TArray<int32> NearbyEnemyPieceIds;
+    };
+
+    struct FEnemyPressureSummary
+    {
+        int32 EnemyFactionId = INDEX_NONE;
+        int32 NearestContactDistance = INDEX_NONE;
+        int32 FrontlineContactCount = 0;
+        int32 PressurePriority = 0;
+        TArray<int32> RepresentativeEnemyPieceIds;
+        TArray<int32> RepresentativeFriendlyPieceIds;
+    };
+
+    struct FStrategicOption
+    {
+        FString Intent;
+        int32 Priority = 0;
+        TArray<FString> EvidenceTags;
+        TArray<int32> KeyPieceIds;
+        TArray<int32> KeyCellIds;
+        int32 TargetEnemyFactionId = INDEX_NONE;
+    };
+
+    struct FCurrentFactionStrategicSnapshot
+    {
+        FStrategicSnapshot Snapshot;
+        FFactionStrategicSummary FactionSummary;
+        TArray<FFrontlineContact> FrontlineContacts;
+        TArray<FTerrainControlPoint> TerrainControlPoints;
+        TArray<FEnemyPressureSummary> EnemyPressures;
+        TArray<FStrategicOption> StrategicOptions;
+    };
+
     struct FInteractionUndoSnapshot
     {
         TArray<FTerraGameplayPieceState> Pieces;
@@ -157,6 +230,7 @@ public:
     bool FindNearestEnemyDistance(int32 CellId, int32 PerspectiveFactionId, int32& OutDistance) const;
     bool QueryCurrentFactionPieceTurnSurvey(int32 PieceId, FPieceTurnSurvey& OutSurvey) const;
     bool BuildLocalTacticalSituationCard(const FLegalActionQuery& Action, FLocalTacticalSituationCard& OutCard) const;
+    bool BuildCurrentFactionStrategicSnapshot(FCurrentFactionStrategicSnapshot& OutSnapshot) const;
     const TArray<FTerraGameplayPieceState>& GetPieces() const { return Pieces; }
     const TArray<FTerraGameplayFactionState>& GetFactions() const { return Factions; }
     const TArray<int32>& GetCellToPieceId() const { return CellToPieceId; }
@@ -191,6 +265,7 @@ private:
     void CollectAdjacentPieceIdsForBoard_(int32 CellId, int32 PerspectiveFactionId, const TArray<int32>& HypotheticalCellToPieceId, TArray<int32>& OutFriendlyPieceIds, TArray<int32>& OutEnemyPieceIds) const;
     bool FindNearestEnemyDistanceForBoard_(int32 CellId, int32 PerspectiveFactionId, const TArray<int32>& HypotheticalCellToPieceId, int32& OutDistance) const;
     void BuildHypotheticalBoardForAction_(const FLegalActionQuery& Action, TArray<int32>& OutCellToPieceId) const;
+    void FindNearestPieceIdsForFactions_(int32 StartCellId, const TSet<int32>& TargetFactionIds, int32& OutDistance, TArray<int32>& OutPieceIds) const;
     void CollectCaptureEntriesAfterHypotheticalMove_(const FTerraGameplayPieceState& Piece, int32 TargetCellId, TMap<int32, FTerraGameplayCaptureEntry>& OutCaptureEntriesByCellId) const;
     void CollectCaptureEntriesAfterHypotheticalMoveForFaction_(const FTerraGameplayPieceState& Piece, int32 TargetCellId, int32 ActingFactionId, TMap<int32, FTerraGameplayCaptureEntry>& OutCaptureEntriesByCellId) const;
     void CollectCaptureCellsAfterHypotheticalMove_(const FTerraGameplayPieceState& Piece, int32 TargetCellId, TSet<int32>& OutCaptureCellIds) const;

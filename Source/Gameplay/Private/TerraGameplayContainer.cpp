@@ -665,6 +665,324 @@ bool FTerraGameplayContainer::BuildLocalTacticalSituationCard(const FLegalAction
     return true;
 }
 
+void FTerraGameplayContainer::FindNearestPieceIdsForFactions_(int32 StartCellId, const TSet<int32>& TargetFactionIds, int32& OutDistance, TArray<int32>& OutPieceIds) const
+{
+    OutDistance = INDEX_NONE;
+    OutPieceIds.Reset();
+    if (!IsValidCellId_(StartCellId) || TargetFactionIds.Num() == 0)
+    {
+        return;
+    }
+
+    TArray<int32> Distances;
+    Distances.Init(INDEX_NONE, Cells.Num());
+    TArray<int32> Queue;
+    Queue.Add(StartCellId);
+    Distances[StartCellId] = 0;
+    for (int32 QueueIndex = 0; QueueIndex < Queue.Num(); ++QueueIndex)
+    {
+        const int32 CurrentCellId = Queue[QueueIndex];
+        const int32 CurrentDistance = Distances[CurrentCellId];
+        if (OutDistance != INDEX_NONE && CurrentDistance > OutDistance)
+        {
+            break;
+        }
+
+        const FTerraGameplayPieceState* Piece = GetPiece_(GetPieceIdAtCell_(CurrentCellId));
+        if (Piece && Piece->bAlive && TargetFactionIds.Contains(Piece->OwnerFactionId))
+        {
+            OutDistance = CurrentDistance;
+            OutPieceIds.AddUnique(Piece->PieceId);
+            continue;
+        }
+        if (OutDistance != INDEX_NONE)
+        {
+            continue;
+        }
+
+        for (int32 I = 0; I < 6; ++I)
+        {
+            const int32 NeighborCellId = Cells[CurrentCellId].NeighborCellIds[I];
+            if (!IsValidCellId_(NeighborCellId) || Distances[NeighborCellId] != INDEX_NONE)
+            {
+                continue;
+            }
+            Distances[NeighborCellId] = CurrentDistance + 1;
+            Queue.Add(NeighborCellId);
+        }
+    }
+    OutPieceIds.Sort();
+}
+
+bool FTerraGameplayContainer::BuildCurrentFactionStrategicSnapshot(FCurrentFactionStrategicSnapshot& OutSnapshot) const
+{
+    OutSnapshot = FCurrentFactionStrategicSnapshot();
+    if (!bInitialized || bMatchEnded || CurrentFactionId == INDEX_NONE)
+    {
+        return false;
+    }
+
+    OutSnapshot.Snapshot.TurnIndex = TurnIndex;
+    OutSnapshot.Snapshot.CurrentFactionId = CurrentFactionId;
+    OutSnapshot.Snapshot.InteractionPhase = InteractionPhase;
+
+    TSet<int32> FriendlyFactionIds;
+    FriendlyFactionIds.Add(CurrentFactionId);
+    TSet<int32> EnemyFactionIds;
+    for (const FTerraGameplayFactionState& Faction : Factions)
+    {
+        if (Faction.bAlive && Faction.FactionId != CurrentFactionId)
+        {
+            EnemyFactionIds.Add(Faction.FactionId);
+        }
+    }
+
+    TArray<int32> MovablePieceIds;
+    TMap<int32, int32> EnemyDistanceByPieceId;
+    TMap<int32, TArray<int32>> NearestEnemyPieceIdsByPieceId;
+    for (const FTerraGameplayPieceState& Piece : Pieces)
+    {
+        if (!Piece.bAlive || Piece.OwnerFactionId != CurrentFactionId)
+        {
+            continue;
+        }
+
+        FFactionStrategicSummary& Summary = OutSnapshot.FactionSummary;
+        Summary.TotalAlivePieceCount++;
+        switch (Piece.PieceType)
+        {
+        case ETerraGameplayPieceType::Commander: Summary.CommanderCount++; break;
+        case ETerraGameplayPieceType::Archer: Summary.ArcherCount++; break;
+        case ETerraGameplayPieceType::Cavalry: Summary.CavalryCount++; break;
+        case ETerraGameplayPieceType::Infantry: Summary.InfantryCount++; break;
+        default: break;
+        }
+
+        if (!IsPieceSelectableForFaction_(Piece, CurrentFactionId))
+        {
+            continue;
+        }
+        Summary.MovablePieceCount++;
+        MovablePieceIds.Add(Piece.PieceId);
+
+        int32 Distance = INDEX_NONE;
+        TArray<int32> EnemyPieceIds;
+        FindNearestPieceIdsForFactions_(Piece.CellId, EnemyFactionIds, Distance, EnemyPieceIds);
+        EnemyDistanceByPieceId.Add(Piece.PieceId, Distance);
+        NearestEnemyPieceIdsByPieceId.Add(Piece.PieceId, EnemyPieceIds);
+        if (Distance != INDEX_NONE && (Summary.NearestEnemyDistance == INDEX_NONE || Distance < Summary.NearestEnemyDistance))
+        {
+            Summary.NearestEnemyDistance = Distance;
+        }
+
+        TArray<int32> NearbyFriendlyPieceIds;
+        TArray<int32> NearbyEnemyPieceIds;
+        CollectAdjacentPieceIds(Piece.CellId, CurrentFactionId, NearbyFriendlyPieceIds, NearbyEnemyPieceIds);
+        if (NearbyFriendlyPieceIds.Num() == 0 && Distance != INDEX_NONE && Distance <= 3)
+        {
+            Summary.IsolatedMovablePieceIds.Add(Piece.PieceId);
+        }
+    }
+
+    const int32 FrontlineDistance = OutSnapshot.FactionSummary.NearestEnemyDistance == INDEX_NONE
+        ? INDEX_NONE
+        : OutSnapshot.FactionSummary.NearestEnemyDistance + 1;
+    for (const int32 FriendlyPieceId : MovablePieceIds)
+    {
+        const int32* DistancePtr = EnemyDistanceByPieceId.Find(FriendlyPieceId);
+        if (!DistancePtr || *DistancePtr == INDEX_NONE || *DistancePtr > FrontlineDistance)
+        {
+            continue;
+        }
+        OutSnapshot.FactionSummary.FrontlinePieceIds.Add(FriendlyPieceId);
+        const FTerraGameplayPieceState* FriendlyPiece = GetPiece_(FriendlyPieceId);
+        const TArray<int32>* EnemyPieceIds = NearestEnemyPieceIdsByPieceId.Find(FriendlyPieceId);
+        if (!FriendlyPiece || !EnemyPieceIds)
+        {
+            continue;
+        }
+
+        TArray<int32> NearbyFriendlyPieceIds;
+        TArray<int32> NearbyEnemyPieceIds;
+        CollectAdjacentPieceIds(FriendlyPiece->CellId, CurrentFactionId, NearbyFriendlyPieceIds, NearbyEnemyPieceIds);
+        for (const int32 EnemyPieceId : *EnemyPieceIds)
+        {
+            const FTerraGameplayPieceState* EnemyPiece = GetPiece_(EnemyPieceId);
+            if (!EnemyPiece || !EnemyPiece->bAlive)
+            {
+                continue;
+            }
+            FFrontlineContact& Contact = OutSnapshot.FrontlineContacts.AddDefaulted_GetRef();
+            Contact.FriendlyPieceId = FriendlyPieceId;
+            Contact.FriendlyCellId = FriendlyPiece->CellId;
+            Contact.EnemyPieceId = EnemyPieceId;
+            Contact.EnemyFactionId = EnemyPiece->OwnerFactionId;
+            Contact.EnemyCellId = EnemyPiece->CellId;
+            Contact.Distance = *DistancePtr;
+            Contact.FriendlyTerrainType = Cells[FriendlyPiece->CellId].TerrainType;
+            Contact.FriendlyAdjacentSupportCount = NearbyFriendlyPieceIds.Num();
+        }
+    }
+    OutSnapshot.FactionSummary.FrontlinePieceIds.Sort();
+    OutSnapshot.FactionSummary.IsolatedMovablePieceIds.Sort();
+    OutSnapshot.FrontlineContacts.Sort([](const FFrontlineContact& A, const FFrontlineContact& B)
+    {
+        if (A.Distance != B.Distance) return A.Distance < B.Distance;
+        if (A.FriendlyPieceId != B.FriendlyPieceId) return A.FriendlyPieceId < B.FriendlyPieceId;
+        return A.EnemyPieceId < B.EnemyPieceId;
+    });
+
+    for (const FTerraGameplayCellState& Cell : Cells)
+    {
+        if (Cell.TerrainType == ETerraGameplayTerrainType::Plain)
+        {
+            continue;
+        }
+        FTerrainControlPoint& Point = OutSnapshot.TerrainControlPoints.AddDefaulted_GetRef();
+        Point.CellId = Cell.CellId;
+        Point.TerrainType = Cell.TerrainType;
+        TArray<int32> IgnoredFriendlyIds;
+        TArray<int32> IgnoredEnemyIds;
+        FindNearestPieceIdsForFactions_(Cell.CellId, FriendlyFactionIds, Point.NearestFriendlyDistance, IgnoredFriendlyIds);
+        FindNearestPieceIdsForFactions_(Cell.CellId, EnemyFactionIds, Point.NearestEnemyDistance, IgnoredEnemyIds);
+        CollectAdjacentPieceIds(Cell.CellId, CurrentFactionId, Point.NearbyFriendlyPieceIds, Point.NearbyEnemyPieceIds);
+        if (Point.NearestFriendlyDistance == INDEX_NONE && Point.NearestEnemyDistance == INDEX_NONE)
+        {
+            Point.ControlStatus = TEXT("unclaimed");
+        }
+        else if (Point.NearestEnemyDistance == INDEX_NONE || (Point.NearestFriendlyDistance != INDEX_NONE && Point.NearestFriendlyDistance < Point.NearestEnemyDistance))
+        {
+            Point.ControlStatus = TEXT("friendly_closer");
+        }
+        else if (Point.NearestFriendlyDistance == INDEX_NONE || Point.NearestEnemyDistance < Point.NearestFriendlyDistance)
+        {
+            Point.ControlStatus = TEXT("enemy_closer");
+        }
+        else
+        {
+            Point.ControlStatus = TEXT("contested");
+        }
+    }
+    OutSnapshot.TerrainControlPoints.Sort([](const FTerrainControlPoint& A, const FTerrainControlPoint& B)
+    {
+        const int32 RankA = A.ControlStatus == TEXT("contested") ? 0 : A.ControlStatus == TEXT("enemy_closer") ? 1 : 2;
+        const int32 RankB = B.ControlStatus == TEXT("contested") ? 0 : B.ControlStatus == TEXT("enemy_closer") ? 1 : 2;
+        if (RankA != RankB) return RankA < RankB;
+        const int32 DistanceA = FMath::Min(A.NearestFriendlyDistance == INDEX_NONE ? MAX_int32 : A.NearestFriendlyDistance, A.NearestEnemyDistance == INDEX_NONE ? MAX_int32 : A.NearestEnemyDistance);
+        const int32 DistanceB = FMath::Min(B.NearestFriendlyDistance == INDEX_NONE ? MAX_int32 : B.NearestFriendlyDistance, B.NearestEnemyDistance == INDEX_NONE ? MAX_int32 : B.NearestEnemyDistance);
+        if (DistanceA != DistanceB) return DistanceA < DistanceB;
+        return A.CellId < B.CellId;
+    });
+    if (OutSnapshot.TerrainControlPoints.Num() > 12)
+    {
+        OutSnapshot.TerrainControlPoints.SetNum(12);
+    }
+
+    for (const FTerraGameplayFactionState& Faction : Factions)
+    {
+        if (!Faction.bAlive || Faction.FactionId == CurrentFactionId)
+        {
+            continue;
+        }
+        FEnemyPressureSummary& Pressure = OutSnapshot.EnemyPressures.AddDefaulted_GetRef();
+        Pressure.EnemyFactionId = Faction.FactionId;
+        for (const FFrontlineContact& Contact : OutSnapshot.FrontlineContacts)
+        {
+            if (Contact.EnemyFactionId != Faction.FactionId)
+            {
+                continue;
+            }
+            Pressure.FrontlineContactCount++;
+            Pressure.RepresentativeFriendlyPieceIds.AddUnique(Contact.FriendlyPieceId);
+            Pressure.RepresentativeEnemyPieceIds.AddUnique(Contact.EnemyPieceId);
+            if (Pressure.NearestContactDistance == INDEX_NONE || Contact.Distance < Pressure.NearestContactDistance)
+            {
+                Pressure.NearestContactDistance = Contact.Distance;
+            }
+        }
+        if (Pressure.NearestContactDistance == INDEX_NONE)
+        {
+            TSet<int32> SpecificEnemyFactionIds;
+            SpecificEnemyFactionIds.Add(Faction.FactionId);
+            for (const int32 FriendlyPieceId : MovablePieceIds)
+            {
+                const FTerraGameplayPieceState* FriendlyPiece = GetPiece_(FriendlyPieceId);
+                int32 Distance = INDEX_NONE;
+                TArray<int32> EnemyPieceIds;
+                if (!FriendlyPiece)
+                {
+                    continue;
+                }
+                FindNearestPieceIdsForFactions_(FriendlyPiece->CellId, SpecificEnemyFactionIds, Distance, EnemyPieceIds);
+                if (Distance != INDEX_NONE && (Pressure.NearestContactDistance == INDEX_NONE || Distance < Pressure.NearestContactDistance))
+                {
+                    Pressure.NearestContactDistance = Distance;
+                    Pressure.RepresentativeFriendlyPieceIds = { FriendlyPieceId };
+                    Pressure.RepresentativeEnemyPieceIds = EnemyPieceIds;
+                }
+            }
+        }
+        Pressure.PressurePriority = Pressure.NearestContactDistance == INDEX_NONE ? 0 : FMath::Max(0, 100 - 15 * Pressure.NearestContactDistance + 4 * Pressure.FrontlineContactCount);
+        Pressure.RepresentativeFriendlyPieceIds.Sort();
+        Pressure.RepresentativeEnemyPieceIds.Sort();
+    }
+    OutSnapshot.EnemyPressures.Sort([](const FEnemyPressureSummary& A, const FEnemyPressureSummary& B)
+    {
+        if (A.PressurePriority != B.PressurePriority) return A.PressurePriority > B.PressurePriority;
+        return A.EnemyFactionId < B.EnemyFactionId;
+    });
+
+    if (OutSnapshot.FrontlineContacts.Num() > 0)
+    {
+        const FFrontlineContact& Contact = OutSnapshot.FrontlineContacts[0];
+        FStrategicOption& Option = OutSnapshot.StrategicOptions.AddDefaulted_GetRef();
+        Option.Intent = TEXT("advance_contact");
+        Option.Priority = FMath::Max(0, 70 - 8 * Contact.Distance + 3 * Contact.FriendlyAdjacentSupportCount);
+        Option.EvidenceTags = { FString::Printf(TEXT("nearest_enemy_distance_%d"), Contact.Distance), TEXT("movable_frontline_piece") };
+        Option.KeyPieceIds = { Contact.FriendlyPieceId };
+        Option.KeyCellIds = { Contact.FriendlyCellId, Contact.EnemyCellId };
+        Option.TargetEnemyFactionId = Contact.EnemyFactionId;
+    }
+    for (const FTerrainControlPoint& Point : OutSnapshot.TerrainControlPoints)
+    {
+        if (Point.ControlStatus == TEXT("contested"))
+        {
+            FStrategicOption& Option = OutSnapshot.StrategicOptions.AddDefaulted_GetRef();
+            Option.Intent = TEXT("contest_terrain");
+            Option.Priority = Point.TerrainType == ETerraGameplayTerrainType::Forest ? 60 : 54;
+            Option.EvidenceTags = { TEXT("contested_terrain"), Point.TerrainType == ETerraGameplayTerrainType::Forest ? TEXT("forest_cover_value") : TEXT("mountain_mobility_value") };
+            Option.KeyCellIds = { Point.CellId };
+            break;
+        }
+    }
+    if (OutSnapshot.FactionSummary.IsolatedMovablePieceIds.Num() > 0)
+    {
+        const int32 PieceId = OutSnapshot.FactionSummary.IsolatedMovablePieceIds[0];
+        FStrategicOption& Option = OutSnapshot.StrategicOptions.AddDefaulted_GetRef();
+        Option.Intent = TEXT("preserve_exposed_unit");
+        Option.Priority = 62;
+        Option.EvidenceTags = { TEXT("isolated_movable_piece"), TEXT("enemy_within_three_cells") };
+        Option.KeyPieceIds = { PieceId };
+        if (const FTerraGameplayPieceState* Piece = GetPiece_(PieceId))
+        {
+            Option.KeyCellIds = { Piece->CellId };
+        }
+    }
+    if (OutSnapshot.StrategicOptions.Num() == 0)
+    {
+        FStrategicOption& Option = OutSnapshot.StrategicOptions.AddDefaulted_GetRef();
+        Option.Intent = TEXT("observe_and_develop");
+        Option.Priority = 10;
+        Option.EvidenceTags = { TEXT("no_immediate_frontline_or_contested_terrain") };
+    }
+    OutSnapshot.StrategicOptions.Sort([](const FStrategicOption& A, const FStrategicOption& B)
+    {
+        if (A.Priority != B.Priority) return A.Priority > B.Priority;
+        return A.Intent < B.Intent;
+    });
+    return true;
+}
+
 bool FTerraGameplayContainer::CollectCurrentFactionLegalActions(TArray<FLegalActionQuery>& OutActions) const
 {
     OutActions.Reset();
