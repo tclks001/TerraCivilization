@@ -223,6 +223,121 @@ namespace
         }
     }
 
+    TSharedRef<FJsonObject> MakeLocalTacticalCardObject_(const FTerraGameplayContainer::FLocalTacticalSituationCard& Card)
+    {
+        TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
+        Object->SetNumberField(TEXT("schema_version"), Card.SchemaVersion);
+        Object->SetNumberField(TEXT("piece_id"), Card.PieceId);
+        Object->SetStringField(TEXT("piece_type"), StaticEnum<ETerraGameplayPieceType>()->GetNameStringByValue(static_cast<int64>(Card.PieceType)));
+        Object->SetNumberField(TEXT("from_cell_id"), Card.FromCellId);
+        Object->SetNumberField(TEXT("to_cell_id"), Card.ToCellId);
+        Object->SetBoolField(TEXT("is_jump"), Card.bIsJump);
+        Object->SetNumberField(TEXT("capture_count"), Card.CaptureCount);
+
+        auto MakeCellInfo = [](ETerraGameplayTerrainType TerrainType, const TArray<int32>& FriendlyPieceIds, const TArray<int32>& EnemyPieceIds, int32 NearestEnemyDistance)
+        {
+            TSharedRef<FJsonObject> CellObject = MakeShared<FJsonObject>();
+            CellObject->SetArrayField(TEXT("terrain_tags"), MakeStringArray_({ TerrainTypeToTag_(TerrainType) }));
+            CellObject->SetArrayField(TEXT("nearby_friendly_piece_ids"), MakeNumberArray_(FriendlyPieceIds));
+            CellObject->SetArrayField(TEXT("nearby_enemy_piece_ids"), MakeNumberArray_(EnemyPieceIds));
+            if (NearestEnemyDistance != INDEX_NONE)
+            {
+                CellObject->SetNumberField(TEXT("nearest_enemy_distance"), NearestEnemyDistance);
+            }
+            else
+            {
+                CellObject->SetField(TEXT("nearest_enemy_distance"), MakeShared<FJsonValueNull>());
+            }
+            return CellObject;
+        };
+
+        Object->SetObjectField(TEXT("from"), MakeCellInfo(Card.FromTerrainType, Card.FromNearbyFriendlyPieceIds, Card.FromNearbyEnemyPieceIds, Card.NearestEnemyDistanceFrom));
+        TSharedRef<FJsonObject> ToObject = MakeCellInfo(Card.ToTerrainType, Card.ToNearbyFriendlyPieceIds, Card.ToNearbyEnemyPieceIds, Card.NearestEnemyDistanceTo);
+        ToObject->SetBoolField(TEXT("destination_threatened"), Card.bDestinationThreatened);
+        ToObject->SetNumberField(TEXT("threat_count"), Card.ThreatCount);
+        ToObject->SetArrayField(TEXT("threatening_piece_ids"), MakeNumberArray_(Card.ThreateningPieceIds));
+        Object->SetObjectField(TEXT("to"), ToObject);
+
+        if (Card.NearestEnemyDistanceFrom != INDEX_NONE && Card.NearestEnemyDistanceTo != INDEX_NONE)
+        {
+            Object->SetNumberField(TEXT("approach_to_enemy"), Card.NearestEnemyDistanceFrom - Card.NearestEnemyDistanceTo);
+        }
+        else
+        {
+            Object->SetField(TEXT("approach_to_enemy"), MakeShared<FJsonValueNull>());
+        }
+
+        TSharedRef<FJsonObject> TopologyObject = MakeShared<FJsonObject>();
+        TopologyObject->SetNumberField(TEXT("to_cell_neighbor_count"), Card.ToCellNeighborCount);
+        TopologyObject->SetArrayField(TEXT("approach_cell_ids"), MakeNumberArray_(Card.ApproachCellIds));
+        TopologyObject->SetArrayField(TEXT("forward_neighbor_cell_ids"), MakeNumberArray_(Card.ForwardNeighborCellIds));
+        TopologyObject->SetNumberField(TEXT("forward_empty_cell_count"), Card.ForwardEmptyCellCount);
+        TopologyObject->SetArrayField(TEXT("forward_friendly_piece_ids"), MakeNumberArray_(Card.ForwardFriendlyPieceIds));
+        TopologyObject->SetArrayField(TEXT("forward_enemy_piece_ids"), MakeNumberArray_(Card.ForwardEnemyPieceIds));
+        TSharedRef<FJsonObject> RingOneObject = MakeShared<FJsonObject>();
+        RingOneObject->SetNumberField(TEXT("cell_count"), Card.RingOneCellCount);
+        RingOneObject->SetNumberField(TEXT("forest_cell_count"), Card.RingOneForestCellCount);
+        RingOneObject->SetNumberField(TEXT("mountain_cell_count"), Card.RingOneMountainCellCount);
+        RingOneObject->SetNumberField(TEXT("friendly_piece_count"), Card.RingOneFriendlyPieceCount);
+        RingOneObject->SetNumberField(TEXT("enemy_piece_count"), Card.RingOneEnemyPieceCount);
+        TopologyObject->SetObjectField(TEXT("ring_1"), RingOneObject);
+        TSharedRef<FJsonObject> RingTwoObject = MakeShared<FJsonObject>();
+        RingTwoObject->SetNumberField(TEXT("cell_count"), Card.RingTwoCellCount);
+        RingTwoObject->SetNumberField(TEXT("forest_cell_count"), Card.RingTwoForestCellCount);
+        RingTwoObject->SetNumberField(TEXT("mountain_cell_count"), Card.RingTwoMountainCellCount);
+        RingTwoObject->SetNumberField(TEXT("friendly_piece_count"), Card.RingTwoFriendlyPieceCount);
+        RingTwoObject->SetNumberField(TEXT("enemy_piece_count"), Card.RingTwoEnemyPieceCount);
+        TopologyObject->SetObjectField(TEXT("ring_2"), RingTwoObject);
+        Object->SetObjectField(TEXT("topology"), TopologyObject);
+
+        TSharedRef<FJsonObject> MobilityObject = MakeShared<FJsonObject>();
+        MobilityObject->SetNumberField(TEXT("ordinary_target_count_after_move"), Card.OrdinaryTargetCountAfterMove);
+        MobilityObject->SetNumberField(TEXT("jump_target_count_after_move"), Card.JumpTargetCountAfterMove);
+        MobilityObject->SetNumberField(TEXT("reachable_endpoint_count_before_move"), Card.ReachableEndpointCountBeforeMove);
+        MobilityObject->SetNumberField(TEXT("reachable_endpoint_count_after_move"), Card.ReachableEndpointCountAfterMove);
+        MobilityObject->SetNumberField(TEXT("mobility_delta_reachable_endpoints"), Card.ReachableEndpointCountAfterMove - Card.ReachableEndpointCountBeforeMove);
+        MobilityObject->SetNumberField(TEXT("forward_enterable_cell_count"), Card.ForwardEnterableCellCount);
+        MobilityObject->SetArrayField(TEXT("forward_blocked_by_mountain_cell_ids"), MakeNumberArray_(Card.ForwardBlockedByMountainCellIds));
+        Object->SetObjectField(TEXT("mobility"), MobilityObject);
+
+        TSharedRef<FJsonObject> FriendlySynergyObject = MakeShared<FJsonObject>();
+        FriendlySynergyObject->SetArrayField(TEXT("adjacent_friendly_piece_ids_after_move"), MakeNumberArray_(Card.ToNearbyFriendlyPieceIds));
+        FriendlySynergyObject->SetNumberField(TEXT("support_delta"), Card.SupportDelta);
+        FriendlySynergyObject->SetArrayField(TEXT("moved_piece_can_be_jump_anchor_for_friendly_piece_ids"), MakeNumberArray_(Card.MovedPieceJumpAnchorFriendlyPieceIds));
+        Object->SetObjectField(TEXT("friendly_synergy"), FriendlySynergyObject);
+
+        TSharedRef<FJsonObject> EnemyInteractionObject = MakeShared<FJsonObject>();
+        EnemyInteractionObject->SetBoolField(TEXT("enemy_response_threatens_moved_piece"), Card.bEnemyResponseThreatensMovedPiece);
+        EnemyInteractionObject->SetArrayField(TEXT("enemy_response_threatening_piece_ids"), MakeNumberArray_(Card.EnemyResponseThreateningPieceIds));
+        EnemyInteractionObject->SetArrayField(TEXT("enemy_archer_line_threatening_piece_ids"), MakeNumberArray_(Card.EnemyArcherLineThreateningPieceIds));
+        Object->SetObjectField(TEXT("enemy_interaction"), EnemyInteractionObject);
+        Object->SetArrayField(TEXT("summary_tags"), MakeStringArray_(Card.SummaryTags));
+        return Object;
+    }
+
+    void AddTacticalOverviewFields_(const FTerraGameplayContainer& GameplayContainer, int32 PieceId, int32 CellId, const TSharedRef<FJsonObject>& Object)
+    {
+        TSharedRef<FJsonObject> OverviewObject = MakeShared<FJsonObject>();
+        FTerraGameplayContainer::FPieceTurnSurvey Survey;
+        if (GameplayContainer.QueryCurrentFactionPieceTurnSurvey(PieceId, Survey))
+        {
+            OverviewObject->SetNumberField(TEXT("reachable_action_count"), Survey.ReachableActionCount);
+            OverviewObject->SetBoolField(TEXT("can_capture_now"), Survey.bCanCaptureNow);
+            OverviewObject->SetBoolField(TEXT("threatened_if_hold"), Survey.bThreatenedIfHold);
+        }
+        int32 NearestEnemyDistance = INDEX_NONE;
+        if (GameplayContainer.FindNearestEnemyDistance(CellId, GameplayContainer.GetCurrentFactionId(), NearestEnemyDistance))
+        {
+            OverviewObject->SetNumberField(TEXT("nearest_enemy_distance"), NearestEnemyDistance);
+        }
+        else
+        {
+            OverviewObject->SetField(TEXT("nearest_enemy_distance"), MakeShared<FJsonValueNull>());
+        }
+        OverviewObject->SetBoolField(TEXT("candidate_card_available"), true);
+        Object->SetObjectField(TEXT("tactical_overview"), OverviewObject);
+    }
+
     TSharedRef<FJsonObject> MakeExecutionResultObject_(const FTerraGameplayContainer::FValidatedActionExecutionResult& ExecutionResult)
     {
         TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
@@ -566,6 +681,7 @@ namespace
                     PieceObject->SetStringField(TEXT("piece_type"), StaticEnum<ETerraGameplayPieceType>()->GetNameStringByValue(static_cast<int64>(PieceStates[PieceId].PieceType)));
                     PieceObject->SetNumberField(TEXT("cell_id"), CellId);
                     BuildLocalInfoFields_(*GameplayContainer, GameplayContainer->GetCurrentFactionId(), CellId, PieceObject);
+                    AddTacticalOverviewFields_(*GameplayContainer, PieceId, CellId, PieceObject);
 
                     FTerraGameplayContainer::FPieceTurnSurvey Survey;
                     if (GameplayContainer->QueryCurrentFactionPieceTurnSurvey(PieceId, Survey))
@@ -648,6 +764,11 @@ namespace
                     MoveObject->SetNumberField(TEXT("threat_count"), Risk.ThreatCount);
                     BuildLocalInfoFields_(*GameplayContainer, GameplayContainer->GetCurrentFactionId(), Action.ToCellId, MoveObject);
                     AddNearestEnemyDistanceFields_(*GameplayContainer, GameplayContainer->GetCurrentFactionId(), Action.FromCellId, Action.ToCellId, MoveObject);
+                    FTerraGameplayContainer::FLocalTacticalSituationCard TacticalCard;
+                    if (GameplayContainer->BuildLocalTacticalSituationCard(Action, TacticalCard))
+                    {
+                        MoveObject->SetObjectField(TEXT("local_tactical_card"), MakeLocalTacticalCardObject_(TacticalCard));
+                    }
                     MoveOptions.Add(MakeShared<FJsonValueObject>(MoveObject));
                 }
                 Result->SetArrayField(TEXT("move_options"), MoveOptions);
@@ -681,11 +802,14 @@ namespace
             bool bHasCachedLegalAction = false;
             FTerraGameplayContainer::FActionRiskQuery CachedRisk;
             bool bHasCachedRisk = false;
+            FTerraGameplayContainer::FLocalTacticalSituationCard CachedTacticalCard;
+            bool bHasCachedTacticalCard = false;
             if (const FTerraGameplayContainer* GameplayContainerBeforePreview = FTerraNpcMcpGameplayBridge::GetGameplayContainer();
                 GameplayContainerBeforePreview && GameplayContainerBeforePreview->IsInitialized())
             {
                 bHasCachedLegalAction = GameplayContainerBeforePreview->GetSelectedPieceLegalAction(ToCellId, CachedLegalAction);
                 bHasCachedRisk = GameplayContainerBeforePreview->EvaluateCurrentFactionActionRisk(PieceId, ToCellId, CachedRisk);
+                bHasCachedTacticalCard = bHasCachedLegalAction && GameplayContainerBeforePreview->BuildLocalTacticalSituationCard(CachedLegalAction, CachedTacticalCard);
             }
 
             FTerraNpcMcpGameplayBridge::FUiReviewResult ReviewResult;
@@ -707,6 +831,17 @@ namespace
                     PreviewObject->SetNumberField(TEXT("threat_count"), bHasCachedRisk ? CachedRisk.ThreatCount : 0);
                     BuildLocalInfoFields_(*GameplayContainer, GameplayContainer->GetCurrentFactionId(), ToCellId, PreviewObject);
                     AddNearestEnemyDistanceFields_(*GameplayContainer, GameplayContainer->GetCurrentFactionId(), CachedLegalAction.FromCellId, CachedLegalAction.ToCellId, PreviewObject);
+                    if (bHasCachedTacticalCard)
+                    {
+                        TSharedRef<FJsonObject> TacticalCardObject = MakeLocalTacticalCardObject_(CachedTacticalCard);
+                        const TSharedPtr<FJsonObject>* MobilityObject = nullptr;
+                        if (TacticalCardObject->TryGetObjectField(TEXT("mobility"), MobilityObject) && MobilityObject && MobilityObject->IsValid())
+                        {
+                            (*MobilityObject)->SetBoolField(TEXT("can_continue_jump_now"), ReviewResult.InteractionState.ContinueJumpTargetCellIds.Num() > 0);
+                            (*MobilityObject)->SetArrayField(TEXT("continue_jump_target_cell_ids"), MakeNumberArray_(ReviewResult.InteractionState.ContinueJumpTargetCellIds));
+                        }
+                        PreviewObject->SetObjectField(TEXT("local_tactical_card"), TacticalCardObject);
+                    }
                     Result->SetObjectField(TEXT("preview"), PreviewObject);
                     Result->SetBoolField(TEXT("can_confirm_now"), ReviewResult.InteractionState.bCanConfirmNow);
                     Result->SetBoolField(TEXT("can_continue_jump"), ReviewResult.InteractionState.ContinueJumpTargetCellIds.Num() > 0);

@@ -51,6 +51,59 @@ public:
         TArray<int32> ThreateningPieceIds;
     };
 
+    struct FLocalTacticalSituationCard
+    {
+        int32 SchemaVersion = 1;
+        int32 PieceId = INDEX_NONE;
+        ETerraGameplayPieceType PieceType = ETerraGameplayPieceType::Infantry;
+        int32 FromCellId = INDEX_NONE;
+        int32 ToCellId = INDEX_NONE;
+        bool bIsJump = false;
+        int32 CaptureCount = 0;
+
+        ETerraGameplayTerrainType FromTerrainType = ETerraGameplayTerrainType::Plain;
+        ETerraGameplayTerrainType ToTerrainType = ETerraGameplayTerrainType::Plain;
+        TArray<int32> FromNearbyFriendlyPieceIds;
+        TArray<int32> FromNearbyEnemyPieceIds;
+        TArray<int32> ToNearbyFriendlyPieceIds;
+        TArray<int32> ToNearbyEnemyPieceIds;
+        int32 NearestEnemyDistanceFrom = INDEX_NONE;
+        int32 NearestEnemyDistanceTo = INDEX_NONE;
+        bool bDestinationThreatened = false;
+        int32 ThreatCount = 0;
+        TArray<int32> ThreateningPieceIds;
+
+        int32 ToCellNeighborCount = 0;
+        TArray<int32> ApproachCellIds;
+        TArray<int32> ForwardNeighborCellIds;
+        int32 ForwardEmptyCellCount = 0;
+        TArray<int32> ForwardFriendlyPieceIds;
+        TArray<int32> ForwardEnemyPieceIds;
+        int32 RingOneCellCount = 0;
+        int32 RingOneForestCellCount = 0;
+        int32 RingOneMountainCellCount = 0;
+        int32 RingOneFriendlyPieceCount = 0;
+        int32 RingOneEnemyPieceCount = 0;
+        int32 RingTwoCellCount = 0;
+        int32 RingTwoForestCellCount = 0;
+        int32 RingTwoMountainCellCount = 0;
+        int32 RingTwoFriendlyPieceCount = 0;
+        int32 RingTwoEnemyPieceCount = 0;
+
+        int32 OrdinaryTargetCountAfterMove = 0;
+        int32 JumpTargetCountAfterMove = 0;
+        int32 ReachableEndpointCountBeforeMove = 0;
+        int32 ReachableEndpointCountAfterMove = 0;
+        int32 ForwardEnterableCellCount = 0;
+        TArray<int32> ForwardBlockedByMountainCellIds;
+        TArray<int32> MovedPieceJumpAnchorFriendlyPieceIds;
+        int32 SupportDelta = 0;
+        bool bEnemyResponseThreatensMovedPiece = false;
+        TArray<int32> EnemyResponseThreateningPieceIds;
+        TArray<int32> EnemyArcherLineThreateningPieceIds;
+        TArray<FString> SummaryTags;
+    };
+
     struct FInteractionUndoSnapshot
     {
         TArray<FTerraGameplayPieceState> Pieces;
@@ -103,6 +156,7 @@ public:
     bool CollectAdjacentPieceIds(int32 CellId, int32 PerspectiveFactionId, TArray<int32>& OutFriendlyPieceIds, TArray<int32>& OutEnemyPieceIds) const;
     bool FindNearestEnemyDistance(int32 CellId, int32 PerspectiveFactionId, int32& OutDistance) const;
     bool QueryCurrentFactionPieceTurnSurvey(int32 PieceId, FPieceTurnSurvey& OutSurvey) const;
+    bool BuildLocalTacticalSituationCard(const FLegalActionQuery& Action, FLocalTacticalSituationCard& OutCard) const;
     const TArray<FTerraGameplayPieceState>& GetPieces() const { return Pieces; }
     const TArray<FTerraGameplayFactionState>& GetFactions() const { return Factions; }
     const TArray<int32>& GetCellToPieceId() const { return CellToPieceId; }
@@ -132,6 +186,11 @@ private:
     void CollectJumpTargets_(const FTerraGameplayPieceState& Piece, TSet<int32>& OutTargetCellIds) const;
     void CollectJumpTargetsForFaction_(const FTerraGameplayPieceState& Piece, int32 ActingFactionId, int32 BlockedReturnCellId, TSet<int32>& OutTargetCellIds) const;
     void CollectJumpTargetsForHypotheticalBoard_(const FTerraGameplayPieceState& Piece, int32 ActingFactionId, int32 CurrentCellId, int32 BlockedReturnCellId, const TArray<int32>& HypotheticalCellToPieceId, TSet<int32>& OutTargetCellIds) const;
+    void CollectOrdinaryMoveTargetsForHypotheticalBoard_(const FTerraGameplayPieceState& Piece, int32 ActingFactionId, const TArray<int32>& HypotheticalCellToPieceId, TSet<int32>& OutTargetCellIds) const;
+    void CollectReachableEndpointsForHypotheticalBoard_(const FTerraGameplayPieceState& Piece, int32 ActingFactionId, const TArray<int32>& HypotheticalCellToPieceId, TSet<int32>& OutEndpointCellIds, int32& OutOrdinaryTargetCount, int32& OutJumpTargetCount) const;
+    void CollectAdjacentPieceIdsForBoard_(int32 CellId, int32 PerspectiveFactionId, const TArray<int32>& HypotheticalCellToPieceId, TArray<int32>& OutFriendlyPieceIds, TArray<int32>& OutEnemyPieceIds) const;
+    bool FindNearestEnemyDistanceForBoard_(int32 CellId, int32 PerspectiveFactionId, const TArray<int32>& HypotheticalCellToPieceId, int32& OutDistance) const;
+    void BuildHypotheticalBoardForAction_(const FLegalActionQuery& Action, TArray<int32>& OutCellToPieceId) const;
     void CollectCaptureEntriesAfterHypotheticalMove_(const FTerraGameplayPieceState& Piece, int32 TargetCellId, TMap<int32, FTerraGameplayCaptureEntry>& OutCaptureEntriesByCellId) const;
     void CollectCaptureEntriesAfterHypotheticalMoveForFaction_(const FTerraGameplayPieceState& Piece, int32 TargetCellId, int32 ActingFactionId, TMap<int32, FTerraGameplayCaptureEntry>& OutCaptureEntriesByCellId) const;
     void CollectCaptureCellsAfterHypotheticalMove_(const FTerraGameplayPieceState& Piece, int32 TargetCellId, TSet<int32>& OutCaptureCellIds) const;

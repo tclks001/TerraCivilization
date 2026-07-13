@@ -1,7 +1,7 @@
 # L2 局部战术情报卡设计稿
 
 日期：2026-07-13  
-状态：设计完成，待 C++ 落地。
+状态：C++ 已落地并完成 Runtime MCP 确定性验收；LLM 回归测试待配置 API key。
 
 ## 目标
 
@@ -52,6 +52,23 @@ L3+：在 L2 情报卡上构建战略语义、两回合候选计划、阵营记�
 ```
 
 L2 不维护平行 Agent phase。每次 `ui_` 调用仍以 Gameplay 返回的 `interaction_state` 为唯一权威，Agent 只缓存该快照。
+
+## 本次实现范围（L2 v1）
+
+本次已在 `FTerraGameplayContainer::BuildLocalTacticalSituationCard` 中实现并通过 MCP 返回：
+
+```text
+行动前后 terrain、相邻敌我、最近敌人的 BFS 图距离和 approach_to_enemy。
+以 from -> to 最短图路径前驱格定义的 approach_cell_ids 与 forward neighbors。
+落点 ring_1 / ring_2 地形和敌我数量摘要。
+普通移动、首跳、多跳可达终点的 before/after 机动计数。
+骑兵前方山地阻断、前方可进入空格数。
+落点友军支援变化，以及 moved piece 是否实际新增友军跳跃目标。
+已有 Gameplay 风险查询提供的敌方回应威胁和弓兵威胁者 ID。
+aggressive_safe_probe、cavalry_forward_mountain_blocked、archer_forest_outpost、jump_chain_anchor 等可回溯标签。
+```
+
+本次暂未把设计中的 `friendly_followup_candidates`、`moved_piece_can_screen_for_*`、局部 group 敌方吃子总数和 `breaks_enemy_attack_path_for_piece_ids` 做成字段。这些需要进一步定义“下一回合友军可行动”和“攻击路径归因”的稳定口径，应作为 L2 v1.1 扩展，不能以邻接猜测替代。
 
 ## 核心模型：行动前后局部态势卡
 
@@ -129,11 +146,11 @@ L1 已存在的顶层 `terrain_tags`、`nearby_*`、`destination_threatened`、`
 
 ### 2. `topology`：以 action 方向定义的局部拓扑
 
-球面图没有一个天然、稳定的“左/右/前/后”。L2 不向 LLM 输出人为的屏幕方向，而以当前 action 的有向边 `from -> to` 定义“向前”：
+球面图没有一个天然、稳定的“左/右/前/后”。L2 不向 LLM 输出人为的屏幕方向，而以当前 action 的有向路径 `from -> to` 定义“向前”：
 
 ```text
-forward neighbor：to 的邻居，排除 from。
-return neighbor：from。
+approach cell：to 的邻居中、位于从 from 到 to 的最短图路径上的前驱格；普通移动时通常就是 from，跳跃时通常是被跨越的中间格。
+forward neighbor：to 的邻居，排除全部 approach cell。
 local ring 1 / 2：以 to 为中心的 BFS 图距离 1 / 2。
 ```
 
@@ -141,6 +158,7 @@ local ring 1 / 2：以 to 为中心的 BFS 图距离 1 / 2。
 {
   "topology": {
     "to_cell_neighbor_count": 6,
+    "approach_cell_ids": [117],
     "forward_neighbor_cell_ids": [119, 120, 121, 122, 123],
     "forward_empty_cell_count": 3,
     "forward_friendly_piece_ids": [7],
