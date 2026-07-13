@@ -374,6 +374,19 @@ public:
 private:
     APlanetTessellatedMesh* GetHost() const;
 
-    UPROPERTY(VisibleAnywhere, Category = "PlanetTopology|Tess|SimpleGameplay P1 Piece Presentation")
+    /**
+     * SimpleGameplay P1：运行时懒创建的表现管理器。
+     *
+     * 注意：这里**不再**使用 CreateDefaultSubobject 且**不再**用 VisibleAnywhere 暴露给
+     * 编辑器 Details 面板。原实现把一个 UActorComponent 子对象作为另一个 UActorComponent
+     * 的 default subobject 并挂到 Details 里，会触发 UnrealEditor_PropertyEditor 在展开
+     * 蓝图 CDO 时无限递归展开（EXCEPTION_STACK_OVERFLOW，一双击 BP 立刻崩溃）。
+     * 现改为 SyncPresentation 首次调用时 NewObject 懒创建，Transient 只在运行时存在，
+     * 不出现在 CDO / Details 面板，蓝图编辑器不再触发递归。
+     */
+    UPROPERTY(Transient)
     TObjectPtr<UTerraPiecePresentationManager> PiecePresentationManager;
+
+    /** SimpleGameplay P1：确保 PiecePresentationManager 存在（懒创建）。返回是否可用。 */
+    bool EnsurePiecePresentationManager_();
 };

@@ -73,12 +73,30 @@ namespace
 UPlanetPiecePresentationComponent::UPlanetPiecePresentationComponent()
 {
     PrimaryComponentTick.bCanEverTick = false;
-    PiecePresentationManager = CreateDefaultSubobject<UTerraPiecePresentationManager>(TEXT("PiecePresentationManager"));
+    // 注意：PiecePresentationManager 不再作为 default subobject 创建。
+    // 详见 PlanetPiecePresentationComponent.h 中 PiecePresentationManager 字段的说明：
+    // ActorComponent 作为另一个 ActorComponent 的 default subobject + Details 面板可见会
+    // 导致 UnrealEditor_PropertyEditor 在打开蓝图 CDO 时无限递归展开而 stack overflow。
+    // 改为在 SyncPresentation 首次调用（运行时）通过 NewObject 懒创建。
 }
 
 APlanetTessellatedMesh* UPlanetPiecePresentationComponent::GetHost() const
 {
     return Cast<APlanetTessellatedMesh>(GetOwner());
+}
+
+bool UPlanetPiecePresentationComponent::EnsurePiecePresentationManager_()
+{
+    if (PiecePresentationManager)
+    {
+        return true;
+    }
+
+    // 懒创建：Outer 设为本组件（保持对象层级合理），Transient 已在 UPROPERTY 声明。
+    // 使用 CreateDefaultSubobject 会在 CDO 上生成 subobject 并被 Details 面板递归展开，
+    // 因此这里改用 NewObject，仅在运行时实例上存在。
+    PiecePresentationManager = NewObject<UTerraPiecePresentationManager>(this, TEXT("PiecePresentationManager"));
+    return PiecePresentationManager != nullptr;
 }
 
 void UPlanetPiecePresentationComponent::SyncPresentation(
@@ -100,7 +118,14 @@ void UPlanetPiecePresentationComponent::SyncPresentation(
 
     UPlanetGameplayComponent* GameplayComp = Host->GetPlanetGameplayComponent();
     const FTerraGameplayContainer* Gameplay = GameplayComp ? GameplayComp->GetGameplayContainer() : nullptr;
-    if (!PiecePresentationManager || !Gameplay || !Gameplay->IsInitialized())
+    if (!Gameplay || !Gameplay->IsInitialized())
+    {
+        ClearPresentation();
+        return;
+    }
+
+    // 运行时懒创建 PiecePresentationManager（详见构造函数与头文件字段注释）。
+    if (!EnsurePiecePresentationManager_())
     {
         ClearPresentation();
         return;

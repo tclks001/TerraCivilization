@@ -120,6 +120,15 @@ APlanetTessellatedMesh::APlanetTessellatedMesh(FVTableHelper& Helper)
 void APlanetTessellatedMesh::OnConstruction(const FTransform& Transform)
 {
     Super::OnConstruction(Transform);
+
+    // Blueprint SCS previews construct temporary actors while PropertyEditor builds
+    // the component tree. Do not populate runtime HISM/Gameplay state in that path.
+    const UWorld* World = GetWorld();
+    if (IsTemplate() || (World && World->WorldType == EWorldType::EditorPreview))
+    {
+        return;
+    }
+
     RebuildAll_();
 }
 

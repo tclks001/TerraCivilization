@@ -312,34 +312,41 @@ public:
     TUniquePtr<FWorldGenerator> Generator;
 
     /** SimpleGameplay：平原瓦片 HISM 组件。 */
-    UPROPERTY(VisibleAnywhere, Category = "PlanetTopology|Tess|HISM Tiles")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|HISM Tiles",
+              meta = (AllowPrivateAccess = "true", NoEditInline))
     TObjectPtr<UHierarchicalInstancedStaticMeshComponent> PlainTileHISMComp;
 
     /** SimpleGameplay：森林瓦片 HISM 组件。 */
-    UPROPERTY(VisibleAnywhere, Category = "PlanetTopology|Tess|HISM Tiles")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|HISM Tiles",
+              meta = (AllowPrivateAccess = "true", NoEditInline))
     TObjectPtr<UHierarchicalInstancedStaticMeshComponent> ForestTileHISMComp;
 
     /** SimpleGameplay：山脉瓦片 HISM 组件。 */
-    UPROPERTY(VisibleAnywhere, Category = "PlanetTopology|Tess|HISM Tiles")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|HISM Tiles",
+              meta = (AllowPrivateAccess = "true", NoEditInline))
     TObjectPtr<UHierarchicalInstancedStaticMeshComponent> MountainTileHISMComp;
 
     /** HISM 瓦片渲染、实例索引、命中反查与 PerInstanceCustomData 高亮状态。 */
     FPlanetHISMTileRenderer HISMTileRenderer;
 
     /** SimpleGameplay Camera：独立相机组件，承载配置字段与镜头运行时状态。 */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|Camera", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|Camera",
+              meta = (AllowPrivateAccess = "true", NoEditInline))
     TObjectPtr<UPlanetCameraComponent> PlanetCameraComponent;
 
     /** SimpleGameplay Gameplay：独立玩法编排组件，承载回合/点击/Undo/NPC 执行等运行时状态。 */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|Gameplay", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|Gameplay",
+              meta = (AllowPrivateAccess = "true", NoEditInline))
     TObjectPtr<UPlanetGameplayComponent> PlanetGameplayComponent;
 
     /** SimpleGameplay HISM Interaction：独立 HISM 命中解析、高亮写入与 hover/click 交互组件。 */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|HISM Highlight", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|HISM Highlight",
+              meta = (AllowPrivateAccess = "true", NoEditInline))
     TObjectPtr<UPlanetHISMInteractionComponent> PlanetHISMInteractionComponent;
 
     /** SimpleGameplay Piece Presentation：独立棋子表现组件，承载配置字段与表现运行时状态。 */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|Piece Presentation", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|Piece Presentation",
+              meta = (AllowPrivateAccess = "true", NoEditInline))
     TObjectPtr<UPlanetPiecePresentationComponent> PlanetPiecePresentationComponent;
 
     //----------------------------------------------------------
