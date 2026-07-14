@@ -401,7 +401,10 @@ void ATerraPieceActor::PlayAttackAnimation(UAnimationAsset* AttackAnimation, flo
     if (IsMountedCavalry_())
     {
         ApplyMountedRiderSaddleTransform_();
-        const bool bMontagePlayed = PlayMountedRiderUpperBodyMontage_(CachedVisualConfig.RiderUpperBodyAttackMontage, StartOffsetSeconds);
+        UAnimMontage* AttackMontage = PieceType == ETerraGameplayPieceType::ArcherCavalry
+            ? CachedVisualConfig.ArcherCavalryUpperBodyAttackMontage.Get()
+            : CachedVisualConfig.RiderUpperBodyAttackMontage.Get();
+        const bool bMontagePlayed = PlayMountedRiderUpperBodyMontage_(AttackMontage, StartOffsetSeconds);
         if (!bMontagePlayed)
         {
             PlayAnimationOnMesh_(RiderMesh, AttackAnimation, false, StartOffsetSeconds, PlayRate);
@@ -472,7 +475,8 @@ void ATerraPieceActor::PlayDeathAnimation(UAnimationAsset* DeathAnimation, float
         {
             RiderMesh->SetPosition(FMath::Max(StartOffsetSeconds, 0.0f), false);
         }
-        PlayAnimationOnMesh_(HorseMesh, CachedVisualConfig.HorseDeathAnimation, false, 0.0f);
+        HorseMesh->SetHiddenInGame(true);
+        HorseMesh->SetVisibility(false);
     }
     else
     {
@@ -923,6 +927,16 @@ void ATerraPieceActor::ApplyWeaponAttachments_()
             CachedVisualConfig.ArcherBowRelativeRotation,
             CachedVisualConfig.ArcherBowUniformScale);
         break;
+    case ETerraGameplayPieceType::ArcherCavalry:
+        ConfigureWeaponComponent_(
+            WeaponPrimaryMesh,
+            RiderMesh,
+            CachedVisualConfig.ArcherBowMesh,
+            CachedVisualConfig.ArcherBowAttachName,
+            CachedVisualConfig.ArcherBowRelativeLocation,
+            CachedVisualConfig.ArcherBowRelativeRotation,
+            CachedVisualConfig.ArcherBowUniformScale);
+        break;
     case ETerraGameplayPieceType::Infantry:
         ConfigureWeaponComponent_(
             WeaponPrimaryMesh,
@@ -1250,5 +1264,6 @@ FQuat ATerraPieceActor::BuildPresentationOnlyMoveRotation_(const FVector& WorldP
 
 bool ATerraPieceActor::IsMountedCavalry_() const
 {
-    return PieceType == ETerraGameplayPieceType::Cavalry;
+    return PieceType == ETerraGameplayPieceType::Cavalry
+        || PieceType == ETerraGameplayPieceType::ArcherCavalry;
 }

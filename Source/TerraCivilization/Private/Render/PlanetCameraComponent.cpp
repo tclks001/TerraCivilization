@@ -385,7 +385,7 @@ float UPlanetCameraComponent::GetC6_5AttackAnimationDurationSeconds(
             / FMath::Max(PiecePresentation->P35CommanderAttackPlayRateScale, 0.001f);
     }
 
-    if (PieceType == ETerraGameplayPieceType::Archer)
+    if (PieceType == ETerraGameplayPieceType::Archer || PieceType == ETerraGameplayPieceType::ArcherCavalry)
     {
         return FMath::Max(PiecePresentation->P35ArcherAttackDurationSeconds, 0.001f)
             / FMath::Max(PiecePresentation->P35ArcherAttackPlayRateScale, 0.001f);

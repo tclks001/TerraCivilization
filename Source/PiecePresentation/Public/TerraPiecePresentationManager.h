@@ -9,6 +9,7 @@
 
 class ATerraPieceActor;
 class ATerraPieceProjectileActor;
+class ATerraEquipmentDropActor;
 
 UCLASS(ClassGroup = (Terra), meta = (BlueprintSpawnableComponent))
 class PIECEPRESENTATION_API UTerraPiecePresentationManager : public UActorComponent
@@ -22,7 +23,8 @@ public:
         const TArray<FTerraPiecePresentationSnapshot>& Snapshots,
         const FTerraPieceVisualConfig& VisualConfig,
         const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents = TArray<FTerraPiecePresentationMoveEvent>(),
-        const TArray<FTerraPiecePresentationCaptureEvent>& CaptureEvents = TArray<FTerraPiecePresentationCaptureEvent>());
+        const TArray<FTerraPiecePresentationCaptureEvent>& CaptureEvents = TArray<FTerraPiecePresentationCaptureEvent>(),
+        const TArray<FTerraPieceEquipmentDropSnapshot>& EquipmentDrops = TArray<FTerraPieceEquipmentDropSnapshot>());
     void ClearPieces();
 
     int32 GetPresentedPieceCount() const { return PieceActors.Num(); }
@@ -33,6 +35,9 @@ protected:
 private:
     UPROPERTY(Transient)
     TMap<int32, TObjectPtr<ATerraPieceActor>> PieceActors;
+
+    UPROPERTY(Transient)
+    TMap<int32, TObjectPtr<ATerraEquipmentDropActor>> EquipmentDropActors;
 
     UPROPERTY(Transient)
     TArray<TObjectPtr<ATerraPieceProjectileActor>> ActiveP6Projectiles;

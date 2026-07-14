@@ -18,6 +18,15 @@ enum class ETerraGameplayPieceType : uint8
     Infantry UMETA(DisplayName = "Infantry"),
     Cavalry UMETA(DisplayName = "Cavalry"),
     Archer UMETA(DisplayName = "Archer"),
+    ArcherCavalry UMETA(DisplayName = "Archer Cavalry"),
+};
+
+UENUM(BlueprintType)
+enum class ETerraGameplayEquipmentDropType : uint8
+{
+    None UMETA(DisplayName = "None"),
+    Bow UMETA(DisplayName = "Bow"),
+    Horse UMETA(DisplayName = "Horse"),
 };
 
 UENUM(BlueprintType)
@@ -27,6 +36,17 @@ enum class ETerraGameplayInteractionPhase : uint8
     PieceSelected UMETA(DisplayName = "Piece Selected"),
     PieceMovedCanEndTurn UMETA(DisplayName = "Piece Moved Can End Turn"),
     PieceJumpingCanContinue UMETA(DisplayName = "Piece Jumping Can Continue"),
+};
+
+USTRUCT(BlueprintType)
+struct GAMEPLAY_API FTerraGameplayNeutralSpawnConfig
+{
+    GENERATED_BODY()
+
+    int32 CommanderCount = 20;
+    int32 InfantryCount = 20;
+    int32 CavalryCount = 20;
+    int32 ArcherCount = 20;
 };
 
 USTRUCT(BlueprintType)
@@ -57,6 +77,10 @@ struct GAMEPLAY_API FTerraGameplayPieceState
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
     int32 OwnerFactionId = INDEX_NONE;
 
+    /** Neutral pieces have no permanent faction and temporarily support the active faction. */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    bool bIsNeutral = false;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
     int32 CellId = INDEX_NONE;
 
@@ -86,6 +110,21 @@ struct GAMEPLAY_API FTerraGameplayFactionState
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
     bool bAlive = true;
+};
+
+USTRUCT(BlueprintType)
+struct GAMEPLAY_API FTerraGameplayEquipmentDropState
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    int32 CellId = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    bool bHasBow = false;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    bool bHasHorse = false;
 };
 
 USTRUCT(BlueprintType)

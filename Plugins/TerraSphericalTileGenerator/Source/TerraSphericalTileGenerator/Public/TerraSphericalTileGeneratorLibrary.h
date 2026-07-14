@@ -34,7 +34,8 @@ struct TERRASPHERICALTILEGENERATOR_API FTSTGSphericalTileAssetBuildSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PBR")
 	TObjectPtr<UTexture2D> BaseColorTexture = nullptr;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PBR")
+	/** Tangent-space normal map. Only NormalDX assets are supported; import as Normalmap with sRGB disabled. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PBR", meta = (ToolTip = "Only NormalDX tangent-space normal maps are supported. Import as Normalmap with sRGB disabled."))
 	TObjectPtr<UTexture2D> NormalTexture = nullptr;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PBR")

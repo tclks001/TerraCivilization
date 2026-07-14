@@ -184,7 +184,12 @@ void UPlanetGameplayComponent::RebuildGameplay()
     }
 
     GameplayContainer = MakeUnique<FTerraGameplayContainer>();
-    GameplayContainer->Initialize(GameplayCells);
+    FTerraGameplayNeutralSpawnConfig NeutralSpawnConfig;
+    NeutralSpawnConfig.CommanderCount = FMath::Max(G10NeutralCommanderCount, 0);
+    NeutralSpawnConfig.InfantryCount = FMath::Max(G10NeutralInfantryCount, 0);
+    NeutralSpawnConfig.CavalryCount = FMath::Max(G10NeutralCavalryCount, 0);
+    NeutralSpawnConfig.ArcherCount = FMath::Max(G10NeutralArcherCount, 0);
+    GameplayContainer->Initialize(GameplayCells, NeutralSpawnConfig);
     GameplayContainer->SetDebugKeepSameFactionOnEndTurn(bG3DebugKeepSameFactionOnEndTurn);
     FTerraNpcMcpGameplayBridge::RegisterGameplayContainer(GameplayContainer.Get());
     FTerraNpcMcpGameplayBridge::RegisterExecuteValidatedActionDelegate(

@@ -11,6 +11,8 @@ USkeletalMesh* FTerraPieceVisualConfig::ResolveMesh(ETerraGameplayPieceType Piec
         return CommanderMesh;
     case ETerraGameplayPieceType::Cavalry:
         return CavalryMesh;
+    case ETerraGameplayPieceType::ArcherCavalry:
+        return ArcherMesh;
     case ETerraGameplayPieceType::Archer:
         return ArcherMesh;
     case ETerraGameplayPieceType::Infantry:
@@ -26,6 +28,7 @@ UAnimationAsset* FTerraPieceVisualConfig::ResolveAttackAnimation(ETerraGameplayP
     case ETerraGameplayPieceType::Commander:
         return CommanderMagicAttackAnimation;
     case ETerraGameplayPieceType::Archer:
+    case ETerraGameplayPieceType::ArcherCavalry:
         return ArcherRangedAttackAnimation;
     case ETerraGameplayPieceType::Cavalry:
         return CavalryMeleeAttackAnimation;
@@ -43,6 +46,8 @@ float FTerraPieceVisualConfig::ResolveAttackToHitSeconds(ETerraGameplayPieceType
         return P3CommanderAttackToHitSeconds;
     case ETerraGameplayPieceType::Archer:
         return P3ArcherAttackToHitSeconds;
+    case ETerraGameplayPieceType::ArcherCavalry:
+        return ArcherCavalryAttackToHitSeconds;
     case ETerraGameplayPieceType::Cavalry:
         return P3CavalryAttackToHitSeconds;
     case ETerraGameplayPieceType::Infantry:
@@ -58,6 +63,7 @@ UTexture2D* FTerraPieceVisualConfig::ResolveP7BaseTexture(ETerraGameplayPieceTyp
     case ETerraGameplayPieceType::Commander:
         return P7CommanderBaseTexture.Get();
     case ETerraGameplayPieceType::Archer:
+    case ETerraGameplayPieceType::ArcherCavalry:
         return P7ArcherBaseTexture.Get();
     case ETerraGameplayPieceType::Cavalry:
         return P7CavalryRiderBaseTexture.Get();
@@ -69,9 +75,12 @@ UTexture2D* FTerraPieceVisualConfig::ResolveP7BaseTexture(ETerraGameplayPieceTyp
 
 const FTerraPiecePaletteMask* FTerraPieceVisualConfig::ResolveP7PaletteMask(ETerraGameplayPieceType PieceType) const
 {
+    const ETerraGameplayPieceType LookupPieceType = PieceType == ETerraGameplayPieceType::ArcherCavalry
+        ? ETerraGameplayPieceType::Archer
+        : PieceType;
     for (const FTerraPiecePaletteMask& Mask : P7PaletteMasksByPieceType)
     {
-        if (Mask.PieceType == PieceType)
+        if (Mask.PieceType == LookupPieceType)
         {
             return &Mask;
         }

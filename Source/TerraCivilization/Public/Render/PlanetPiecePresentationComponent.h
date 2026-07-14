@@ -159,6 +159,39 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SimpleGameplay P1 Piece Presentation")
     TObjectPtr<UStaticMesh> P5CavalryAxeMesh;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SimpleGameplay P12 Equipment Drop Presentation")
+    TObjectPtr<UStaticMesh> P12DroppedBowMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SimpleGameplay P12 Equipment Drop Presentation")
+    TObjectPtr<USkeletalMesh> P12DroppedHorseMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SimpleGameplay P12 Equipment Drop Presentation")
+    TObjectPtr<UAnimationAsset> P12DroppedHorseIdleAnimation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SimpleGameplay P12 Equipment Drop Presentation")
+    TObjectPtr<UAnimMontage> P12ArcherCavalryUpperBodyAttackMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SimpleGameplay P12 Equipment Drop Presentation", meta = (ClampMin = "0.0", ClampMax = "10.0"))
+    float P12ArcherCavalryAttackToHitSeconds = 0.35f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SimpleGameplay P12 Equipment Drop Presentation")
+    FVector P12DroppedBowRelativeLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SimpleGameplay P12 Equipment Drop Presentation")
+    FRotator P12DroppedBowRelativeRotation = FRotator(180.0f, 0.0f, 0.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SimpleGameplay P12 Equipment Drop Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
+    float P12DroppedBowUniformScale = 0.01f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SimpleGameplay P12 Equipment Drop Presentation")
+    FVector P12DroppedHorseRelativeLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SimpleGameplay P12 Equipment Drop Presentation")
+    FRotator P12DroppedHorseRelativeRotation = FRotator(0.0f, -90.0f, 0.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SimpleGameplay P12 Equipment Drop Presentation", meta = (ClampMin = "0.001", ClampMax = "100.0"))
+    float P12DroppedHorseUniformScale = 3.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SimpleGameplay P1 Piece Presentation")
     FName P5ArcherBowAttachName = TEXT("handslot_l");
 

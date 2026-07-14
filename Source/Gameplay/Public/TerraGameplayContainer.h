@@ -160,11 +160,14 @@ public:
     struct FStrategicOption
     {
         FString Intent;
-        int32 Priority = 0;
+        FString EvidenceScope;
         TArray<FString> EvidenceTags;
         TArray<int32> KeyPieceIds;
         TArray<int32> KeyCellIds;
+        TArray<int32> RouteCellIds;
+        TArray<FString> TerrainTags;
         int32 TargetEnemyFactionId = INDEX_NONE;
+        TArray<FString> ValidationQuestions;
     };
 
     struct FCurrentFactionStrategicSnapshot
@@ -177,10 +180,36 @@ public:
         TArray<FStrategicOption> StrategicOptions;
     };
 
+    struct FLocalTopologyCellInfo
+    {
+        int32 CellId = INDEX_NONE;
+        ETerraGameplayTerrainType TerrainType = ETerraGameplayTerrainType::Plain;
+        int32 OccupyingPieceId = INDEX_NONE;
+        int32 OccupyingFactionId = INDEX_NONE;
+        ETerraGameplayPieceType OccupyingPieceType = ETerraGameplayPieceType::Infantry;
+        bool bOccupyingPieceCanMove = false;
+    };
+
+    struct FLocalTopologyEdge
+    {
+        int32 CellAId = INDEX_NONE;
+        int32 CellBId = INDEX_NONE;
+    };
+
+    struct FLocalTopologyObservation
+    {
+        FStrategicSnapshot Snapshot;
+        int32 CenterCellId = INDEX_NONE;
+        int32 Radius = 3;
+        TArray<FLocalTopologyCellInfo> Cells;
+        TArray<FLocalTopologyEdge> Edges;
+    };
+
     struct FInteractionUndoSnapshot
     {
         TArray<FTerraGameplayPieceState> Pieces;
         TArray<int32> CellToPieceId;
+        TMap<int32, FTerraGameplayEquipmentDropState> EquipmentDropsByCellId;
         TMap<int32, FTerraGameplayCellHighlight> GameplayHighlights;
         TSet<int32> OrdinaryMoveTargetCellIds;
         TSet<int32> JumpTargetCellIds;
@@ -195,7 +224,7 @@ public:
         ETerraGameplayInteractionPhase InteractionPhase = ETerraGameplayInteractionPhase::Idle;
     };
 
-    void Initialize(const TArray<FTerraGameplayCellState>& InCells);
+    void Initialize(const TArray<FTerraGameplayCellState>& InCells, const FTerraGameplayNeutralSpawnConfig& InNeutralSpawnConfig = FTerraGameplayNeutralSpawnConfig());
 
     bool IsInitialized() const { return bInitialized; }
     int32 GetCurrentFactionId() const { return CurrentFactionId; }
@@ -231,15 +260,19 @@ public:
     bool QueryCurrentFactionPieceTurnSurvey(int32 PieceId, FPieceTurnSurvey& OutSurvey) const;
     bool BuildLocalTacticalSituationCard(const FLegalActionQuery& Action, FLocalTacticalSituationCard& OutCard) const;
     bool BuildCurrentFactionStrategicSnapshot(FCurrentFactionStrategicSnapshot& OutSnapshot) const;
+    bool BuildLocalTopologyObservation(int32 CenterCellId, FLocalTopologyObservation& OutObservation) const;
     const TArray<FTerraGameplayPieceState>& GetPieces() const { return Pieces; }
     const TArray<FTerraGameplayFactionState>& GetFactions() const { return Factions; }
     const TArray<int32>& GetCellToPieceId() const { return CellToPieceId; }
+    void CollectEquipmentDrops(TArray<FTerraGameplayEquipmentDropState>& OutEquipmentDrops) const;
 
 private:
     void ResetRuntimeState_();
     void BuildInitialPieces_();
+    void BuildNeutralPieces_(const FTerraGameplayNeutralSpawnConfig& NeutralSpawnConfig);
     bool AddPiece_(int32 FactionId, int32 CellId, ETerraGameplayPieceType PieceType, int32& OutPieceId);
     bool AddPieceIfFree_(int32 FactionId, int32 CellId, ETerraGameplayPieceType PieceType, int32& OutPieceId);
+    bool TryAddNeutralPiece_(ETerraGameplayPieceType PieceType, int32& OutPieceId);
 
     bool IsValidCellId_(int32 CellId) const;
     bool IsValidPieceId_(int32 PieceId) const;
@@ -248,6 +281,13 @@ private:
     int32 GetPieceIdAtCell_(int32 CellId) const;
     FTerraGameplayPieceState* GetMutablePiece_(int32 PieceId);
     const FTerraGameplayPieceState* GetPiece_(int32 PieceId) const;
+    bool IsNeutralPiece_(const FTerraGameplayPieceState& Piece) const;
+    bool IsPieceFriendlyToFaction_(const FTerraGameplayPieceState& Piece, int32 FactionId) const;
+    bool IsPieceEnemyToFaction_(const FTerraGameplayPieceState& Piece, int32 FactionId) const;
+    bool IsCavalryCapable_(const FTerraGameplayPieceState& Piece) const;
+    bool IsArcherCapable_(const FTerraGameplayPieceState& Piece) const;
+    void AddEquipmentDropsForCapturedPiece_(const FTerraGameplayPieceState& CapturedPiece, int32 CaptureCellId, TArray<int32>& OutDirtyCellIds);
+    void TryCollectEquipmentAtCell_(FTerraGameplayPieceState& Piece, TArray<int32>& OutDirtyCellIds);
     bool IsCurrentFactionPiece_(const FTerraGameplayPieceState& Piece) const;
     bool IsPieceSelectable_(const FTerraGameplayPieceState& Piece) const;
     bool IsPieceSelectableForFaction_(const FTerraGameplayPieceState& Piece, int32 ActingFactionId) const;
@@ -274,7 +314,7 @@ private:
     void LockPendingCapturesForActionTarget_(int32 ActionTargetCellId, TArray<int32>& OutDirtyCellIds);
     void RebuildPendingCapturesForSelectedPieceCell_(TArray<int32>& OutDirtyCellIds);
     void ResolvePendingCaptures_(TArray<int32>& OutDirtyCellIds);
-    void EliminateFaction_(int32 FactionId, TArray<int32>& OutDirtyCellIds);
+    void EliminateFaction_(int32 FactionId, int32 ConqueringFactionId, TArray<int32>& OutDirtyCellIds);
     void EvaluateWinStateAfterCaptures_();
     void FinalizeTurnAfterResolution_();
     void InitializeActionLogFilePath_();
@@ -303,6 +343,7 @@ private:
     TArray<FTerraGameplayPieceState> Pieces;
     TArray<FTerraGameplayFactionState> Factions;
     TArray<int32> CellToPieceId;
+    TMap<int32, FTerraGameplayEquipmentDropState> EquipmentDropsByCellId;
     TMap<int32, FTerraGameplayCellHighlight> GameplayHighlights;
     TSet<int32> OrdinaryMoveTargetCellIds;
     TSet<int32> JumpTargetCellIds;

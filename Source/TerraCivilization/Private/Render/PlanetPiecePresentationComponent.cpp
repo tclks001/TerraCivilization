@@ -8,11 +8,15 @@
 #include "FCell.h"
 
 #include "Animation/AnimationAsset.h"
+#include "Animation/AnimMontage.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
+#include "UObject/ConstructorHelpers.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogPlanetPiecePresentation, Log, All);
 
 namespace
 {
@@ -73,11 +77,18 @@ namespace
 UPlanetPiecePresentationComponent::UPlanetPiecePresentationComponent()
 {
     PrimaryComponentTick.bCanEverTick = false;
-    // ×¢Òâ£ºPiecePresentationManager ²»ÔÙ×÷Îª default subobject ´´½¨¡£
-    // Ïê¼û PlanetPiecePresentationComponent.h ÖĞ PiecePresentationManager ×Ö¶ÎµÄËµÃ÷£º
-    // ActorComponent ×÷ÎªÁíÒ»¸ö ActorComponent µÄ default subobject + Details Ãæ°å¿É¼û»á
-    // µ¼ÖÂ UnrealEditor_PropertyEditor ÔÚ´ò¿ªÀ¶Í¼ CDO Ê±ÎŞÏŞµİ¹éÕ¹¿ª¶ø stack overflow¡£
-    // ¸ÄÎªÔÚ SyncPresentation Ê×´Îµ÷ÓÃ£¨ÔËĞĞÊ±£©Í¨¹ı NewObject ÀÁ´´½¨¡£
+
+    static ConstructorHelpers::FObjectFinder<UStaticMesh> DroppedBowAsset(TEXT("/Game/Animations/Adventurers/Assets/bow.bow"));
+    static ConstructorHelpers::FObjectFinder<USkeletalMesh> DroppedHorseAsset(TEXT("/Game/Animations/Horse/Horse.Horse"));
+    static ConstructorHelpers::FObjectFinder<UAnimationAsset> DroppedHorseIdleAsset(TEXT("/Game/Animations/Horse/HorseIdle.HorseIdle"));
+    P12DroppedBowMesh = DroppedBowAsset.Object;
+    P12DroppedHorseMesh = DroppedHorseAsset.Object;
+    P12DroppedHorseIdleAnimation = DroppedHorseIdleAsset.Object;
+    // æ³¨æ„ï¼šPiecePresentationManager ä¸å†ä½œä¸º default subobject åˆ›å»ºã€‚
+    // è¯¦è§ PlanetPiecePresentationComponent.h ä¸­ PiecePresentationManager å­—æ®µçš„è¯´æ˜ï¼š
+    // ActorComponent ä½œä¸ºå¦ä¸€ä¸ª ActorComponent çš„ default subobject + Details é¢æ¿å¯è§ä¼š
+    // å¯¼è‡´ UnrealEditor_PropertyEditor åœ¨æ‰“å¼€è“å›¾ CDO æ—¶æ— é™é€’å½’å±•å¼€è€Œ stack overflowã€‚
+    // æ”¹ä¸ºåœ¨ SyncPresentation é¦–æ¬¡è°ƒç”¨ï¼ˆè¿è¡Œæ—¶ï¼‰é€šè¿‡ NewObject æ‡’åˆ›å»ºã€‚
 }
 
 APlanetTessellatedMesh* UPlanetPiecePresentationComponent::GetHost() const
@@ -92,9 +103,9 @@ bool UPlanetPiecePresentationComponent::EnsurePiecePresentationManager_()
         return true;
     }
 
-    // ÀÁ´´½¨£ºOuter ÉèÎª±¾×é¼ş£¨±£³Ö¶ÔÏó²ã¼¶ºÏÀí£©£¬Transient ÒÑÔÚ UPROPERTY ÉùÃ÷¡£
-    // Ê¹ÓÃ CreateDefaultSubobject »áÔÚ CDO ÉÏÉú³É subobject ²¢±» Details Ãæ°åµİ¹éÕ¹¿ª£¬
-    // Òò´ËÕâÀï¸ÄÓÃ NewObject£¬½öÔÚÔËĞĞÊ±ÊµÀıÉÏ´æÔÚ¡£
+    // æ‡’åˆ›å»ºï¼šOuter è®¾ä¸ºæœ¬ç»„ä»¶ï¼ˆä¿æŒå¯¹è±¡å±‚çº§åˆç†ï¼‰ï¼ŒTransient å·²åœ¨ UPROPERTY å£°æ˜ã€‚
+    // ä½¿ç”¨ CreateDefaultSubobject ä¼šåœ¨ CDO ä¸Šç”Ÿæˆ subobject å¹¶è¢« Details é¢æ¿é€’å½’å±•å¼€ï¼Œ
+    // å› æ­¤è¿™é‡Œæ”¹ç”¨ NewObjectï¼Œä»…åœ¨è¿è¡Œæ—¶å®ä¾‹ä¸Šå­˜åœ¨ã€‚
     PiecePresentationManager = NewObject<UTerraPiecePresentationManager>(this, TEXT("PiecePresentationManager"));
     return PiecePresentationManager != nullptr;
 }
@@ -124,7 +135,7 @@ void UPlanetPiecePresentationComponent::SyncPresentation(
         return;
     }
 
-    // ÔËĞĞÊ±ÀÁ´´½¨ PiecePresentationManager£¨Ïê¼û¹¹Ôìº¯ÊıÓëÍ·ÎÄ¼ş×Ö¶Î×¢ÊÍ£©¡£
+    // è¿è¡Œæ—¶æ‡’åˆ›å»º PiecePresentationManagerï¼ˆè¯¦è§æ„é€ å‡½æ•°ä¸å¤´æ–‡ä»¶å­—æ®µæ³¨é‡Šï¼‰ã€‚
     if (!EnsurePiecePresentationManager_())
     {
         ClearPresentation();
@@ -152,13 +163,32 @@ void UPlanetPiecePresentationComponent::SyncPresentation(
 
         FTerraPiecePresentationSnapshot& Snapshot = Snapshots.AddDefaulted_GetRef();
         Snapshot.PieceId = Piece.PieceId;
-        Snapshot.OwnerFactionId = Piece.OwnerFactionId;
+        Snapshot.OwnerFactionId = Piece.bIsNeutral ? Gameplay->GetCurrentFactionId() : Piece.OwnerFactionId;
         Snapshot.CellId = Piece.CellId;
         Snapshot.PieceType = Piece.PieceType;
         Snapshot.WorldTransform = PieceWorldTransform;
     }
 
-    PiecePresentationManager->SyncPieces(Snapshots, VisualConfig, MoveEvents, CaptureEvents);
+    TArray<FTerraPieceEquipmentDropSnapshot> EquipmentDropSnapshots;
+    TArray<FTerraGameplayEquipmentDropState> EquipmentDrops;
+    Gameplay->CollectEquipmentDrops(EquipmentDrops);
+    EquipmentDropSnapshots.Reserve(EquipmentDrops.Num());
+    for (const FTerraGameplayEquipmentDropState& Drop : EquipmentDrops)
+    {
+        FTransform DropWorldTransform = FTransform::Identity;
+        if (!BuildPieceWorldTransform(Drop.CellId, ETerraGameplayPieceType::Infantry, DropWorldTransform))
+        {
+            continue;
+        }
+
+        FTerraPieceEquipmentDropSnapshot& Snapshot = EquipmentDropSnapshots.AddDefaulted_GetRef();
+        Snapshot.CellId = Drop.CellId;
+        Snapshot.bHasBow = Drop.bHasBow;
+        Snapshot.bHasHorse = Drop.bHasHorse;
+        Snapshot.WorldTransform = DropWorldTransform;
+    }
+
+    PiecePresentationManager->SyncPieces(Snapshots, VisualConfig, MoveEvents, CaptureEvents, EquipmentDropSnapshots);
 }
 
 void UPlanetPiecePresentationComponent::ClearPresentation()
@@ -208,7 +238,7 @@ bool UPlanetPiecePresentationComponent::BuildPieceWorldTransform(int32 CellId, E
 
     FVector TraceWorldUp = WorldUp;
     float TraceAngularOffsetDeg = 0.0f;
-    if (PieceType == ETerraGameplayPieceType::Cavalry)
+    if (PieceType == ETerraGameplayPieceType::Cavalry || PieceType == ETerraGameplayPieceType::ArcherCavalry)
     {
         const float RequestedOffsetDeg = FMath::Clamp(P2_6CavalryHeightTraceAngularOffsetDeg, 0.0f, 15.0f);
         if (RequestedOffsetDeg > KINDA_SMALL_NUMBER)
@@ -244,14 +274,41 @@ bool UPlanetPiecePresentationComponent::TryResolvePieceHeightFromHISM(
     UWorld* World = Host ? Host->GetWorld() : nullptr;
     if (!Host || !World || !bEnableP2_5HISMPieceHeightTrace || !Host->bEnableHISMTileRendering || !Host->bEnableHISMTileCollision)
     {
+        if (bDebugP2_5HISMPieceHeightTrace)
+        {
+            UE_LOG(LogPlanetPiecePresentation, Warning,
+                TEXT("[PiecePresentation][P2.5] Cell=%d TraceSkipped Host=%d World=%d EnableTrace=%d EnableHISMRendering=%d EnableHISMCollision=%d"),
+                CellId,
+                Host ? 1 : 0,
+                World ? 1 : 0,
+                bEnableP2_5HISMPieceHeightTrace ? 1 : 0,
+                Host && Host->bEnableHISMTileRendering ? 1 : 0,
+                Host && Host->bEnableHISMTileCollision ? 1 : 0);
+        }
         return false;
     }
     if (!Host->CellTopology.IsValid() || !Host->CellTopology->Cells.IsValidIndex(CellId))
     {
+        if (bDebugP2_5HISMPieceHeightTrace)
+        {
+            UE_LOG(LogPlanetPiecePresentation, Warning,
+                TEXT("[PiecePresentation][P2.5] Cell=%d TraceSkipped InvalidTopology HasTopology=%d CellCount=%d"),
+                CellId,
+                Host->CellTopology.IsValid() ? 1 : 0,
+                Host->CellTopology.IsValid() ? Host->CellTopology->Cells.Num() : 0);
+        }
         return false;
     }
     if (TraceWorldUp.IsNearlyZero() || PlacementWorldUp.IsNearlyZero())
     {
+        if (bDebugP2_5HISMPieceHeightTrace)
+        {
+            UE_LOG(LogPlanetPiecePresentation, Warning,
+                TEXT("[PiecePresentation][P2.5] Cell=%d TraceSkipped InvalidDirection TraceUp=%s PlacementUp=%s"),
+                CellId,
+                *TraceWorldUp.ToString(),
+                *PlacementWorldUp.ToString());
+        }
         return false;
     }
 
@@ -265,6 +322,33 @@ bool UPlanetPiecePresentationComponent::TryResolvePieceHeightFromHISM(
     TArray<FHitResult> Hits;
     if (!World->LineTraceMultiByChannel(Hits, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams))
     {
+        if (bDebugP2_5HISMPieceHeightTrace)
+        {
+            const auto LogHISMState = [](const TCHAR* Label, const UHierarchicalInstancedStaticMeshComponent* Component)
+            {
+                UE_LOG(LogPlanetPiecePresentation, Warning,
+                    TEXT("[PiecePresentation][P2.5] %s Component=%s Mesh=%s Instances=%d CollisionEnabled=%d WorldStaticResponse=%d Visible=%d"),
+                    Label,
+                    *GetNameSafe(Component),
+                    *GetNameSafe(Component ? Component->GetStaticMesh() : nullptr),
+                    Component ? Component->GetInstanceCount() : 0,
+                    Component ? static_cast<int32>(Component->GetCollisionEnabled()) : -1,
+                    Component ? static_cast<int32>(Component->GetCollisionResponseToChannel(ECC_WorldStatic)) : -1,
+                    Component && Component->IsVisible() ? 1 : 0);
+            };
+
+            UE_LOG(LogPlanetPiecePresentation, Warning,
+                TEXT("[PiecePresentation][P2.5] Cell=%d NoTraceHit Start=%s End=%s StartRadius=%.1f EndRadius=%.1f TraceOffsetDeg=%.3f"),
+                CellId,
+                *TraceStart.ToString(),
+                *TraceEnd.ToString(),
+                FVector::Distance(TraceStart, PlanetCenterWorld),
+                FVector::Distance(TraceEnd, PlanetCenterWorld),
+                TraceAngularOffsetDeg);
+            LogHISMState(TEXT("Plain"), Host->PlainTileHISMComp);
+            LogHISMState(TEXT("Forest"), Host->ForestTileHISMComp);
+            LogHISMState(TEXT("Mountain"), Host->MountainTileHISMComp);
+        }
         return false;
     }
 
@@ -273,6 +357,22 @@ bool UPlanetPiecePresentationComponent::TryResolvePieceHeightFromHISM(
     for (const FHitResult& Hit : Hits)
     {
         UPrimitiveComponent* HitComp = Hit.GetComponent();
+        if (bDebugP2_5HISMPieceHeightTrace)
+        {
+            int32 ResolvedCellId = INDEX_NONE;
+            const bool bResolvedCell = Host->TryResolveHISMHitToCellId(Hit, ResolvedCellId);
+            UE_LOG(LogPlanetPiecePresentation, Log,
+                TEXT("[PiecePresentation][P2.5] Cell=%d RawHit Component=%s Actor=%s Item=%d Impact=%s Radius=%.1f IsTileHISM=%d ResolvedCell=%d ResolveSucceeded=%d"),
+                CellId,
+                *GetNameSafe(HitComp),
+                *GetNameSafe(Hit.GetActor()),
+                Hit.Item,
+                *Hit.ImpactPoint.ToString(),
+                FVector::Distance(Hit.ImpactPoint, PlanetCenterWorld),
+                HitComp == Host->PlainTileHISMComp || HitComp == Host->ForestTileHISMComp || HitComp == Host->MountainTileHISMComp ? 1 : 0,
+                ResolvedCellId,
+                bResolvedCell ? 1 : 0);
+        }
         if (HitComp != Host->PlainTileHISMComp && HitComp != Host->ForestTileHISMComp && HitComp != Host->MountainTileHISMComp)
         {
             continue;
@@ -294,12 +394,36 @@ bool UPlanetPiecePresentationComponent::TryResolvePieceHeightFromHISM(
     const FHitResult* SelectedHit = CurrentCellHit ? CurrentCellHit : FirstHISMHit;
     if (!SelectedHit)
     {
+        if (bDebugP2_5HISMPieceHeightTrace)
+        {
+            UE_LOG(LogPlanetPiecePresentation, Warning,
+                TEXT("[PiecePresentation][P2.5] Cell=%d NoTileHISMHit RawHitCount=%d"),
+                CellId,
+                Hits.Num());
+        }
         return false;
     }
 
     const float ImpactRadius = FVector::Distance(SelectedHit->ImpactPoint, PlanetCenterWorld);
     const float FinalRadius = ImpactRadius + FMath::Max(P1PieceRadiusOffsetCM, 0.0f);
     OutWorldPosition = PlanetCenterWorld + PlacementDirection * FinalRadius;
+    if (bDebugP2_5HISMPieceHeightTrace)
+    {
+        int32 SelectedCellId = INDEX_NONE;
+        const bool bSelectedCellResolved = Host->TryResolveHISMHitToCellId(*SelectedHit, SelectedCellId);
+        UE_LOG(LogPlanetPiecePresentation, Log,
+            TEXT("[PiecePresentation][P2.5] Cell=%d HeightApplied Component=%s Item=%d SelectedCell=%d ResolveSucceeded=%d ExactCellMatch=%d ImpactRadius=%.1f PieceOffset=%.1f FinalRadius=%.1f Position=%s"),
+            CellId,
+            *GetNameSafe(SelectedHit->GetComponent()),
+            SelectedHit->Item,
+            SelectedCellId,
+            bSelectedCellResolved ? 1 : 0,
+            CurrentCellHit ? 1 : 0,
+            ImpactRadius,
+            FMath::Max(P1PieceRadiusOffsetCM, 0.0f),
+            FinalRadius,
+            *OutWorldPosition.ToString());
+    }
     return true;
 }
 
@@ -444,6 +568,17 @@ FTerraPieceVisualConfig UPlanetPiecePresentationComponent::BuildVisualConfig() c
     VisualConfig.InfantrySwordMesh = P5InfantrySwordMesh.Get() ? P5InfantrySwordMesh.Get() : LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Animations/Adventurers/Assets/sword_1handed.sword_1handed"));
     VisualConfig.InfantryShieldMesh = P5InfantryShieldMesh.Get() ? P5InfantryShieldMesh.Get() : LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Animations/Adventurers/Assets/shield_round.shield_round"));
     VisualConfig.CavalryAxeMesh = P5CavalryAxeMesh.Get() ? P5CavalryAxeMesh.Get() : LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Animations/Adventurers/Assets/axe_1handed.axe_1handed"));
+    VisualConfig.EquipmentDropBowMesh = P12DroppedBowMesh.Get() ? P12DroppedBowMesh.Get() : LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Animations/Adventurers/Assets/bow.bow"));
+    VisualConfig.EquipmentDropHorseMesh = P12DroppedHorseMesh.Get() ? P12DroppedHorseMesh.Get() : LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Animations/Horse/Horse.Horse"));
+    VisualConfig.EquipmentDropHorseIdleAnimation = P12DroppedHorseIdleAnimation.Get() ? P12DroppedHorseIdleAnimation.Get() : LoadObject<UAnimationAsset>(nullptr, TEXT("/Game/Animations/Horse/HorseIdle.HorseIdle"));
+    VisualConfig.EquipmentDropBowRelativeLocation = P12DroppedBowRelativeLocation;
+    VisualConfig.EquipmentDropBowRelativeRotation = P12DroppedBowRelativeRotation;
+    VisualConfig.EquipmentDropBowUniformScale = FMath::Max(P12DroppedBowUniformScale, 0.001f);
+    VisualConfig.EquipmentDropHorseRelativeLocation = P12DroppedHorseRelativeLocation;
+    VisualConfig.EquipmentDropHorseRelativeRotation = P12DroppedHorseRelativeRotation;
+    VisualConfig.EquipmentDropHorseUniformScale = FMath::Max(P12DroppedHorseUniformScale, 0.001f);
+    VisualConfig.ArcherCavalryUpperBodyAttackMontage = P12ArcherCavalryUpperBodyAttackMontage.Get() ? P12ArcherCavalryUpperBodyAttackMontage.Get() : LoadObject<UAnimMontage>(nullptr, TEXT("/Game/PiecePresentation/Animations/AM_ArcherCavalry_ShootUpperBody.AM_ArcherCavalry_ShootUpperBody"));
+    VisualConfig.ArcherCavalryAttackToHitSeconds = FMath::Max(P12ArcherCavalryAttackToHitSeconds, 0.0f);
     VisualConfig.ArcherBowAttachName = P5ArcherBowAttachName;
     VisualConfig.InfantrySwordAttachName = P5InfantrySwordAttachName;
     VisualConfig.InfantryShieldAttachName = P5InfantryShieldAttachName;

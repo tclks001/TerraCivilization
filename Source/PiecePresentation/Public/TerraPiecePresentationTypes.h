@@ -138,6 +138,39 @@ struct PIECEPRESENTATION_API FTerraPieceVisualConfig
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation")
     TObjectPtr<USkeletalMesh> ArcherMesh;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P12")
+    TObjectPtr<UStaticMesh> EquipmentDropBowMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P12")
+    TObjectPtr<USkeletalMesh> EquipmentDropHorseMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P12")
+    TObjectPtr<UAnimationAsset> EquipmentDropHorseIdleAnimation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P12")
+    FVector EquipmentDropBowRelativeLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P12")
+    FRotator EquipmentDropBowRelativeRotation = FRotator::ZeroRotator;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P12", meta = (ClampMin = "0.001"))
+    float EquipmentDropBowUniformScale = 0.01f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P12")
+    FVector EquipmentDropHorseRelativeLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P12")
+    FRotator EquipmentDropHorseRelativeRotation = FRotator(0.0f, -90.0f, 0.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P12", meta = (ClampMin = "0.001"))
+    float EquipmentDropHorseUniformScale = 3.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P12")
+    TObjectPtr<UAnimMontage> ArcherCavalryUpperBodyAttackMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation|P12", meta = (ClampMin = "0.0"))
+    float ArcherCavalryAttackToHitSeconds = 0.35f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Piece Presentation", meta = (ClampMin = "0.001"))
     float UniformScale = 1.0f;
 
@@ -450,6 +483,17 @@ struct PIECEPRESENTATION_API FTerraPiecePresentationSnapshot
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
     bool bForceFacingFromSnapshot = false;
+};
+
+USTRUCT(BlueprintType)
+struct PIECEPRESENTATION_API FTerraPieceEquipmentDropSnapshot
+{
+    GENERATED_BODY()
+
+    int32 CellId = INDEX_NONE;
+    bool bHasBow = false;
+    bool bHasHorse = false;
+    FTransform WorldTransform = FTransform::Identity;
 };
 
 USTRUCT(BlueprintType)

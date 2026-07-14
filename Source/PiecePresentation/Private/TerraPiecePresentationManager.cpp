@@ -4,6 +4,7 @@
 #include "Engine/World.h"
 #include "Logging/LogMacros.h"
 #include "TerraPieceActor.h"
+#include "TerraEquipmentDropActor.h"
 #include "TerraPieceProjectileActor.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogTerraPiecePresentation, Log, All);
@@ -17,7 +18,8 @@ void UTerraPiecePresentationManager::SyncPieces(
     const TArray<FTerraPiecePresentationSnapshot>& Snapshots,
     const FTerraPieceVisualConfig& VisualConfig,
     const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents,
-    const TArray<FTerraPiecePresentationCaptureEvent>& CaptureEvents)
+    const TArray<FTerraPiecePresentationCaptureEvent>& CaptureEvents,
+    const TArray<FTerraPieceEquipmentDropSnapshot>& EquipmentDrops)
 {
     UWorld* World = GetWorld();
     AActor* Owner = GetOwner();
@@ -27,6 +29,50 @@ void UTerraPiecePresentationManager::SyncPieces(
     }
 
     CachedVisualConfig = VisualConfig;
+
+    TSet<int32> LiveEquipmentDropCellIds;
+    for (const FTerraPieceEquipmentDropSnapshot& Drop : EquipmentDrops)
+    {
+        if (Drop.CellId == INDEX_NONE || (!Drop.bHasBow && !Drop.bHasHorse))
+        {
+            continue;
+        }
+
+        LiveEquipmentDropCellIds.Add(Drop.CellId);
+        ATerraEquipmentDropActor* DropActor = EquipmentDropActors.FindRef(Drop.CellId).Get();
+        if (!IsValid(DropActor))
+        {
+            FActorSpawnParameters SpawnParams;
+            SpawnParams.Owner = Owner;
+            SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+            SpawnParams.Name = FName(*FString::Printf(TEXT("TerraEquipmentDrop_%d"), Drop.CellId));
+            DropActor = World->SpawnActor<ATerraEquipmentDropActor>(ATerraEquipmentDropActor::StaticClass(), Drop.WorldTransform, SpawnParams);
+            if (!DropActor)
+            {
+                continue;
+            }
+            EquipmentDropActors.Add(Drop.CellId, DropActor);
+        }
+        DropActor->ApplySnapshot(Drop, VisualConfig);
+    }
+
+    TArray<int32> EquipmentDropCellsToRemove;
+    for (const TPair<int32, TObjectPtr<ATerraEquipmentDropActor>>& Pair : EquipmentDropActors)
+    {
+        if (!LiveEquipmentDropCellIds.Contains(Pair.Key))
+        {
+            EquipmentDropCellsToRemove.Add(Pair.Key);
+        }
+    }
+    for (const int32 CellId : EquipmentDropCellsToRemove)
+    {
+        TObjectPtr<ATerraEquipmentDropActor> DropActor;
+        EquipmentDropActors.RemoveAndCopyValue(CellId, DropActor);
+        if (IsValid(DropActor))
+        {
+            DropActor->Destroy();
+        }
+    }
 
     TSet<int32> ExistingPieceIds;
     ExistingPieceIds.Reserve(PieceActors.Num());
@@ -176,6 +222,15 @@ void UTerraPiecePresentationManager::ClearPieces()
         }
     }
     PieceActors.Reset();
+
+    for (const TPair<int32, TObjectPtr<ATerraEquipmentDropActor>>& Pair : EquipmentDropActors)
+    {
+        if (IsValid(Pair.Value))
+        {
+            Pair.Value->Destroy();
+        }
+    }
+    EquipmentDropActors.Reset();
 
     for (TObjectPtr<ATerraPieceProjectileActor>& Projectile : ActiveP6Projectiles)
     {
@@ -589,6 +644,7 @@ bool UTerraPiecePresentationManager::IsMeleePiece_(ETerraGameplayPieceType Piece
 bool UTerraPiecePresentationManager::IsP6ProjectilePiece_(ETerraGameplayPieceType PieceType) const
 {
     return PieceType == ETerraGameplayPieceType::Archer
+        || PieceType == ETerraGameplayPieceType::ArcherCavalry
         || PieceType == ETerraGameplayPieceType::Commander;
 }
 
@@ -697,7 +753,8 @@ float UTerraPiecePresentationManager::GetAnimationLength_(UAnimationAsset* Anima
 bool UTerraPiecePresentationManager::IsP35RemoteAttackPiece_(ETerraGameplayPieceType PieceType) const
 {
     return PieceType == ETerraGameplayPieceType::Commander
-        || PieceType == ETerraGameplayPieceType::Archer;
+        || PieceType == ETerraGameplayPieceType::Archer
+        || PieceType == ETerraGameplayPieceType::ArcherCavalry;
 }
 
 float UTerraPiecePresentationManager::GetP35RemoteAttackDurationSeconds_(ETerraGameplayPieceType PieceType) const
@@ -707,7 +764,7 @@ float UTerraPiecePresentationManager::GetP35RemoteAttackDurationSeconds_(ETerraG
         return FMath::Max(CachedVisualConfig.P35CommanderAttackDurationSeconds, 0.001f);
     }
 
-    if (PieceType == ETerraGameplayPieceType::Archer)
+    if (PieceType == ETerraGameplayPieceType::Archer || PieceType == ETerraGameplayPieceType::ArcherCavalry)
     {
         return FMath::Max(CachedVisualConfig.P35ArcherAttackDurationSeconds, 0.001f);
     }
@@ -722,7 +779,7 @@ float UTerraPiecePresentationManager::GetP35RemoteAttackPlayRateScale_(ETerraGam
         return FMath::Max(CachedVisualConfig.P35CommanderAttackPlayRateScale, 0.001f);
     }
 
-    if (PieceType == ETerraGameplayPieceType::Archer)
+    if (PieceType == ETerraGameplayPieceType::Archer || PieceType == ETerraGameplayPieceType::ArcherCavalry)
     {
         return FMath::Max(CachedVisualConfig.P35ArcherAttackPlayRateScale, 0.001f);
     }

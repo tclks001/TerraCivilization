@@ -57,6 +57,18 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G4")
     FLinearColor G4CaptureTargetHoverColor = FLinearColor(1.0f, 0.0f, 0.0f, 1.0f);
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G10", meta = (ClampMin = "0"))
+    int32 G10NeutralCommanderCount = 20;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G10", meta = (ClampMin = "0"))
+    int32 G10NeutralInfantryCount = 20;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G10", meta = (ClampMin = "0"))
+    int32 G10NeutralCavalryCount = 20;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G10", meta = (ClampMin = "0"))
+    int32 G10NeutralArcherCount = 20;
+
     void RebuildGameplay();
     void RefreshGameplayHighlights(const TArray<int32>& DirtyCellIds);
     bool HandleGameplayCellClick(int32 CellId, const TCHAR* SourceLabel, int32 InstanceIndex, const FString& ComponentName);
