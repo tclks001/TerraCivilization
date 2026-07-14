@@ -99,7 +99,7 @@ struct FTSTGSphericalTileAssetBuildSettings
 说明：
 
 - `BaseColorTexture`：颜色贴图，通常使用 ambientCG 的 `Color` / `Albedo` / `BaseColor` 贴图。
-- `NormalTexture`：法线贴图，通常使用 ambientCG 的 `NormalGL` 或 `NormalDX` 贴图。具体选择取决于父材质中的法线通道约定。
+- `NormalTexture`：只接受 ambientCG 的 `NormalDX` 切线空间法线贴图。导入设置必须为 `NormalMap` 压缩、`sRGB=false`；插件和父材质不支持 `NormalGL`，也不会自动翻转绿色通道。
 - `HeightTexture`：高度图，插件会读取该贴图的顶层 mip 并按 UV 双线性采样，用于真实修改网格顶点高度。
 - `RoughnessTexture`：粗糙度贴图，用于写入材质实例参数，不参与几何生成。
 - `SubdivisionsPerSide`：四边形网格每边细分程度，生成 `(N+1)*(N+1)` 个顶点、`N*N*2` 个三角形。当前代码 clamp 到 `1..512`。
@@ -251,14 +251,14 @@ static UStaticMesh* GenerateSphericalTileStaticMeshAsset(
 | 用途 | ambientCG 常见命名 | 填入字段 |
 | --- | --- | --- |
 | 颜色 | `Color` / `Albedo` / `BaseColor` | `BaseColorTexture` |
-| 法线 | `NormalGL` / `NormalDX` | `NormalTexture` |
+| 法线 | `NormalDX` | `NormalTexture` |
 | 高度 | `Displacement` / `Height` | `HeightTexture` |
 | 粗糙 | `Roughness` | `RoughnessTexture` |
 
 导入 UE 后建议检查：
 
 - `BaseColorTexture`：通常保持 `sRGB=true`。
-- `NormalTexture`：压缩类型应为 `NormalMap`。
+- `NormalTexture`：必须使用 `NormalDX`，压缩类型应为 `NormalMap`，且 `sRGB=false`。不得传入 `NormalGL`；插件不会自动翻转绿色通道。
 - `HeightTexture`：建议关闭 `sRGB`，并保留源文件数据；插件会读取 `Texture->Source` 顶层 mip。
 - `RoughnessTexture`：建议关闭 `sRGB`。
 
@@ -292,6 +292,16 @@ TextureSampleParameter2D(BaseColorTexture) -> Base Color
 TextureSampleParameter2D(NormalTexture)    -> Normal
 TextureSampleParameter2D(RoughnessTexture) -> Roughness
 ```
+
+> **❗ 必需的法线采样设置**（新建节点默认不对，必须手动改）：
+>
+> - 在父材质里，选中接到 `Material.Normal` 引脚的 `TextureSampleParameter2D(NormalTexture)` 节点，
+>   在 Details 面板中将 **`Sampler Type` 显式设为 `Normal`**（不能保留新建节点的默认值 `Color`）。
+> - 同时法线贴图本身的导入设置必须是 `Compression Settings = TC_Normalmap` + `sRGB = false`（参见 §7.2）。
+>
+> 若 `Sampler Type` 错设为 `Color`，UE **不会**自动执行 `2*rgb - 1` 的 unpack，采样出来的 `[0, 1]` 原始颜色会直接当作切线空间法线送入引脚，
+> 经 TBN 变换后世界法线会被整体扳向 `(+X, +Y, 0)`，表现为地块在 **World Normal 可视化下整片黄色**、且 **XY 正方向光能照亮、XY 负方向光死黑**。
+> 详细的排查与修复流程见 §7.9 常见问题排查表。
 
 说明：
 
@@ -454,6 +464,7 @@ InstanceScale = 适配 Cell 尺寸的统一缩放，必要时略大于逻辑 Cel
 | `OutErrorMessage` 提示对象路径无效 | 使用了磁盘路径或目录路径 | 改成 `/Game/.../AssetName` 格式 |
 | 生成了网格但没有材质 | `ParentMaterial=nullptr` 或 `bCreateMaterialInstance=false` | 指定父材质并启用 `bCreateMaterialInstance` |
 | 材质实例生成了但贴图没生效 | 父材质参数名与默认参数名不一致 | 修改 `TextureParameterNames` 或父材质参数名 |
+| **地块在 World Normal 可视化下整片黄色（≈ `(+X, +Y, 0)`），且只有 XY 正方向入射的光能照亮、XY 负方向入射的光下地块死黑**（关闭高度图后仍然如此，且顶点绕序、UV 都已确认无误） | **父材质中 `TextureSampleParameter2D(NormalTexture)` 节点的 `Sampler Type` 错设为 `Color`（新建节点的默认值）**，导致采样出来的 `[0, 1]` RGB 未被 UE unpack 到 `[-1, +1]`，直接当作切线空间法线进入引脚 | 打开父材质→选中接到 `Material.Normal` 的 `TextureSampleParameter2D` 节点→Details 面板把 `Sampler Type` 改为 `Normal`；同时确认贴图导入设置 `Compression Settings = TC_Normalmap` 且 `sRGB = false`。修正后 World Normal 应回到蓝色，方向光绕 Z 轴旋转时照光应连续过渡 |
 | 高度图没有起伏 | `HeightTexture=nullptr`、高度幅度太小或源格式未支持 | 指定高度图，提高 `HeightmapExtensionAmplitude`，检查纹理导入格式 |
 | 边缘仍然露毛边 | 压边幅度或实例覆盖不足 | 提高 `SphereExtensionAmplitude`，或让 HISM 实例缩放略大 |
 | 山脉太尖 / 穿插严重 | `HeightmapExtensionAmplitude` 过大 | 降低高度图幅度或换更平滑高度图 |

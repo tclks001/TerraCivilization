@@ -467,6 +467,43 @@ float n1;
 
 不对齐：编辑器红色错误，材质 fallback 到 WorldGridMaterial。
 
+#### 3.5.1 ? Normal 贴图 Sampler Type 错设为 `Color` → World Normal 整片黄色（TerraSphericalTileGenerator 案例）
+
+> **核心结论**：把法线贴图的 `Texture Sample` 节点 `Sampler Type` 保持默认的 `Color` 而不切换到 `Normal`，即便贴图本身导入设置正确（`TC_Normalmap` + `sRGB=false`），采样出来的 RGB 也**不会被 UE 自动 unpack 到 `[-1, +1]`**，会以 `[0, 1]` 的原始颜色直接进入 `Material.Normal` 引脚，经 TBN 变换后世界法线被整体扳向 `(+X, +Y, 0)`，表现为"XY 正方向光照亮、XY 负方向光死黑"。
+
+##### 症状指纹
+
+1. 场景里同高度的方向光，只要 XY 分量取正就能照亮 mesh，取负就死黑（`dot(L, N)` 恒为负被 clamp）。
+2. Buffer Visualization → **World Normal**：正确朝上的地面应呈现**蓝色** `(0.5, 0.5, 1.0)`；本坑下 mesh 整体呈现**黄色** `(1.0, 1.0, 0.5)`，即世界法线 ≈ `(+1, +1, 0)`。
+3. **不是**顶点绕序反了（那样会整片朝下 / 偏黑，不是黄色）。
+4. **不是** UV 的 U/V 反了（那只会让法线贴图 XY 分量互换，Z 分量仍 ≈ 1，World Normal 仍近似蓝色）。
+5. 关闭高度图（`HeightmapExtensionAmplitude = 0`）后现象**依然存在** → 排除几何顶点法线来源。
+
+##### 排查方法（推荐顺序）
+
+1. **先看 World Normal 可视化**：整片黄色 ≈ `(+1, +1, 0)` 是"切线空间法线未 unpack"的稳定指纹（因为未 unpack 时 `N_tangent ≈ (0.5, 0.5, ~1)`，经 TBN 展开约等于 `+T + +B + N`，加权后偏向 `(+X, +Y, 0)`）。
+2. **打开父材质**，选中接到 `Material.Normal` 引脚的 `TextureSample` / `TextureSampleParameter2D` 节点：
+    - Details 面板 → `Sampler Type` 应为 **`Normal`**，若为 `Color` / `LinearColor` 即为此坑。
+3. **打开法线贴图资产**，确认：
+    - `Compression Settings = TC_Normalmap`
+    - `sRGB = false`
+    - `Texture Group = WorldNormalMap`（推荐）
+    - `Flip Green Channel = false`（NormalDX 无需翻绿）
+4. 如果 `Sampler Type=Normal` 但贴图的 `Compression Settings` 不是 `Normalmap`，UE 会在材质编译时抛出 `"Texture is not a normal map"` 警告——**看到这类警告立即改贴图导入设置**，不要在材质里 workaround。
+
+##### 修复
+
+- **首选**：把 `Texture Sample` 的 `Sampler Type` 改成 `Normal`，同时确保贴图 `TC_Normalmap` + `sRGB=false`。UE 会在采样阶段内部执行 `2*rgb - 1` 的 unpack，直接把切线空间法线送进 `Material.Normal`。
+- **应急**（不推荐作为长期方案）：在 `Texture Sample.RGB` 与 `Material.Normal` 之间插入 `ConstantBiasScale`（`Bias = -0.5`，`Scale = 2.0`），等价于手动 `N = RGB * 2 - 1`；但此法会绕过 UE 对法线贴图专用的 BC5 双通道压缩优化，仅供临时验证归因用。
+
+##### 沉淀到 Agent 自查清单
+
+Agent 在设计"参数化 PBR 父材质"型玩法（本项目 TerraSphericalTileGenerator、未来任何 ambientCG 材质集成）时，**主稿 / 详稿必须明确要求**：
+
+- 父材质中的 Normal `TextureSampleParameter2D` 节点，`Sampler Type` 必须显式设为 `Normal`（不能沿用新建节点的默认 `Color`）。
+- 文档"父材质接线"一节必须以**红字 / 加粗形式**提示这一点，并在"常见问题排查"表中给出"World Normal 整片黄色 → 检查 Sampler Type"这一行。
+- 代码侧无法自动纠正此项（Sampler Type 属于材质图节点属性，非纹理资产属性），因此只能通过文档与验收清单兜底。
+
 ### 3.6 ? 顶点法线写法通则（UE5 左手系 + CCW 约定，经 R8 实测修订）
 
 > **核心结论**（已修订）：UE5 是左手坐标系 + CCW frontface（[`D3D12State.cpp:356`](../../Program%20Files/Epic%20Games/UE_5.8/Engine/Source/Runtime/D3D12RHI/Private/D3D12State.cpp) `FrontCounterClockwise = true`）+ 漫反射用 `saturate(dot(N, L))`（[`ForwardLightingCommon.ush:387-392`](../../Program%20Files/Epic%20Games/UE_5.8/Engine/Shaders/Private/ForwardLightingCommon.ush)）。**对球外渲染的球面 mesh，顶点法线应朝外**（`+UnitCenter`）——与几何直觉完全一致。

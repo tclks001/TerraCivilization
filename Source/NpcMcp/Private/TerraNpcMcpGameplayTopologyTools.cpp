@@ -28,6 +28,7 @@ namespace
         {
         case ETerraGameplayPieceType::Commander: return TEXT("Commander");
         case ETerraGameplayPieceType::Archer: return TEXT("Archer");
+        case ETerraGameplayPieceType::ArcherCavalry: return TEXT("ArcherCavalry");
         case ETerraGameplayPieceType::Cavalry: return TEXT("Cavalry");
         case ETerraGameplayPieceType::Infantry:
         default: return TEXT("Infantry");

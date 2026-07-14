@@ -158,8 +158,8 @@ else if (HoverIntensity > KINDA_SMALL_NUMBER)
 ```text
 无高亮：Color=(0,0,0), Intensity=0
 普通 Hover：Color=HighlightHoverColor, Intensity=1
-G2.5 当前阵营棋子底色：Color=(1,0.45,0.68), Intensity=1
-G2.5 hover 当前阵营棋子：Color=(1,0.22,0.32), Intensity=1
+G2.5 当前阵营棋子底色：仅永久属于当前阵营的棋子，Color=(1,0.45,0.68), Intensity=1
+G2.5 hover 当前阵营棋子：仅永久属于当前阵营的棋子，Color=(1,0.22,0.32), Intensity=1
 G3 可行走 / 可跳跃落点：Color=(0.35,0.80,1), Intensity=1
 G3 hover 可行走 / 可跳跃落点：Color=(0.08,0.45,1), Intensity=1
 G2/G3 选中棋子脚下：Color=(1,1,0), Intensity=1
@@ -549,7 +549,7 @@ Custom.MF_HISM_FinalHighlightTintedBaseColor
 
 运行 PIE：
 
-- 回合开始时，摄像机切到当前阵营大本营上方并朝向大本营，当前阵营棋子所在 Cell 显示淡粉色。
+- 回合开始时，摄像机切到当前阵营大本营上方并朝向大本营，仅当前阵营永久所属棋子所在 Cell 显示淡粉色；中立棋子所在 Cell 不显示该底色。
 - hover 到当前阵营棋子所在 tile，淡粉色变为更红的红粉色；hover 离开后恢复淡粉色。
 - 左键点击当前阵营的可移动棋子所在 tile，该棋子脚下 Cell 高亮黄色，摄像机不移动但旋转对准该棋子。
 - 再点击相邻空 tile，棋子普通移动 1 格，原黄色消失，新脚下 Cell 高亮蓝色。

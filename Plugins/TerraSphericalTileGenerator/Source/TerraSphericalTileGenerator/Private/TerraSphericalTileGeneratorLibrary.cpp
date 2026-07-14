@@ -146,10 +146,15 @@ namespace TerraSphericalTileGenerator
 		Mesh.Clear();
 		Mesh.EnableAttributes();
 		Mesh.Attributes()->SetNumUVLayers(1);
-		Mesh.Attributes()->SetNumNormalLayers(1);
+		// 故意不启用 NormalOverlay：
+		// 顶点位置在 cube-sphere 方向基础上叠加了 EdgeOcclusionOffset 与 HeightOffset，
+		// 使得真正的表面法线并不等于 cube-sphere 原始方向。
+		// 如果这里手写一份错误的法线，MikkTSpace 会依据它反解切线/副切线，
+		// 最终 TangentToWorld 与真实几何不匹配，导致法线贴图沿 XY 方向出现单向受光偏差。
+		// 让 UE 在 StaticMesh Build 阶段（bEnableRecomputeNormals=true）根据几何重算平滑法线，
+		// 再让 MikkT（bEnableRecomputeTangents=true）在同一份法线上求切线，从而得到一致的 TBN。
 
 		FDynamicMeshUVOverlay* UVOverlay = Mesh.Attributes()->PrimaryUV();
-		FDynamicMeshNormalOverlay* NormalOverlay = Mesh.Attributes()->PrimaryNormals();
 
 		const int32 N = FMath::Clamp(Settings.SubdivisionsPerSide, 1, 512);
 		const int32 VertexCountPerSide = N + 1;
@@ -195,7 +200,7 @@ namespace TerraSphericalTileGenerator
 				const int32 T0 = Mesh.AppendTriangle(V00, V01, V10);
 				const int32 T1 = Mesh.AppendTriangle(V10, V01, V11);
 
-				if (T0 >= 0 && UVOverlay != nullptr && NormalOverlay != nullptr)
+				if (T0 >= 0 && UVOverlay != nullptr)
 				{
 					const FVector2f UV00(static_cast<float>(X) / N, static_cast<float>(Y) / N);
 					const FVector2f UV01(static_cast<float>(X) / N, static_cast<float>(Y + 1) / N);
@@ -204,17 +209,9 @@ namespace TerraSphericalTileGenerator
 					const int32 E01 = UVOverlay->AppendElement(UV01);
 					const int32 E10 = UVOverlay->AppendElement(UV10);
 					UVOverlay->SetTriangle(T0, FIndex3i(E00, E01, E10));
-
-					const FVector3f N00 = FVector3f(Mesh.GetVertex(V00).GetSafeNormal());
-					const FVector3f N01 = FVector3f(Mesh.GetVertex(V01).GetSafeNormal());
-					const FVector3f N10 = FVector3f(Mesh.GetVertex(V10).GetSafeNormal());
-					const int32 NE00 = NormalOverlay->AppendElement(N00);
-					const int32 NE01 = NormalOverlay->AppendElement(N01);
-					const int32 NE10 = NormalOverlay->AppendElement(N10);
-					NormalOverlay->SetTriangle(T0, FIndex3i(NE00, NE01, NE10));
 				}
 
-				if (T1 >= 0 && UVOverlay != nullptr && NormalOverlay != nullptr)
+				if (T1 >= 0 && UVOverlay != nullptr)
 				{
 					const FVector2f UV10(static_cast<float>(X + 1) / N, static_cast<float>(Y) / N);
 					const FVector2f UV01(static_cast<float>(X) / N, static_cast<float>(Y + 1) / N);
@@ -223,14 +220,6 @@ namespace TerraSphericalTileGenerator
 					const int32 E01 = UVOverlay->AppendElement(UV01);
 					const int32 E11 = UVOverlay->AppendElement(UV11);
 					UVOverlay->SetTriangle(T1, FIndex3i(E10, E01, E11));
-
-					const FVector3f N10 = FVector3f(Mesh.GetVertex(V10).GetSafeNormal());
-					const FVector3f N01 = FVector3f(Mesh.GetVertex(V01).GetSafeNormal());
-					const FVector3f N11 = FVector3f(Mesh.GetVertex(V11).GetSafeNormal());
-					const int32 NE10 = NormalOverlay->AppendElement(N10);
-					const int32 NE01 = NormalOverlay->AppendElement(N01);
-					const int32 NE11 = NormalOverlay->AppendElement(N11);
-					NormalOverlay->SetTriangle(T1, FIndex3i(NE10, NE01, NE11));
 				}
 			}
 		}
@@ -322,7 +311,8 @@ UStaticMesh* UTerraSphericalTileGeneratorLibrary::GenerateSphericalTileStaticMes
 		true);
 
 	FGeometryScriptCreateNewStaticMeshAssetOptions StaticMeshOptions;
-	StaticMeshOptions.bEnableRecomputeNormals = false;
+	// Height and edge-occlusion displace the spherical patch, so normals must match final geometry.
+	StaticMeshOptions.bEnableRecomputeNormals = true;
 	StaticMeshOptions.bEnableRecomputeTangents = true;
 	StaticMeshOptions.bEnableNanite = Settings.bEnableNanite;
 	StaticMeshOptions.bEnableCollision = Settings.bEnableCollision;
