@@ -12,6 +12,7 @@ const STRATEGIC_TOOL_NAMES = [
   "terra.strategy.find_enemy_pressure",
   "terra.strategy.describe_strategic_options",
 ];
+const TOPOLOGY_TOOL_NAME = "terra.inspect_local_topology";
 
 function parseArgs(argv) {
   const args = {
@@ -22,8 +23,10 @@ function parseArgs(argv) {
     maxSteps: parsePositiveInt(process.env.TERRA_NPC_LLM_MAX_STEPS, DEFAULT_MAX_STEPS),
     dryRunLlm: false,
     exposeStrategicTools: false,
+    exposeTopologyTool: false,
     prefetchStrategicContext: true,
     llmToolTakeaways: false,
+    hiddenToolNames: new Set(),
   };
 
   for (let i = 2; i < argv.length; ++i) {
@@ -48,10 +51,16 @@ function parseArgs(argv) {
       args.dryRunLlm = true;
     } else if (arg === "--allow-strategy-tools") {
       args.exposeStrategicTools = true;
+    } else if (arg === "--allow-topology-tool") {
+      args.exposeTopologyTool = true;
     } else if (arg === "--no-strategy-prefetch") {
       args.prefetchStrategicContext = false;
     } else if (arg === "--llm-tool-takeaways") {
       args.llmToolTakeaways = true;
+    } else if (arg === "--hide-tool" && argv[i + 1]) {
+      args.hiddenToolNames.add(argv[++i]);
+    } else if (arg.startsWith("--hide-tool=")) {
+      args.hiddenToolNames.add(arg.slice("--hide-tool=".length));
     } else if (arg === "--help" || arg === "-h") {
       args.help = true;
     }
@@ -80,8 +89,10 @@ Environment:
 Options:
   --dry-run-llm                 Print the first LLM request payload and stop.
   --allow-strategy-tools        Let the LLM call terra.strategy.* tools alongside current UI tools.
+  --allow-topology-tool         Let the LLM call terra.inspect_local_topology alongside current UI tools.
   --no-strategy-prefetch        Do not have the supervisor prefetch strategic context at turn start.
   --llm-tool-takeaways          Ask the LLM for one factual takeaway after every tool result.
+  --hide-tool <name>            Hide one listed MCP tool from the LLM for an experiment.
 `);
 }
 
@@ -247,26 +258,23 @@ function filterInteractiveTools(toolsResult) {
     }));
 }
 
-function filterAvailableTools(toolsResult, exposeStrategicTools) {
+function filterAvailableTools(toolsResult, exposeStrategicTools, exposeTopologyTool, hiddenToolNames) {
   const interactiveTools = filterInteractiveTools(toolsResult);
-  if (!exposeStrategicTools) {
-    return interactiveTools;
-  }
-
-  const strategicTools = (toolsResult?.tools || [])
-    .filter((tool) => STRATEGIC_TOOL_NAMES.includes(tool.name))
+  const queryTools = (toolsResult?.tools || [])
+    .filter((tool) => (exposeStrategicTools && STRATEGIC_TOOL_NAMES.includes(tool.name))
+      || (exposeTopologyTool && tool.name === TOPOLOGY_TOOL_NAME))
     .map((tool) => ({
       name: tool.name,
       description: tool.description || "",
       input_schema: tool.inputSchema || tool.input_schema || {},
     }));
-  return [...interactiveTools, ...strategicTools];
+  return [...interactiveTools, ...queryTools].filter((tool) => !hiddenToolNames.has(tool.name));
 }
 
-function buildSystemPrompt(exposeStrategicTools) {
+function buildSystemPrompt(exposeStrategicTools, exposeTopologyTool) {
   return [
     "You are the NPC brain for TerraCivilization.",
-    exposeStrategicTools
+    exposeStrategicTools || exposeTopologyTool
       ? "You operate through stateful interactive MCP UI tools and idempotent strategic MCP query tools."
       : "You operate through interactive MCP UI tools only.",
     "You must think explicitly in a structured way before each tool call.",
@@ -296,6 +304,15 @@ function buildSystemPrompt(exposeStrategicTools) {
     "- Do not treat a strategic option as a legal action. Use UI tools and local tactical cards to validate a concrete piece and destination.",
     exposeStrategicTools
       ? "- terra.strategy.* tools are available in addition to UI tools. They are read-only, accept {}, and can be called in any interaction phase. Use them deliberately to choose or revise an intent; do not repeatedly request an unchanged strategic view without a new question."
+      : "",
+    exposeStrategicTools
+      ? "- describe_strategic_options returns unranked investigation candidates, never a best move. Compare evidence_scope, evidence_tags, key pieces/cells, route_cell_ids, terrain_tags, and validation_questions yourself. A graph-distance-only candidate requires topology or UI validation before confirmation."
+      : "",
+    exposeTopologyTool
+      ? "- terra.inspect_local_topology(cell_id) is a read-only, fixed-radius-3 local graph observation. Use it when a strategic key cell, frontline cell, selected piece, or preview destination needs local terrain-and-piece topology inspection. State the specific structure you want to verify in purpose."
+      : "",
+    exposeTopologyTool
+      ? "- Its cells contain only terrain and occupant state; its undirected edges are the only authoritative adjacency relation. Do not infer adjacency from CellId values. Use the graph to form or reject a hypothesis about routes, terrain blocks, cover, anchors, or enemy structure, but still validate concrete movement with UI tools."
       : "",
     "",
     "Local tactical card semantics:",
@@ -328,9 +345,9 @@ function buildSystemPrompt(exposeStrategicTools) {
   ].filter(Boolean).join("\n");
 }
 
-function buildUserPrompt(availableTools, history, currentState, strategicContext, exposeStrategicTools) {
+function buildUserPrompt(availableTools, history, currentState, strategicContext, exposeStrategicTools, exposeTopologyTool) {
   return JSON.stringify({
-    task: exposeStrategicTools
+    task: exposeStrategicTools || exposeTopologyTool
       ? "Play exactly one NPC turn using only the listed tools. Stateful terra.ui_* tools are dynamically exposed by Gameplay; read-only terra.strategy.* tools may be queried at any phase. Give explicit structured reasoning before each tool call."
       : "Play exactly one NPC turn using only the currently visible interactive UI tools, with explicit structured reasoning before each tool call.",
     available_tools: availableTools,
@@ -342,6 +359,11 @@ function buildUserPrompt(availableTools, history, currentState, strategicContext
       ...(exposeStrategicTools ? [
         "A terra.strategy.* call is an information-gathering step, not a move and does not change interaction phase.",
         "Use strategy queries to answer a concrete question about material, frontline, terrain control, enemy pressure, or strategic alternatives before selecting or revising a UI line.",
+        "Never treat a strategic candidate as ranked or as a command. State why its evidence and validation questions make it worth investigating relative to other visible candidates.",
+      ] : []),
+      ...(exposeTopologyTool ? [
+        "Call terra.inspect_local_topology only when you can state a concrete local topology question; include that question in purpose.",
+        "After a topology result, use its cells and edges explicitly in the next hypothesis or explain why it did not answer the question.",
       ] : []),
       "Do not invent piece ids or destination cell ids.",
       "Base your reasoning on observed tool outputs, not on imagined topology.",
@@ -563,12 +585,13 @@ function validateLlmStep(step, allowedToolNames) {
 
 function sanitizeToolResult(result) {
   const text = JSON.stringify(result);
-  if (text.length <= 12000) {
+  const maxCharacters = Array.isArray(result?.strategic_options) ? 32000 : 12000;
+  if (text.length <= maxCharacters) {
     return result;
   }
   return {
-    note: "tool result truncated for prompt budget",
-    json_preview: text.slice(0, 12000),
+    note: `tool result truncated for prompt budget at ${maxCharacters} characters`,
+    json_preview: text.slice(0, maxCharacters),
   };
 }
 
@@ -591,7 +614,7 @@ async function main() {
   const init = await mcp.initialize();
   console.log(`[Agent] MCP initialized. Protocol=${init?.protocolVersion || "unknown"} Session=${mcp.sessionId}`);
 
-  const systemPrompt = buildSystemPrompt(args.exposeStrategicTools);
+  const systemPrompt = buildSystemPrompt(args.exposeStrategicTools, args.exposeTopologyTool);
   const history = [];
   let currentState = null;
   let executed = false;
@@ -602,7 +625,7 @@ async function main() {
   for (let stepIndex = 1; stepIndex <= args.maxSteps; ++stepIndex) {
     const toolsResult = await mcp.listTools();
     const interactiveTools = filterInteractiveTools(toolsResult);
-    const availableTools = filterAvailableTools(toolsResult, args.exposeStrategicTools);
+    const availableTools = filterAvailableTools(toolsResult, args.exposeStrategicTools, args.exposeTopologyTool, args.hiddenToolNames);
     const allowedToolNames = new Set(availableTools.map((tool) => tool.name));
 
     if (availableTools.length <= 0) {
@@ -617,7 +640,7 @@ async function main() {
       console.log(`[Agent] Strategic snapshot: ${strategicContext.snapshot_key}`);
     }
 
-    const userPrompt = buildUserPrompt(availableTools, history, currentState, strategicContext, args.exposeStrategicTools);
+    const userPrompt = buildUserPrompt(availableTools, history, currentState, strategicContext, args.exposeStrategicTools, args.exposeTopologyTool);
     const llmStep = await askLlmForStep(args, systemPrompt, userPrompt);
     validateLlmStep(llmStep, allowedToolNames);
 

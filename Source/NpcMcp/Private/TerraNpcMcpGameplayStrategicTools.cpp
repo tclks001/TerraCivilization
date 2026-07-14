@@ -174,11 +174,14 @@ namespace
         {
             TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
             Object->SetStringField(TEXT("intent"), Option.Intent);
-            Object->SetNumberField(TEXT("priority"), Option.Priority);
+            Object->SetStringField(TEXT("evidence_scope"), Option.EvidenceScope);
             Object->SetArrayField(TEXT("evidence_tags"), MakeStringArray_(Option.EvidenceTags));
             Object->SetArrayField(TEXT("key_piece_ids"), MakeNumberArray_(Option.KeyPieceIds));
             Object->SetArrayField(TEXT("key_cell_ids"), MakeNumberArray_(Option.KeyCellIds));
+            Object->SetArrayField(TEXT("route_cell_ids"), MakeNumberArray_(Option.RouteCellIds));
+            Object->SetArrayField(TEXT("terrain_tags"), MakeStringArray_(Option.TerrainTags));
             if (Option.TargetEnemyFactionId != INDEX_NONE) Object->SetNumberField(TEXT("target_enemy_faction_id"), Option.TargetEnemyFactionId); else Object->SetField(TEXT("target_enemy_faction_id"), MakeShared<FJsonValueNull>());
+            Object->SetArrayField(TEXT("validation_questions"), MakeStringArray_(Option.ValidationQuestions));
             Result.Add(MakeShared<FJsonValueObject>(Object));
         }
         return Result;

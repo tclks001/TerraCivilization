@@ -10,7 +10,8 @@
     "run-llm-basic-tools": "node src/run-llm-basic-tools.js",
     "run-llm-interactive-tools": "node src/run-llm-interactive-tools.js",
     "run-llm-interactive-think": "node src/run-llm-interactive-think.js",
-    "run-llm-strategy-interactive-think": "node src/run-llm-strategy-interactive-think.js"
+    "run-llm-strategy-interactive-think": "node src/run-llm-strategy-interactive-think.js",
+    "run-llm-strategy-topology-interactive-think": "node src/run-llm-strategy-topology-interactive-think.js"
   },
   "engines": {
     "node": ">=18"

@@ -27,6 +27,7 @@ TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpStrategicFrontlineTool();
 TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpStrategicTerrainTool();
 TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpStrategicEnemyPressureTool();
 TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpStrategicOptionsTool();
+TSharedRef<IModelContextProtocolTool> MakeTerraNpcMcpInspectLocalTopologyTool();
 
 IMPLEMENT_MODULE(FNpcMcpModule, NpcMcp)
 
@@ -84,6 +85,7 @@ void FNpcMcpModule::RegisterTools_()
     AllToolsByName.Add(TEXT("terra.strategy.find_terrain_control_points"), MakeTerraNpcMcpStrategicTerrainTool());
     AllToolsByName.Add(TEXT("terra.strategy.find_enemy_pressure"), MakeTerraNpcMcpStrategicEnemyPressureTool());
     AllToolsByName.Add(TEXT("terra.strategy.describe_strategic_options"), MakeTerraNpcMcpStrategicOptionsTool());
+    AllToolsByName.Add(TEXT("terra.inspect_local_topology"), MakeTerraNpcMcpInspectLocalTopologyTool());
 
     const TArray<FString> AlwaysOnToolNames = {
         TEXT("terra.ping_gameplay"),
@@ -96,7 +98,8 @@ void FNpcMcpModule::RegisterTools_()
         TEXT("terra.strategy.describe_frontline"),
         TEXT("terra.strategy.find_terrain_control_points"),
         TEXT("terra.strategy.find_enemy_pressure"),
-        TEXT("terra.strategy.describe_strategic_options")
+        TEXT("terra.strategy.describe_strategic_options"),
+        TEXT("terra.inspect_local_topology")
     };
 
     for (const FString& ToolName : AlwaysOnToolNames)

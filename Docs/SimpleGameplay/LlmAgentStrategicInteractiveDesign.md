@@ -1,7 +1,7 @@
 # LLM Agent 战略思考与交互式战术工具设计稿
 
 日期：2026-07-09
-状态：总体设计持续维护中；A1/A2/A3 与 L1 已实现并验证。
+状态：总体设计持续维护中；A1/A2/A3、L1、L2、L3、L3.1 已实现并完成 Runtime 验证。
 
 ## 目标
 
@@ -191,13 +191,11 @@ terra.execute_validated_action
 战略语义工具把原始棋盘压缩成 LLM 更容易理解的概念：
 
 ```text
-terra.summarize_faction_state
-terra.describe_strategic_options
-terra.describe_frontline
-terra.describe_ring_control
-terra.find_terrain_control_points
-terra.find_enemy_pressure
-terra.summarize_recent_hostility
+terra.strategy.summarize_faction_state
+terra.strategy.describe_strategic_options
+terra.strategy.describe_frontline
+terra.strategy.find_terrain_control_points
+terra.strategy.find_enemy_pressure
 ```
 
 返回的信息不应该是几百个格子的列表，而应该是战略摘要：
@@ -224,7 +222,26 @@ terra.summarize_recent_hostility
 }
 ```
 
-### 3. 战术分析工具
+### 3. L3.1 局部拓扑观察工具
+
+[L3.1 局部拓扑观察工具设计稿](L31LocalTopologyObservationDesign.md) 补上“玩家看棋盘”与“LLM 读局部图”之间的观察层：
+
+```text
+terra.inspect_local_topology(cell_id)
+```
+
+它不是行动工具，也不替代 L2 的合法行动、风险和局部战术卡。它固定返回目标 Cell 半径 3 内的：
+
+```text
+cells：每个 Cell 的 terrain 与占据该格的 piece/faction/type。
+edges：局部子图内的无向真实邻接边。
+```
+
+该工具始终可见、只读、幂等，不改变 UI 选择、高亮或镜头。LLM 应在战略工具指出 control point、前线或关键棋子后，主动调用它确认局部通路、山地阻断、森林掩护、友军锚点和敌我结构；不得仅从 CellId 数字或世界空间想象拓扑。
+
+`cells` 不包含 offset、distance、neighbor list 等重复拓扑字段，`edges` 是唯一权威图关系。LLM 不负责以图论保证行动合法性，仍必须使用 `ui_select_piece` / `ui_preview_move` 和 Gameplay validator 验证具体走法。
+
+### 4. 战术分析工具
 
 战术分析工具负责把战略意图落到可验证的候选计划：
 
@@ -599,17 +616,25 @@ UE validator 保持权威。
    - 目标是表达通用事实，例如山前骑兵死角、可作为下一回合跳跃锚点、可形成友军屏障，而不是硬编码固定棋谱。
 
 3. [L3 战略语义工具](L3StrategicSemanticToolsDesign.md)
-   - 阵营摘要、地形控制点、环形拓扑、前线、敌方压力、近期敌对事件。
+   - 已完成：阵营摘要、地形控制点、前线和敌方压力。
 
-4. 多回合协同分析工具
+4. [L3.2 战略候选重写](L32StrategicOptionsRewriteDesign.md)
+   - 已完成：重写 `describe_strategic_options`，移除 priority，枚举前线、争议地形、地形走廊和暴露单位等调查候选。
+   - 候选是可验证的观察线索，不是行动或分数排序命令。
+
+5. [L3.1 局部拓扑观察工具](L31LocalTopologyObservationDesign.md)
+   - 已完成：以指定 Cell 为中心返回固定半径 3 的真实局部子图，供 LLM 主动观察地形、棋子与连接关系。
+   - 首轮 Agent 已主动查询战略 control point；验证了局部边关系读取，但也证明 raw topology 不能替代兵种受限可达性与目标对齐工具。
+
+6. 多回合协同分析工具
    - 以确定性枚举输出可验证的两回合/多回合候选计划、屏障、远程火力窗口和多跳链机会。
    - LLM 比较计划与上下文，不自行证明规则可行性。
 
-5. 阵营记忆与 active plan
+7. 阵营记忆与 active plan
    - 每个 NPC 阵营独立上下文。
    - 记录计划、敌对关系、近期攻击和被攻击事件。
 
-6. 生产级多阵营 Agent 调度
+8. 生产级多阵营 Agent 调度
    - 12 个阵营各自拥有独立记忆和 active plan，不共享隐式对话上下文。
    - Agent 按回合复用或重建会话均可，但每回合都以 Gameplay 返回的事实和该阵营持久记忆为准。
    - 依据玩家可见性、重要性和预算决定展示完整 review 还是后台快速执行。

@@ -1,7 +1,7 @@
 # L3 战略语义工具设计稿
 
 日期：2026-07-13  
-状态：C++ 已落地，Game target 编译通过；独立 Editor Runtime MCP/Agent 验收等待当前编辑器会话释放 DLL 后执行。
+状态：已完成并独立 Runtime 验收。
 
 ## 目标
 
@@ -108,7 +108,9 @@ control_status：friendly_closer / enemy_closer / contested / unclaimed。
 
 候选按以下稳定规则截断至 12 个：先 `contested`，再较小双方最小距离，再地形优先级（forest、mountain），再 cell id。不会为了“战略感”返回远离战线的全图 terrain 列表。
 
-### 战略选项
+### 战略选项（已由 L3.2 替换）
+
+本节描述的是 L3 v1 的历史实现，已不应作为 Agent 行为依据。详细重写方案见 [L3.2 战略候选重写](L32StrategicOptionsRewriteDesign.md)。
 
 `describe_strategic_options` 从上述事实生成有限的、可追溯的候选意图，而不是给具体 action：
 
@@ -119,7 +121,7 @@ control_status：friendly_closer / enemy_closer / contested / unclaimed。
 | `preserve_exposed_unit` | 存在邻近友军不足 1 且距离敌人不大于前线阈值的 movable piece | key piece / cell / enemy distance。 |
 | `reinforce_frontline` | 最近前线 piece 友军支援不足而后方存在更近友军群 | key frontline piece / nearby support piece。 |
 
-每个选项输出 `priority`、`evidence_tags`、`key_piece_ids`、`key_cell_ids`、`target_enemy_faction_id`。未满足触发条件的意图不返回；所有候选不足时，返回 `observe_and_develop`，但仍带事实证据。
+L3.2 移除 `priority`，并枚举全部候选。旧字段与旧命名仅用于理解此前验收日志，不应新增依赖。
 
 ## MCP 返回示例
 
@@ -154,7 +156,6 @@ control_status：friendly_closer / enemy_closer / contested / unclaimed。
   "strategic_options": [
     {
       "intent": "advance_contact",
-      "priority": 58,
       "evidence_tags": ["nearest_enemy_distance_3", "movable_frontline_piece"],
       "key_piece_ids": [22],
       "key_cell_ids": [204],
@@ -219,7 +220,7 @@ tools/list
 
 Agent 必须检查五个返回的 `turn_index/current_faction_id/interaction_phase` 相同。若任何 snapshot 不一致、工具失败或 phase 已不为 Idle，丢弃整组结果并重新 `tools/list` 后重试，而不是把不同回合的信息混给 LLM。
 
-推荐新实验脚本：`run-llm-strategic-interactive-think.js`。它复用现有 MCP HTTP client 和结构化 LLM 输出，但在第一轮 LLM 前自动并行预取 L3 工具；后续 UI 调用不并行。
+推荐实验脚本：`run-llm-strategy-interactive-think.js`。它复用现有 MCP HTTP client 和结构化 LLM 输出，并可把 strategy 工具与当前 phase 可见 UI 工具同时交给 LLM；后续 UI 调用不并行。
 
 ## 验收标准
 
@@ -235,4 +236,29 @@ Agent 必须检查五个返回的 `turn_index/current_faction_id/interaction_pha
 
 ## 后续
 
-L3 不直接枚举两回合固定计划。L4 才应在 L2 卡与 L3 intent 的共同约束下，做可验证的兵种协同、屏障、远程射线和多跳链候选枚举。这样“战略为什么”与“战术如何做到”保持分层，而不会把大量棋谱塞进提示词。
+## 实施与验收结项
+
+L3 已在 Runtime MCP 中实现并完成独立 Game 验收：
+
+```text
+Gameplay：
+  FCurrentFactionStrategicSnapshot、阵营/前线/地形控制/敌方压力/透明战略选项。
+
+NpcMcp：
+  TerraNpcMcpGameplayStrategicTools.cpp。
+  五个 terra.strategy.* 工具均在 AlwaysOnToolNames 中注册。
+
+Agent：
+  run-llm-strategy-interactive-think.js 可同时暴露当前 ui_* 与五个 strategy 工具。
+  LLM 已实际调用 describe_frontline / describe_strategic_options，并以返回的 intent 选择观察棋子。
+```
+
+独立 Staged Game 验收中，LLM 能完成 `begin_turn_review -> strategy query -> select -> preview -> confirm`，并由 Gameplay 正常推进回合。战略工具不改变 interaction phase，UI 工具仍只由 Gameplay 状态机控制。
+
+本轮验收确认了 L3 v1 的边界：旧战略 `contest_terrain` 只说明值得关注的地形，不证明某一兵种可到达或可穿越它。L3.2 已以 `investigate_contested_terrain` 取代该命名，并要求 L2 局部卡和 L3.1 局部拓扑验证路径、阻断与协同。
+
+## 后续
+
+[L3.1 局部拓扑观察工具](L31LocalTopologyObservationDesign.md) 紧接 L3，提供以任意 Cell 为中心、半径固定为 3 的真实局部子图。它让 LLM 在决定查看某一战略 control point、棋子或落点时，获得与玩家观察棋盘相近的地形、兵种和图边信息。
+
+L4 才应在 L2 卡、L3 intent 与 L3.1 局部子图的共同约束下，做可验证的兵种协同、屏障、远程射线和多跳链候选枚举。这样“战略为什么”与“战术如何做到”保持分层，而不会把大量棋谱塞进提示词。
