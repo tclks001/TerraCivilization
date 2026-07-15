@@ -30,6 +30,9 @@
 #include "Camera/PlayerCameraManager.h"
 #include "Interaction/PlanetInteractionController.h"
 #include "Kismet/GameplayStatics.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
+#include "Tutorial/TerraTutorialScenarioData.h"
 DEFINE_LOG_CATEGORY_STATIC(LogPlanetTess, Log, All);
 
 // ===================================================================
@@ -135,6 +138,29 @@ void APlanetTessellatedMesh::OnConstruction(const FTransform& Transform)
 void APlanetTessellatedMesh::BeginPlay()
 {
     Super::BeginPlay();
+
+    FString TutorialScenarioPath;
+    const bool bHasTutorialScenario = FParse::Value(FCommandLine::Get(), TEXT("TutorialScenario="), TutorialScenarioPath);
+    if (bHasTutorialScenario)
+    {
+        UTerraTutorialScenarioData* Scenario = LoadObject<UTerraTutorialScenarioData>(nullptr, *TutorialScenarioPath);
+        if (!Scenario)
+        {
+            UE_LOG(LogPlanetTess, Error, TEXT("[Tutorial] Failed to load TutorialScenario '%s'; using default initialization."), *TutorialScenarioPath);
+        }
+        else
+        {
+            CellSubdivisionLevel = Scenario->CellSubdivisionLevel;
+            RebuildAll_();
+            FString Error;
+            if (PlanetGameplayComponent && PlanetGameplayComponent->InitializeTutorialScenario(*Scenario, Error))
+            {
+                UE_LOG(LogPlanetTess, Log, TEXT("[Tutorial] Loaded scenario '%s'."), *Scenario->ScenarioId.ToString());
+                return;
+            }
+            UE_LOG(LogPlanetTess, Error, TEXT("[Tutorial] Failed to initialize scenario '%s': %s; using default initialization."), *Scenario->ScenarioId.ToString(), *Error);
+        }
+    }
 
     const UWorld* World = GetWorld();
     if (World && World->IsGameWorld()
@@ -579,6 +605,7 @@ void APlanetTessellatedMesh::DrawG1DebugPieces_() const
     if (PlanetGameplayComponent)
     {
         PlanetGameplayComponent->DrawG1DebugPieces();
+        PlanetGameplayComponent->TickTutorialNpcScript();
     }
 }
 

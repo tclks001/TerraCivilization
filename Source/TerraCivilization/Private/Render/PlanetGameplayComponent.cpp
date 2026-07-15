@@ -4,6 +4,7 @@
 #include "Render/PlanetCameraComponent.h"
 #include "Render/PlanetHISMInteractionComponent.h"
 #include "Render/PlanetPiecePresentationComponent.h"
+#include "Tutorial/TerraTutorialScenarioData.h"
 #include "NpcMcp.h"
 #include "TerraNpcMcpGameplayBridge.h"
 
@@ -231,6 +232,144 @@ void UPlanetGameplayComponent::RebuildGameplay()
     }
     RefreshCurrentFactionPieceHighlights();
     Host->SyncP1PiecePresentation_();
+}
+
+bool UPlanetGameplayComponent::InitializeTutorialScenario(const UTerraTutorialScenarioData& Scenario, FString& OutError)
+{
+    OutError.Reset();
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host || !Host->CellTopology.IsValid() || !Host->Generator.IsValid())
+    {
+        OutError = TEXT("tutorial_host_not_ready");
+        return false;
+    }
+
+    const int32 NumCells = Host->CellTopology->Cells.Num();
+    TArray<ETerraSimpleTerrainType> TerrainField;
+    TerrainField.Init(ETerraSimpleTerrainType::Plain, NumCells);
+    for (const FTerraTutorialTerrainPlacement& Override : Scenario.TerrainOverrides)
+    {
+        if (!TerrainField.IsValidIndex(Override.CellId))
+        {
+            OutError = FString::Printf(TEXT("invalid_terrain_cell:%d"), Override.CellId);
+            return false;
+        }
+        TerrainField[Override.CellId] = Override.Terrain == ETerraGameplayTerrainType::Forest
+            ? ETerraSimpleTerrainType::Forest
+            : Override.Terrain == ETerraGameplayTerrainType::Mountain ? ETerraSimpleTerrainType::Mountain : ETerraSimpleTerrainType::Plain;
+    }
+
+    TArray<FTerraGameplayCellState> GameplayCells;
+    GameplayCells.SetNum(NumCells);
+    for (int32 CellId = 0; CellId < NumCells; ++CellId)
+    {
+        const FCell& SourceCell = Host->CellTopology->Cells[CellId];
+        FTerraGameplayCellState& Cell = GameplayCells[CellId];
+        Cell.CellId = CellId;
+        Cell.bIsPentagon = SourceCell.bIsPentagon;
+        Cell.NeighborCellIds = SourceCell.NeighborCellIds;
+        Cell.TerrainType = TerrainField[CellId] == ETerraSimpleTerrainType::Forest
+            ? ETerraGameplayTerrainType::Forest
+            : TerrainField[CellId] == ETerraSimpleTerrainType::Mountain ? ETerraGameplayTerrainType::Mountain : ETerraGameplayTerrainType::Plain;
+    }
+
+    TArray<FTerraGameplayPieceState> Pieces;
+    Pieces.SetNum(Scenario.InitialPieces.Num());
+    for (const FTerraTutorialPiecePlacement& Placement : Scenario.InitialPieces)
+    {
+        if (!Pieces.IsValidIndex(Placement.PieceId) || Placement.PieceId == INDEX_NONE)
+        {
+            OutError = FString::Printf(TEXT("piece_ids_must_be_contiguous_from_zero:%d"), Placement.PieceId);
+            return false;
+        }
+        FTerraGameplayPieceState& Piece = Pieces[Placement.PieceId];
+        if (Piece.PieceId != INDEX_NONE)
+        {
+            OutError = FString::Printf(TEXT("duplicate_piece_id:%d"), Placement.PieceId);
+            return false;
+        }
+        if (!GameplayCells.IsValidIndex(Placement.CellId)
+            || (Placement.PieceType == ETerraGameplayPieceType::Cavalry && GameplayCells[Placement.CellId].TerrainType == ETerraGameplayTerrainType::Mountain))
+        {
+            OutError = FString::Printf(TEXT("invalid_piece_cell_or_cavalry_mountain:%d"), Placement.CellId);
+            return false;
+        }
+        Piece.PieceId = Placement.PieceId;
+        Piece.OwnerFactionId = Placement.OwnerFactionId;
+        Piece.bIsNeutral = Placement.bIsNeutral;
+        Piece.CellId = Placement.CellId;
+        Piece.PieceType = Placement.PieceType;
+        Piece.bAlive = true;
+        Piece.bCanMove = Placement.bCanMove && !Placement.bIsNeutral;
+    }
+
+    TArray<FTerraGameplayEquipmentDropState> EquipmentDrops;
+    for (const FTerraTutorialEquipmentDropPlacement& Placement : Scenario.InitialEquipmentDrops)
+    {
+        if (!GameplayCells.IsValidIndex(Placement.CellId))
+        {
+            OutError = FString::Printf(TEXT("invalid_equipment_cell:%d"), Placement.CellId);
+            return false;
+        }
+        FTerraGameplayEquipmentDropState& Drop = EquipmentDrops.AddDefaulted_GetRef();
+        Drop.CellId = Placement.CellId;
+        Drop.bHasBow = Placement.bHasBow;
+        Drop.bHasHorse = Placement.bHasHorse;
+    }
+
+    RebuildGameplay();
+    if (!GameplayContainer->InitializeFixedScenario(GameplayCells, Pieces, EquipmentDrops, Scenario.InitialTurnFactionId, Scenario.InitialTurnIndex, OutError))
+    {
+        return false;
+    }
+
+    Host->Generator->OverrideSimpleTerrainField(TerrainField);
+    Host->RebuildHISMTileInstances_();
+    G2_5LastHighlightedFactionId = GameplayContainer->GetCurrentFactionId();
+    RefreshCurrentFactionPieceHighlights();
+    Host->SyncP1PiecePresentation_();
+    if (UPlanetCameraComponent* Camera = Host->GetPlanetCameraComponent())
+    {
+        Camera->C3InitialDistanceToFocusCM = Scenario.InitialCamera.DistanceToFocusCM;
+        Camera->ResetCameraState();
+        if (Scenario.InitialCamera.FocusCellId != INDEX_NONE)
+        {
+            Camera->FocusCameraOnCell(Scenario.InitialCamera.FocusCellId, true);
+        }
+    }
+    TutorialNpcActionSequence = Scenario.NpcActionSequence;
+    TutorialNpcActionSequence.Sort([](const FTerraTutorialNpcAction& A, const FTerraTutorialNpcAction& B) { return A.TurnIndex < B.TurnIndex; });
+    bTutorialNpcScriptFailed = false;
+    return true;
+}
+
+void UPlanetGameplayComponent::TickTutorialNpcScript()
+{
+    if (bTutorialNpcScriptFailed || TutorialNpcActionSequence.IsEmpty() || !GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
+    {
+        return;
+    }
+
+    const int32 CurrentTurnIndex = GameplayContainer->GetTurnIndex();
+    const int32 ActionIndex = TutorialNpcActionSequence.IndexOfByPredicate([CurrentTurnIndex](const FTerraTutorialNpcAction& Action)
+    {
+        return Action.TurnIndex == CurrentTurnIndex;
+    });
+    if (ActionIndex == INDEX_NONE)
+    {
+        return;
+    }
+
+    const FTerraTutorialNpcAction Action = TutorialNpcActionSequence[ActionIndex];
+    FTerraGameplayContainer::FValidatedActionExecutionResult Result;
+    const bool bExecuted = TryExecuteNpcMcpValidatedAction(CurrentTurnIndex, GameplayContainer->GetCurrentFactionId(), Action.PieceId, Action.TargetCellId, Result);
+    TutorialNpcActionSequence.RemoveAt(ActionIndex);
+    if (!bExecuted)
+    {
+        bTutorialNpcScriptFailed = true;
+        UE_LOG(LogPlanetGameplayComponent, Error, TEXT("[Gameplay][Tutorial] NPC script action rejected. Turn=%d Piece=%d Target=%d Reason=%s"),
+            Action.TurnIndex, Action.PieceId, Action.TargetCellId, *Result.RejectReason);
+    }
 }
 
 void UPlanetGameplayComponent::RefreshGameplayHighlights(const TArray<int32>& DirtyCellIds)

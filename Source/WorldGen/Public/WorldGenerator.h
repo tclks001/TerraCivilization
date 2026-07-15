@@ -30,6 +30,7 @@ public:
     const TArray<FCellGeoData>& GetCellData() const { return CellData; }
     const TArray<int32>& GetBaseCellIds() const { return BaseCellIds; }
     const TArray<ETerraSimpleTerrainType>& GetSimpleTerrainField() const { return SimpleTerrainField; }
+    void OverrideSimpleTerrainField(const TArray<ETerraSimpleTerrainType>& InTerrainField);
 
 private:
     struct FMountainGrowTip
@@ -44,7 +45,7 @@ private:
     void BuildSimpleProtectedCells(int32 Radius);
     void GenerateMountainStrips();
     void GenerateForestPatches();
-    void WriteSimpleTerrainToCellData();
+    void WriteSimpleTerrainToCellData(bool bClearProtectedCells = true);
     void LogSimpleTerrainSummary() const;
 
     int32 SamplePositiveNormalCount(float AverageCount) const;

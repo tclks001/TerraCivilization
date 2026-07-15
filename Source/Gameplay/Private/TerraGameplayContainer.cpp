@@ -182,6 +182,117 @@ bool FTerraGameplayContainer::CollectCurrentFactionPieceCellIds(TArray<int32>& O
     return CollectFactionPieceCellIds(CurrentFactionId, OutCellIds);
 }
 
+bool FTerraGameplayContainer::InitializeFixedScenario(
+    const TArray<FTerraGameplayCellState>& InCells,
+    const TArray<FTerraGameplayPieceState>& InPieces,
+    const TArray<FTerraGameplayEquipmentDropState>& InEquipmentDrops,
+    int32 InitialFactionId,
+    int32 InitialTurnIndex,
+    FString& OutError)
+{
+    OutError.Reset();
+    Cells = InCells;
+    ResetRuntimeState_();
+    InitializeActionLogFilePath_();
+
+    if (Cells.IsEmpty() || InitialTurnIndex < 0)
+    {
+        OutError = TEXT("invalid_cells_or_turn_index");
+        return false;
+    }
+
+    Pieces = InPieces;
+    CellToPieceId.Init(INDEX_NONE, Cells.Num());
+    TSet<int32> FactionIds;
+    TMap<int32, int32> CommanderCellByFaction;
+    for (int32 ArrayIndex = 0; ArrayIndex < Pieces.Num(); ++ArrayIndex)
+    {
+        FTerraGameplayPieceState& Piece = Pieces[ArrayIndex];
+        if (Piece.PieceId != ArrayIndex || !Piece.bAlive || !IsValidCellId_(Piece.CellId)
+            || CellToPieceId[Piece.CellId] != INDEX_NONE)
+        {
+            OutError = FString::Printf(TEXT("invalid_piece_index_or_cell:%d"), ArrayIndex);
+            ResetRuntimeState_();
+            return false;
+        }
+
+        if (!Piece.bIsNeutral)
+        {
+            if (Piece.OwnerFactionId == INDEX_NONE)
+            {
+                OutError = FString::Printf(TEXT("invalid_piece_faction:%d"), ArrayIndex);
+                ResetRuntimeState_();
+                return false;
+            }
+            FactionIds.Add(Piece.OwnerFactionId);
+            if (Piece.PieceType == ETerraGameplayPieceType::Commander)
+            {
+                if (CommanderCellByFaction.Contains(Piece.OwnerFactionId))
+                {
+                    OutError = FString::Printf(TEXT("duplicate_commander_faction:%d"), Piece.OwnerFactionId);
+                    ResetRuntimeState_();
+                    return false;
+                }
+                CommanderCellByFaction.Add(Piece.OwnerFactionId, Piece.CellId);
+            }
+        }
+        CellToPieceId[Piece.CellId] = Piece.PieceId;
+    }
+
+    if (!FactionIds.Contains(InitialFactionId))
+    {
+        OutError = TEXT("initial_faction_has_no_piece");
+        ResetRuntimeState_();
+        return false;
+    }
+
+    for (const int32 FactionId : FactionIds)
+    {
+        const int32* CommanderCellId = CommanderCellByFaction.Find(FactionId);
+        if (!CommanderCellId)
+        {
+            OutError = FString::Printf(TEXT("missing_commander_faction:%d"), FactionId);
+            ResetRuntimeState_();
+            return false;
+        }
+
+        FTerraGameplayFactionState& Faction = Factions.AddDefaulted_GetRef();
+        Faction.FactionId = FactionId;
+        Faction.BaseCellId = *CommanderCellId;
+        Faction.bAlive = true;
+        for (const FTerraGameplayPieceState& Piece : Pieces)
+        {
+            if (!Piece.bIsNeutral && Piece.OwnerFactionId == FactionId && Piece.PieceType == ETerraGameplayPieceType::Commander)
+            {
+                Faction.CommanderPieceId = Piece.PieceId;
+                break;
+            }
+        }
+    }
+    Factions.Sort([](const FTerraGameplayFactionState& A, const FTerraGameplayFactionState& B) { return A.FactionId < B.FactionId; });
+
+    for (const FTerraGameplayEquipmentDropState& Drop : InEquipmentDrops)
+    {
+        if (!IsValidCellId_(Drop.CellId))
+        {
+            OutError = FString::Printf(TEXT("invalid_equipment_cell:%d"), Drop.CellId);
+            ResetRuntimeState_();
+            return false;
+        }
+        FTerraGameplayEquipmentDropState& TargetDrop = EquipmentDropsByCellId.FindOrAdd(Drop.CellId);
+        TargetDrop.CellId = Drop.CellId;
+        TargetDrop.bHasBow |= Drop.bHasBow;
+        TargetDrop.bHasHorse |= Drop.bHasHorse;
+    }
+
+    CurrentFactionId = InitialFactionId;
+    TurnIndex = InitialTurnIndex;
+    bInitialized = true;
+    UE_LOG(LogTerraGameplay, Log, TEXT("[Gameplay][Tutorial] Fixed scenario initialized. Cells=%d Factions=%d Pieces=%d CurrentFaction=%d Turn=%d"),
+        Cells.Num(), Factions.Num(), Pieces.Num(), CurrentFactionId, TurnIndex);
+    return true;
+}
+
 void FTerraGameplayContainer::CollectEquipmentDrops(TArray<FTerraGameplayEquipmentDropState>& OutEquipmentDrops) const
 {
     OutEquipmentDrops.Reset();

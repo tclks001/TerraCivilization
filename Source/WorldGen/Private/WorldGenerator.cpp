@@ -28,6 +28,19 @@ void FWorldGenerator::Generate()
     LogSimpleTerrainSummary();
 }
 
+void FWorldGenerator::OverrideSimpleTerrainField(const TArray<ETerraSimpleTerrainType>& InTerrainField)
+{
+    if (InTerrainField.Num() != CellData.Num())
+    {
+        return;
+    }
+
+    SimpleTerrainField = InTerrainField;
+    // Teaching scenarios are authoritative: explicit terrain may intentionally
+    // occupy the random-world base protection area.
+    WriteSimpleTerrainToCellData(/*bClearProtectedCells=*/false);
+}
+
 void FWorldGenerator::InitSimpleTerrainAsPlain()
 {
     const int32 N = Topology ? Topology->Cells.Num() : 0;
@@ -162,14 +175,14 @@ void FWorldGenerator::GenerateForestPatches()
     }
 }
 
-void FWorldGenerator::WriteSimpleTerrainToCellData()
+void FWorldGenerator::WriteSimpleTerrainToCellData(bool bClearProtectedCells)
 {
     LastMountainCount = 0;
     LastForestCount = 0;
 
     for (int32 CellId = 0; CellId < CellData.Num(); ++CellId)
     {
-        if (IsProtectedCell(CellId))
+        if (bClearProtectedCells && IsProtectedCell(CellId))
         {
             SimpleTerrainField[CellId] = ETerraSimpleTerrainType::Plain;
         }

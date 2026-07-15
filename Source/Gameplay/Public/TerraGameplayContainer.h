@@ -225,6 +225,13 @@ public:
     };
 
     void Initialize(const TArray<FTerraGameplayCellState>& InCells, const FTerraGameplayNeutralSpawnConfig& InNeutralSpawnConfig = FTerraGameplayNeutralSpawnConfig());
+    bool InitializeFixedScenario(
+        const TArray<FTerraGameplayCellState>& InCells,
+        const TArray<FTerraGameplayPieceState>& InPieces,
+        const TArray<FTerraGameplayEquipmentDropState>& InEquipmentDrops,
+        int32 InitialFactionId,
+        int32 InitialTurnIndex,
+        FString& OutError);
 
     bool IsInitialized() const { return bInitialized; }
     int32 GetCurrentFactionId() const { return CurrentFactionId; }

@@ -4,6 +4,7 @@
 #include "Components/ActorComponent.h"
 #include "TerraGameplayContainer.h"
 #include "TerraNpcMcpGameplayBridge.h"
+#include "Tutorial/TerraTutorialScenarioData.h"
 #include "PlanetGameplayComponent.generated.h"
 
 class APlanetTessellatedMesh;
@@ -70,6 +71,8 @@ public:
     int32 G10NeutralArcherCount = 20;
 
     void RebuildGameplay();
+    bool InitializeTutorialScenario(const UTerraTutorialScenarioData& Scenario, FString& OutError);
+    void TickTutorialNpcScript();
     void RefreshGameplayHighlights(const TArray<int32>& DirtyCellIds);
     bool HandleGameplayCellClick(int32 CellId, const TCHAR* SourceLabel, int32 InstanceIndex, const FString& ComponentName);
     bool TryExecuteNpcMcpValidatedAction(int32 ExpectedTurnIndex, int32 ExpectedFactionId, int32 PieceId, int32 ToCellId, FTerraGameplayContainer::FValidatedActionExecutionResult& OutResult);
@@ -99,4 +102,6 @@ private:
     TUniquePtr<FTerraGameplayContainer> GameplayContainer;
     int32 G2_5LastHighlightedFactionId = INDEX_NONE;
     TArray<FTerraG1DebugPiece> G1DebugPieces;
+    TArray<FTerraTutorialNpcAction> TutorialNpcActionSequence;
+    bool bTutorialNpcScriptFailed = false;
 };
