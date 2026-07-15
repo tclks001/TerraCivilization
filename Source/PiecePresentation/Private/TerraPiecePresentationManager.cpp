@@ -45,7 +45,8 @@ void UTerraPiecePresentationManager::SyncPieces(
             FActorSpawnParameters SpawnParams;
             SpawnParams.Owner = Owner;
             SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-            SpawnParams.Name = FName(*FString::Printf(TEXT("TerraEquipmentDrop_%d"), Drop.CellId));
+            // A destroyed drop can retain its UObject name until end-of-frame. Let UE
+            // generate a unique actor name when Undo restores a drop on this cell.
             DropActor = World->SpawnActor<ATerraEquipmentDropActor>(ATerraEquipmentDropActor::StaticClass(), Drop.WorldTransform, SpawnParams);
             if (!DropActor)
             {

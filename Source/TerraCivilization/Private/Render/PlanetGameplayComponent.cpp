@@ -870,7 +870,10 @@ bool UPlanetGameplayComponent::HandleHISMUndo()
         const FTerraGameplayPieceState& PrevPiece = PrevPieces[NewPiece.PieceId];
         if (!PrevPiece.bAlive
             || PrevPiece.CellId == NewPiece.CellId
-            || PrevPiece.OwnerFactionId != NewPiece.OwnerFactionId)
+            || PrevPiece.OwnerFactionId != NewPiece.OwnerFactionId
+            // A G12 pickup changes the actor's visual composition. Do not animate that
+            // actor back as a different piece type; the restored snapshot must replace it.
+            || PrevPiece.PieceType != NewPiece.PieceType)
         {
             continue;
         }
