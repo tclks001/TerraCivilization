@@ -322,6 +322,6 @@ FogEndCM   = 最近可见地表距离 + 80% * 可见地表深度跨度
 
 ## 10. 后续衔接
 
-SL4.5 通过后进入 SL5。SL5 固化所有最终参数：`DL_Sun`、`SL_SpaceAmbient`、`DL_SpaceFill`（如使用）、`PPV_SpacePlanet`、`MI_SpaceSky`、`MI_PlanetAtmosphere`（如使用）以及 `MI_PP_PlanetAerialPerspective`。
+SL4.5 通过后进入 [SL4_6_TerminatorScatteringBandDesign.md](SL4_6_TerminatorScatteringBandDesign.md)，以共同地表母材质补齐晨昏散射带。SL4.6 通过后再进入 SL5，统一固化 `DL_Sun`、`SL_SpaceAmbient`、`DL_SpaceFill`（如使用）、`PPV_SpacePlanet`、`MI_SpaceSky`、`MI_PlanetAtmosphere`（如使用）、`MI_PP_PlanetAerialPerspective` 与晨昏散射材质参数。
 
 若未来需要严格物理的球壳体积散射，应建立独立的屏幕空间射线积分或体积材质设计稿；不得直接用 `ExponentialHeightFog` 替代本阶段的球面空气透视。
