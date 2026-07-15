@@ -203,7 +203,7 @@ void UPlanetGameplayComponent::RebuildGameplay()
     NeutralSpawnConfig.CavalryCount = FMath::Max(G10NeutralCavalryCount, 0);
     NeutralSpawnConfig.ArcherCount = FMath::Max(G10NeutralArcherCount, 0);
     NeutralSpawnConfig.SpawnSeed = G10NeutralSpawnSeed;
-    GameplayContainer->Initialize(GameplayCells, NeutralSpawnConfig);
+    GameplayContainer->Initialize(GameplayCells, NeutralSpawnConfig, T0TechnologyProgressionConfig);
     GameplayContainer->SetDebugKeepSameFactionOnEndTurn(bG3DebugKeepSameFactionOnEndTurn);
     FTerraNpcMcpGameplayBridge::RegisterGameplayContainer(GameplayContainer.Get());
     FTerraNpcMcpGameplayBridge::RegisterExecuteValidatedActionDelegate(
@@ -331,7 +331,14 @@ bool UPlanetGameplayComponent::InitializeTutorialScenario(const UTerraTutorialSc
     }
 
     RebuildGameplay();
-    if (!GameplayContainer->InitializeFixedScenario(GameplayCells, Pieces, EquipmentDrops, Scenario.InitialTurnFactionId, Scenario.InitialTurnIndex, OutError))
+    if (!GameplayContainer->InitializeFixedScenario(
+        GameplayCells,
+        Pieces,
+        EquipmentDrops,
+        Scenario.InitialTurnFactionId,
+        Scenario.InitialTurnIndex,
+        OutError,
+        T0TechnologyProgressionConfig))
     {
         return false;
     }

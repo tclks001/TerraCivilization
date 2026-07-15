@@ -74,6 +74,9 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G10")
     int32 G10NeutralSpawnSeed = 0;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay T0")
+    FTerraGameplayTechnologyProgressionConfig T0TechnologyProgressionConfig;
+
     void RebuildGameplay();
     bool InitializeTutorialScenario(const UTerraTutorialScenarioData& Scenario, FString& OutError);
     void TickTutorialNpcScript();

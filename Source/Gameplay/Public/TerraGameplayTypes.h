@@ -38,6 +38,81 @@ enum class ETerraGameplayInteractionPhase : uint8
     PieceJumpingCanContinue UMETA(DisplayName = "Piece Jumping Can Continue"),
 };
 
+UENUM(BlueprintType)
+enum class ETerraGameplayTechnologyId : uint8
+{
+    None UMETA(DisplayName = "None"),
+    PlaceholderTraining UMETA(DisplayName = "Placeholder Training"),
+    PlaceholderLogistics UMETA(DisplayName = "Placeholder Logistics"),
+    PlaceholderDoctrine UMETA(DisplayName = "Placeholder Doctrine"),
+};
+
+USTRUCT(BlueprintType)
+struct GAMEPLAY_API FTerraGameplayTechnologyProgressionConfig
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Technology Progression")
+    bool bEnableTechnologyProgression = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Technology Progression")
+    int32 TechnologyRandomSeed = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Technology Progression", meta = (ClampMin = "1"))
+    int32 FirstTechnologyUnlockScore = 100;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Technology Progression", meta = (ClampMin = "1"))
+    int32 TechnologyUnlockScoreIncrement = 160;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Technology Progression", meta = (ClampMin = "1"))
+    int32 MaxTechnologyCount = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Technology Progression", meta = (ClampMin = "0"))
+    int32 ScoreForInfantryCapture = 10;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Technology Progression", meta = (ClampMin = "0"))
+    int32 ScoreForEliteCapture = 15;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Technology Progression", meta = (ClampMin = "0"))
+    int32 ScoreForArcherCavalryCapture = 25;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Technology Progression", meta = (ClampMin = "0"))
+    int32 ScoreForPromotion = 10;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terra|Technology Progression", meta = (ClampMin = "0"))
+    int32 ScoreForFactionDefeat = 50;
+};
+
+USTRUCT(BlueprintType)
+struct GAMEPLAY_API FTerraGameplayFactionTechnologyState
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    int32 FactionId = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    int32 AccumulatedScore = 0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    int32 ScoreEarnedThisTurn = 0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    int32 NextUnlockScore = 100;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    int32 UnlockCount = 0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    bool bWaitingForTechnologyChoice = false;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    TArray<ETerraGameplayTechnologyId> OwnedTechnologies;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    TArray<ETerraGameplayTechnologyId> PendingTechnologyChoices;
+};
+
 USTRUCT(BlueprintType)
 struct GAMEPLAY_API FTerraGameplayNeutralSpawnConfig
 {

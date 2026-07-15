@@ -210,6 +210,7 @@ public:
         TArray<FTerraGameplayPieceState> Pieces;
         TArray<int32> CellToPieceId;
         TMap<int32, FTerraGameplayEquipmentDropState> EquipmentDropsByCellId;
+        TMap<int32, FTerraGameplayFactionTechnologyState> FactionTechnologyStates;
         TMap<int32, FTerraGameplayCellHighlight> GameplayHighlights;
         TSet<int32> OrdinaryMoveTargetCellIds;
         TSet<int32> JumpTargetCellIds;
@@ -224,14 +225,18 @@ public:
         ETerraGameplayInteractionPhase InteractionPhase = ETerraGameplayInteractionPhase::Idle;
     };
 
-    void Initialize(const TArray<FTerraGameplayCellState>& InCells, const FTerraGameplayNeutralSpawnConfig& InNeutralSpawnConfig = FTerraGameplayNeutralSpawnConfig());
+    void Initialize(
+        const TArray<FTerraGameplayCellState>& InCells,
+        const FTerraGameplayNeutralSpawnConfig& InNeutralSpawnConfig = FTerraGameplayNeutralSpawnConfig(),
+        const FTerraGameplayTechnologyProgressionConfig& InTechnologyProgressionConfig = FTerraGameplayTechnologyProgressionConfig());
     bool InitializeFixedScenario(
         const TArray<FTerraGameplayCellState>& InCells,
         const TArray<FTerraGameplayPieceState>& InPieces,
         const TArray<FTerraGameplayEquipmentDropState>& InEquipmentDrops,
         int32 InitialFactionId,
         int32 InitialTurnIndex,
-        FString& OutError);
+        FString& OutError,
+        const FTerraGameplayTechnologyProgressionConfig& InTechnologyProgressionConfig = FTerraGameplayTechnologyProgressionConfig());
 
     bool IsInitialized() const { return bInitialized; }
     int32 GetCurrentFactionId() const { return CurrentFactionId; }
@@ -240,6 +245,10 @@ public:
     ETerraGameplayInteractionPhase GetInteractionPhase() const { return InteractionPhase; }
     bool IsMatchEnded() const { return bMatchEnded; }
     int32 GetWinningFactionId() const { return WinningFactionId; }
+    bool IsFactionWaitingForTechnologyChoice(int32 FactionId) const;
+    bool GetFactionTechnologyState(int32 FactionId, FTerraGameplayFactionTechnologyState& OutState) const;
+    bool GetPendingTechnologyChoices(int32 FactionId, TArray<ETerraGameplayTechnologyId>& OutChoices) const;
+    bool ChoosePendingTechnology(int32 FactionId, ETerraGameplayTechnologyId TechnologyId, FString& OutError);
 
     bool HandleCellClick(int32 CellId, TArray<int32>& OutDirtyCellIds);
     bool UndoCurrentInteraction(TArray<int32>& OutDirtyCellIds);
@@ -323,6 +332,10 @@ private:
     void ResolvePendingCaptures_(TArray<int32>& OutDirtyCellIds);
     void EliminateFaction_(int32 FactionId, int32 ConqueringFactionId, TArray<int32>& OutDirtyCellIds);
     void EvaluateWinStateAfterCaptures_();
+    void InitializeFactionTechnologyStates_();
+    void RecordTechnologyScore_(int32 FactionId, int32 ScoreDelta, const TCHAR* Reason);
+    bool FinalizeFactionTurnTechnologyProgress_(int32 FactionId);
+    void GeneratePendingTechnologyChoices_(FTerraGameplayFactionTechnologyState& State);
     void FinalizeTurnAfterResolution_();
     void InitializeActionLogFilePath_();
     void PushUndoSnapshot_();
@@ -351,6 +364,9 @@ private:
     TArray<FTerraGameplayFactionState> Factions;
     TArray<int32> CellToPieceId;
     FRandomStream NeutralSpawnRandomStream;
+    FRandomStream TechnologyRandomStream;
+    FTerraGameplayTechnologyProgressionConfig TechnologyProgressionConfig;
+    TMap<int32, FTerraGameplayFactionTechnologyState> FactionTechnologyStates;
     TMap<int32, FTerraGameplayEquipmentDropState> EquipmentDropsByCellId;
     TMap<int32, FTerraGameplayCellHighlight> GameplayHighlights;
     TSet<int32> OrdinaryMoveTargetCellIds;

@@ -41,14 +41,19 @@ namespace
     }
 }
 
-void FTerraGameplayContainer::Initialize(const TArray<FTerraGameplayCellState>& InCells, const FTerraGameplayNeutralSpawnConfig& InNeutralSpawnConfig)
+void FTerraGameplayContainer::Initialize(
+    const TArray<FTerraGameplayCellState>& InCells,
+    const FTerraGameplayNeutralSpawnConfig& InNeutralSpawnConfig,
+    const FTerraGameplayTechnologyProgressionConfig& InTechnologyProgressionConfig)
 {
     Cells = InCells;
     ResetRuntimeState_();
+    TechnologyProgressionConfig = InTechnologyProgressionConfig;
     InitializeActionLogFilePath_();
     BuildInitialPieces_();
     NeutralSpawnRandomStream.Initialize(InNeutralSpawnConfig.SpawnSeed);
     BuildNeutralPieces_(InNeutralSpawnConfig);
+    InitializeFactionTechnologyStates_();
 
     bInitialized = true;
     CurrentFactionId = Factions.Num() > 0 ? Factions[0].FactionId : INDEX_NONE;
@@ -62,11 +67,92 @@ void FTerraGameplayContainer::Initialize(const TArray<FTerraGameplayCellState>& 
         InNeutralSpawnConfig.SpawnSeed);
 }
 
+bool FTerraGameplayContainer::IsFactionWaitingForTechnologyChoice(int32 FactionId) const
+{
+    const FTerraGameplayFactionTechnologyState* State = FactionTechnologyStates.Find(FactionId);
+    return State && State->bWaitingForTechnologyChoice;
+}
+
+bool FTerraGameplayContainer::GetFactionTechnologyState(int32 FactionId, FTerraGameplayFactionTechnologyState& OutState) const
+{
+    const FTerraGameplayFactionTechnologyState* State = FactionTechnologyStates.Find(FactionId);
+    if (!State)
+    {
+        OutState = FTerraGameplayFactionTechnologyState();
+        return false;
+    }
+
+    OutState = *State;
+    return true;
+}
+
+bool FTerraGameplayContainer::GetPendingTechnologyChoices(int32 FactionId, TArray<ETerraGameplayTechnologyId>& OutChoices) const
+{
+    OutChoices.Reset();
+    const FTerraGameplayFactionTechnologyState* State = FactionTechnologyStates.Find(FactionId);
+    if (!State || !State->bWaitingForTechnologyChoice)
+    {
+        return false;
+    }
+
+    OutChoices = State->PendingTechnologyChoices;
+    return OutChoices.Num() > 0;
+}
+
+bool FTerraGameplayContainer::ChoosePendingTechnology(int32 FactionId, ETerraGameplayTechnologyId TechnologyId, FString& OutError)
+{
+    OutError.Reset();
+    if (!TechnologyProgressionConfig.bEnableTechnologyProgression)
+    {
+        OutError = TEXT("technology_progression_disabled");
+        return false;
+    }
+    const FTerraGameplayFactionState* Faction = Factions.FindByPredicate(
+        [FactionId](const FTerraGameplayFactionState& Candidate) { return Candidate.FactionId == FactionId; });
+    if (FactionId != CurrentFactionId || !Faction || !Faction->bAlive)
+    {
+        OutError = TEXT("invalid_faction");
+        return false;
+    }
+
+    FTerraGameplayFactionTechnologyState* State = FactionTechnologyStates.Find(FactionId);
+    if (!State || !State->bWaitingForTechnologyChoice)
+    {
+        OutError = TEXT("no_pending_technology_choice");
+        return false;
+    }
+    if (TechnologyId == ETerraGameplayTechnologyId::None || !State->PendingTechnologyChoices.Contains(TechnologyId))
+    {
+        OutError = TEXT("technology_not_in_pending_choices");
+        return false;
+    }
+
+    State->OwnedTechnologies.AddUnique(TechnologyId);
+    State->PendingTechnologyChoices.Reset();
+    State->bWaitingForTechnologyChoice = false;
+    ++State->UnlockCount;
+    State->NextUnlockScore += FMath::Max(TechnologyProgressionConfig.TechnologyUnlockScoreIncrement, 1);
+
+    UE_LOG(LogTerraGameplay, Log,
+        TEXT("[Gameplay][T0] TechnologyChosen Faction=%d Technology=%d UnlockCount=%d TotalScore=%d"),
+        FactionId,
+        static_cast<int32>(TechnologyId),
+        State->UnlockCount,
+        State->AccumulatedScore);
+
+    FinalizeTurnAfterResolution_();
+    return true;
+}
+
 bool FTerraGameplayContainer::HandleCellClick(int32 CellId, TArray<int32>& OutDirtyCellIds)
 {
     OutDirtyCellIds.Reset();
 
     if (!bInitialized || bMatchEnded || !IsValidCellId_(CellId) || CurrentFactionId == INDEX_NONE)
+    {
+        return false;
+    }
+    if (IsFactionWaitingForTechnologyChoice(CurrentFactionId))
     {
         return false;
     }
@@ -190,11 +276,13 @@ bool FTerraGameplayContainer::InitializeFixedScenario(
     const TArray<FTerraGameplayEquipmentDropState>& InEquipmentDrops,
     int32 InitialFactionId,
     int32 InitialTurnIndex,
-    FString& OutError)
+    FString& OutError,
+    const FTerraGameplayTechnologyProgressionConfig& InTechnologyProgressionConfig)
 {
     OutError.Reset();
     Cells = InCells;
     ResetRuntimeState_();
+    TechnologyProgressionConfig = InTechnologyProgressionConfig;
     InitializeActionLogFilePath_();
 
     if (Cells.IsEmpty() || InitialTurnIndex < 0)
@@ -272,6 +360,7 @@ bool FTerraGameplayContainer::InitializeFixedScenario(
         }
     }
     Factions.Sort([](const FTerraGameplayFactionState& A, const FTerraGameplayFactionState& B) { return A.FactionId < B.FactionId; });
+    InitializeFactionTechnologyStates_();
 
     for (const FTerraGameplayEquipmentDropState& Drop : InEquipmentDrops)
     {
@@ -1635,6 +1724,10 @@ bool FTerraGameplayContainer::TryExecuteValidatedAction(int32 ExpectedTurnIndex,
     {
         return Reject(TEXT("match_ended"));
     }
+    if (IsFactionWaitingForTechnologyChoice(CurrentFactionId))
+    {
+        return Reject(TEXT("technology_choice_pending"));
+    }
     if (InteractionPhase != ETerraGameplayInteractionPhase::Idle)
     {
         return Reject(TEXT("not_idle"));
@@ -1750,6 +1843,7 @@ bool FTerraGameplayContainer::UndoCurrentInteraction(TArray<int32>& OutDirtyCell
     Pieces = UndoSnapshot.Pieces;
     CellToPieceId = UndoSnapshot.CellToPieceId;
     EquipmentDropsByCellId = UndoSnapshot.EquipmentDropsByCellId;
+    FactionTechnologyStates = UndoSnapshot.FactionTechnologyStates;
     GameplayHighlights = UndoSnapshot.GameplayHighlights;
     OrdinaryMoveTargetCellIds = UndoSnapshot.OrdinaryMoveTargetCellIds;
     JumpTargetCellIds = UndoSnapshot.JumpTargetCellIds;
@@ -1788,6 +1882,7 @@ void FTerraGameplayContainer::ResetRuntimeState_()
     PendingCapturePieceIds.Reset();
     PendingCaptureCellIds.Reset();
     EquipmentDropsByCellId.Reset();
+    FactionTechnologyStates.Reset();
     CellToPieceId.Init(INDEX_NONE, Cells.Num());
     CurrentActionPathCellIds.Reset();
     ActionLogFilePath.Reset();
@@ -1819,6 +1914,7 @@ void FTerraGameplayContainer::PushUndoSnapshot_()
     UndoSnapshot.Pieces = Pieces;
     UndoSnapshot.CellToPieceId = CellToPieceId;
     UndoSnapshot.EquipmentDropsByCellId = EquipmentDropsByCellId;
+    UndoSnapshot.FactionTechnologyStates = FactionTechnologyStates;
     UndoSnapshot.GameplayHighlights = GameplayHighlights;
     UndoSnapshot.OrdinaryMoveTargetCellIds = OrdinaryMoveTargetCellIds;
     UndoSnapshot.JumpTargetCellIds = JumpTargetCellIds;
@@ -2211,6 +2307,7 @@ void FTerraGameplayContainer::TryCollectEquipmentAtCell_(FTerraGameplayPieceStat
 
     if (Piece.PieceType != PreviousType)
     {
+        RecordTechnologyScore_(CurrentFactionId, TechnologyProgressionConfig.ScoreForPromotion, TEXT("promotion"));
         AddDirtyCell_(Piece.CellId, OutDirtyCellIds);
         UE_LOG(LogTerraGameplay, Log,
             TEXT("[Gameplay][G12] EquipmentCollected Piece=%d Cell=%d From=%s To=%s"),
@@ -3002,6 +3099,22 @@ void FTerraGameplayContainer::ResolvePendingCaptures_(TArray<int32>& OutDirtyCel
             DefeatedFactionIds.Add(CapturePiece->OwnerFactionId);
         }
 
+        int32 CaptureScore = 0;
+        if (CapturePiece->PieceType == ETerraGameplayPieceType::Infantry)
+        {
+            CaptureScore = TechnologyProgressionConfig.ScoreForInfantryCapture;
+        }
+        else if (CapturePiece->PieceType == ETerraGameplayPieceType::ArcherCavalry)
+        {
+            CaptureScore = TechnologyProgressionConfig.ScoreForArcherCavalryCapture;
+        }
+        else if (CapturePiece->PieceType == ETerraGameplayPieceType::Archer
+            || CapturePiece->PieceType == ETerraGameplayPieceType::Cavalry)
+        {
+            CaptureScore = TechnologyProgressionConfig.ScoreForEliteCapture;
+        }
+        RecordTechnologyScore_(CurrentFactionId, CaptureScore, TEXT("capture"));
+
         const int32 CaptureCellId = CapturePiece->CellId;
         AddEquipmentDropsForCapturedPiece_(*CapturePiece, CaptureCellId, OutDirtyCellIds);
         if (IsValidCellId_(CaptureCellId) && GetPieceIdAtCell_(CaptureCellId) == CapturePieceId)
@@ -3038,6 +3151,7 @@ void FTerraGameplayContainer::EliminateFaction_(int32 FactionId, int32 Conquerin
     FTerraGameplayFactionState& Faction = Factions[FactionId];
     Faction.bAlive = false;
     Faction.CommanderPieceId = INDEX_NONE;
+    RecordTechnologyScore_(ConqueringFactionId, TechnologyProgressionConfig.ScoreForFactionDefeat, TEXT("faction_defeat"));
 
     int32 TransferredPieceCount = 0;
 
@@ -3059,6 +3173,96 @@ void FTerraGameplayContainer::EliminateFaction_(int32 FactionId, int32 Conquerin
         FactionId,
         ConqueringFactionId,
         TransferredPieceCount);
+}
+
+void FTerraGameplayContainer::InitializeFactionTechnologyStates_()
+{
+    FactionTechnologyStates.Reset();
+    TechnologyRandomStream.Initialize(TechnologyProgressionConfig.TechnologyRandomSeed);
+    const int32 FirstUnlockScore = FMath::Max(TechnologyProgressionConfig.FirstTechnologyUnlockScore, 1);
+    for (const FTerraGameplayFactionState& Faction : Factions)
+    {
+        FTerraGameplayFactionTechnologyState& State = FactionTechnologyStates.FindOrAdd(Faction.FactionId);
+        State.FactionId = Faction.FactionId;
+        State.NextUnlockScore = FirstUnlockScore;
+    }
+}
+
+void FTerraGameplayContainer::RecordTechnologyScore_(int32 FactionId, int32 ScoreDelta, const TCHAR* Reason)
+{
+    if (!TechnologyProgressionConfig.bEnableTechnologyProgression || ScoreDelta <= 0)
+    {
+        return;
+    }
+
+    FTerraGameplayFactionTechnologyState* State = FactionTechnologyStates.Find(FactionId);
+    if (!State)
+    {
+        return;
+    }
+
+    State->ScoreEarnedThisTurn += ScoreDelta;
+    UE_LOG(LogTerraGameplay, Log,
+        TEXT("[Gameplay][T0] ScoreEvent Faction=%d Reason=%s Delta=%d TurnScore=%d TotalBefore=%d"),
+        FactionId,
+        Reason,
+        ScoreDelta,
+        State->ScoreEarnedThisTurn,
+        State->AccumulatedScore);
+}
+
+void FTerraGameplayContainer::GeneratePendingTechnologyChoices_(FTerraGameplayFactionTechnologyState& State)
+{
+    TArray<ETerraGameplayTechnologyId> AvailableChoices =
+    {
+        ETerraGameplayTechnologyId::PlaceholderTraining,
+        ETerraGameplayTechnologyId::PlaceholderLogistics,
+        ETerraGameplayTechnologyId::PlaceholderDoctrine,
+    };
+    for (int32 Index = AvailableChoices.Num() - 1; Index > 0; --Index)
+    {
+        const int32 SwapIndex = TechnologyRandomStream.RandRange(0, Index);
+        AvailableChoices.Swap(Index, SwapIndex);
+    }
+
+    State.PendingTechnologyChoices = MoveTemp(AvailableChoices);
+    State.bWaitingForTechnologyChoice = State.PendingTechnologyChoices.Num() > 0;
+}
+
+bool FTerraGameplayContainer::FinalizeFactionTurnTechnologyProgress_(int32 FactionId)
+{
+    if (!TechnologyProgressionConfig.bEnableTechnologyProgression || bMatchEnded)
+    {
+        return false;
+    }
+
+    FTerraGameplayFactionTechnologyState* State = FactionTechnologyStates.Find(FactionId);
+    if (!State)
+    {
+        return false;
+    }
+
+    State->AccumulatedScore += State->ScoreEarnedThisTurn;
+    State->ScoreEarnedThisTurn = 0;
+    if (State->UnlockCount >= FMath::Max(TechnologyProgressionConfig.MaxTechnologyCount, 1)
+        || State->AccumulatedScore < State->NextUnlockScore)
+    {
+        return false;
+    }
+
+    GeneratePendingTechnologyChoices_(*State);
+    if (!State->bWaitingForTechnologyChoice)
+    {
+        return false;
+    }
+
+    UE_LOG(LogTerraGameplay, Log,
+        TEXT("[Gameplay][T0] TechnologyUnlock Faction=%d Threshold=%d TotalScore=%d ChoiceCount=%d"),
+        FactionId,
+        State->NextUnlockScore,
+        State->AccumulatedScore,
+        State->PendingTechnologyChoices.Num());
+    return true;
 }
 
 void FTerraGameplayContainer::EvaluateWinStateAfterCaptures_()
@@ -3354,16 +3558,21 @@ bool FTerraGameplayContainer::TryEndTurnOnSelectedCell_(int32 CellId, TArray<int
     ActionTargetCellIdToCaptureCellIds.Reset();
     InteractionPhase = ETerraGameplayInteractionPhase::Idle;
     ClearUndoSnapshots_();
-    FinalizeTurnAfterResolution_();
+    const bool bWaitingForTechnologyChoice = FinalizeFactionTurnTechnologyProgress_(EndedFactionId);
+    if (!bWaitingForTechnologyChoice)
+    {
+        FinalizeTurnAfterResolution_();
+    }
 
     UE_LOG(LogTerraGameplay, Log,
-        TEXT("[Gameplay][G6] EndTurn. EndedFaction=%d NewFaction=%d TurnIndex=%d Captures=%d Winner=%d MatchEnded=%d KeepSameFaction=%d"),
+        TEXT("[Gameplay][G6][T0] EndTurn. EndedFaction=%d NewFaction=%d TurnIndex=%d Captures=%d Winner=%d MatchEnded=%d TechnologyChoicePending=%d KeepSameFaction=%d"),
         EndedFactionId,
         CurrentFactionId,
         TurnIndex,
         CaptureCount,
         WinningFactionId,
         bMatchEnded ? 1 : 0,
+        bWaitingForTechnologyChoice ? 1 : 0,
         bDebugKeepSameFactionOnEndTurn ? 1 : 0);
     return true;
 }

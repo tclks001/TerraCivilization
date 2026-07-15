@@ -6,6 +6,8 @@
 #include "Render/PlanetCameraComponent.h"
 #include "Render/PlanetHISMInteractionComponent.h"
 #include "Render/PlanetTessellatedMesh.h"
+#include "UI/TerraUISettings.h"
+#include "UI/TerraUISubsystem.h"
 
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -27,6 +29,14 @@ APlanetInteractionController::APlanetInteractionController()
 void APlanetInteractionController::BeginPlay()
 {
     Super::BeginPlay();
+
+    if (const UTerraUISettings* UISettings = GetDefault<UTerraUISettings>(); UISettings->bShowFrontEndOnStartup)
+    {
+        if (ULocalPlayer* LocalPlayer = GetLocalPlayer())
+        {
+            LocalPlayer->GetSubsystem<UTerraUISubsystem>()->ShowMainMenu();
+        }
+    }
 
     // G8：关闭引擎默认 Pawn 移动输入。
     // 否则在纬度已被 clamp 到极区后，继续按 W/S 时虽然 G8 轨道参数不再变化，
@@ -53,6 +63,14 @@ void APlanetInteractionController::BeginPlay()
 void APlanetInteractionController::PlayerTick(float DeltaTime)
 {
     Super::PlayerTick(DeltaTime);
+
+    if (ULocalPlayer* LocalPlayer = GetLocalPlayer())
+    {
+        if (const UTerraUISubsystem* UI = LocalPlayer->GetSubsystem<UTerraUISubsystem>(); UI && UI->IsBlockingGameInput())
+        {
+            return;
+        }
+    }
 
     if (!CachedBinder)
     {
