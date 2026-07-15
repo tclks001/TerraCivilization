@@ -365,6 +365,22 @@ PIE 验证：是否有蓝图在 BeginPlay 重新生成或重新显示它
 - 星球边缘存在自然的轮廓分离；启用大气壳时，不出现整球发蓝、透明排序或 TAA 闪烁。
 - 画面没有雾感、地表天空感或过强的模板化 Bloom。
 
+### SL4.5：球面远景空气透视
+
+详稿：[SL4_5_PlanetAerialPerspectiveDesign.md](SL4_5_PlanetAerialPerspectiveDesign.md)。
+
+**工作内容**
+
+- 将大气薄壳收敛为只服务轮廓的 Fresnel 散射层，不让它形成包住整颗球的透明蓝色气泡。
+- 为平原、森林、山脉 HISM 设置统一 `CustomStencil`，以地表专属遮罩驱动后处理空气透视。
+- 在 `PPV_SpacePlanet` 挂载基于 `SceneDepth` 的后处理材质，使远处地表逐渐混入低饱和灰蓝空气色，而星空、棋子与交互高亮保持不受影响。
+
+**验收成果**
+
+- 近处地表和玩法对象保持清晰，远处地形与山脉具有连续、受控的朦胧感。
+- 星空不被雾化，行星不再像被巨大透明大气球罩住。
+- 不启用 `ExponentialHeightFog`、体积云、`SkyAtmosphere` 或任何世界 Z 高度雾。
+
 ### SL5：回归验收与参数固化
 
 **工作内容**
