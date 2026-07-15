@@ -82,7 +82,10 @@ const TArray<int32>* FPlanetHISMTileRenderer::FindInstanceMap_(const UPrimitiveC
 
 void FPlanetHISMTileRenderer::PrepareHighlightComponents(const FPlanetHISMHighlightConfig& Config)
 {
-    auto PrepareOne = [&Config](UHierarchicalInstancedStaticMeshComponent* Comp)
+    auto PrepareOne = [&Config](
+        UHierarchicalInstancedStaticMeshComponent* Comp,
+        float HighlightInnerRadius,
+        float HighlightOuterRadius)
     {
         if (!Comp)
         {
@@ -104,16 +107,16 @@ void FPlanetHISMTileRenderer::PrepareHighlightComponents(const FPlanetHISMHighli
                 if (MID)
                 {
                     MID->SetScalarParameterValue(TEXT("HighlightStrength"), Config.HighlightStrength);
-                    MID->SetScalarParameterValue(TEXT("HighlightInnerRadius"), Config.HighlightInnerRadius);
-                    MID->SetScalarParameterValue(TEXT("HighlightOuterRadius"), Config.HighlightOuterRadius);
+                    MID->SetScalarParameterValue(TEXT("HighlightInnerRadius"), HighlightInnerRadius);
+                    MID->SetScalarParameterValue(TEXT("HighlightOuterRadius"), HighlightOuterRadius);
                 }
             }
         }
     };
 
-    PrepareOne(PlainComp);
-    PrepareOne(ForestComp);
-    PrepareOne(MountainComp);
+    PrepareOne(PlainComp, Config.PlainHighlightInnerRadius, Config.PlainHighlightOuterRadius);
+    PrepareOne(ForestComp, Config.ForestHighlightInnerRadius, Config.ForestHighlightOuterRadius);
+    PrepareOne(MountainComp, Config.MountainHighlightInnerRadius, Config.MountainHighlightOuterRadius);
 }
 
 void FPlanetHISMTileRenderer::RebuildInstances(

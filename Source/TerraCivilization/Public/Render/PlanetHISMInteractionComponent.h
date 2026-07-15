@@ -31,13 +31,35 @@ public:
               meta = (ClampMin = "0.0", ClampMax = "5.0"))
     float HISMHoverFadeDuration = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|HISM Highlight",
+    /** Plain tile UV radius at which the HISM highlight ring begins. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|HISM Highlight|Plain",
               meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float HISMHighlightInnerRadius = 0.20f;
+    float PlainHISMHighlightInnerRadius = 0.20f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|HISM Highlight",
+    /** Plain tile UV radius at which the HISM highlight ring reaches full strength. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|HISM Highlight|Plain",
               meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float HISMHighlightOuterRadius = 0.50f;
+    float PlainHISMHighlightOuterRadius = 0.50f;
+
+    /** Forest tile UV radius at which the HISM highlight ring begins. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|HISM Highlight|Forest",
+              meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float ForestHISMHighlightInnerRadius = 0.20f;
+
+    /** Forest tile UV radius at which the HISM highlight ring reaches full strength. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|HISM Highlight|Forest",
+              meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float ForestHISMHighlightOuterRadius = 0.50f;
+
+    /** Mountain tile UV radius at which the HISM highlight ring begins. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|HISM Highlight|Mountain",
+              meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MountainHISMHighlightInnerRadius = 0.20f;
+
+    /** Mountain tile UV radius at which the HISM highlight ring reaches full strength. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|HISM Highlight|Mountain",
+              meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MountainHISMHighlightOuterRadius = 0.50f;
 
     FPlanetHISMHighlightConfig BuildHighlightConfig() const;
     void TickHoverFade(float DeltaSeconds);

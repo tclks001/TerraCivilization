@@ -29,8 +29,12 @@ FPlanetHISMHighlightConfig UPlanetHISMInteractionComponent::BuildHighlightConfig
     FPlanetHISMHighlightConfig Config;
     Config.bEnableInstanceHighlight = bEnableHISMInstanceHighlight;
     Config.HighlightStrength = HighlightStrength;
-    Config.HighlightInnerRadius = HISMHighlightInnerRadius;
-    Config.HighlightOuterRadius = HISMHighlightOuterRadius;
+    Config.PlainHighlightInnerRadius = PlainHISMHighlightInnerRadius;
+    Config.PlainHighlightOuterRadius = PlainHISMHighlightOuterRadius;
+    Config.ForestHighlightInnerRadius = ForestHISMHighlightInnerRadius;
+    Config.ForestHighlightOuterRadius = ForestHISMHighlightOuterRadius;
+    Config.MountainHighlightInnerRadius = MountainHISMHighlightInnerRadius;
+    Config.MountainHighlightOuterRadius = MountainHISMHighlightOuterRadius;
     Config.HoverColor = HighlightHoverColor;
     if (Host && Host->GetPlanetGameplayComponent())
     {

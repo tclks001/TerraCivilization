@@ -41,8 +41,12 @@ struct FPlanetHISMHighlightConfig
 {
     bool bEnableInstanceHighlight = true;
     float HighlightStrength = 1.5f;
-    float HighlightInnerRadius = 0.4f;
-    float HighlightOuterRadius = 0.5f;
+    float PlainHighlightInnerRadius = 0.2f;
+    float PlainHighlightOuterRadius = 0.5f;
+    float ForestHighlightInnerRadius = 0.2f;
+    float ForestHighlightOuterRadius = 0.5f;
+    float MountainHighlightInnerRadius = 0.2f;
+    float MountainHighlightOuterRadius = 0.5f;
     FLinearColor HoverColor = FLinearColor(1.0f, 0.85f, 0.10f, 1.0f);
     FLinearColor CurrentFactionPieceColor = FLinearColor(1.0f, 0.45f, 0.68f, 1.0f);
     FLinearColor CurrentFactionPieceHoverColor = FLinearColor(1.0f, 0.22f, 0.32f, 1.0f);
