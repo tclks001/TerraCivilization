@@ -285,8 +285,8 @@ C++ 负责把每个实例的 `FinalHighlightColor.RGB` 与 `FinalHighlightIntens
 | `AppendVector` | `HighlightRG` | `PICD_HighlightR` + `PICD_HighlightG` |
 | `AppendVector` | `HighlightRGB` | `HighlightRG` + `PICD_HighlightB` |
 | `ScalarParameter` | `HighlightStrength` | 推荐默认 `1.5`，C++ 会写入同名参数 |
-| `ScalarParameter` | `HighlightInnerRadius` | 推荐默认 `0.40`，C++ 会写入同名参数 |
-| `ScalarParameter` | `HighlightOuterRadius` | 推荐默认 `0.50`，C++ 会写入同名参数 |
+| `ScalarParameter` | `HighlightInnerRadius` | C++ 会按平原 / 森林 / 山脉的独立配置写入同名参数 |
+| `ScalarParameter` | `HighlightOuterRadius` | C++ 会按平原 / 森林 / 山脉的独立配置写入同名参数 |
 | `Custom` | `MF_HISM_FinalHighlightEmissive` | 输入 UV、最终颜色、强度、半径，输出自发光颜色 |
 | `Add` | `BaseEmissivePlusHighlight` | 如果原材质已有自发光，用 `Add` 叠加 |
 
@@ -460,10 +460,16 @@ Custom.MF_HISM_FinalHighlightTintedBaseColor
 
 ### 5.6 推荐初始参数
 
-| 参数 | 推荐值 |
+`UPlanetHISMInteractionComponent` 在编辑器中按地形分别暴露半径，并在创建对应 HISM 材质槽的运行时 MID 时写入共同的材质参数名：
+
+| 地形 | 组件字段 | 初始 Inner / Outer |
+| --- | --- | --- |
+| 平原 | `PlainHISMHighlightInnerRadius` / `PlainHISMHighlightOuterRadius` | `0.20 / 0.50` |
+| 森林 | `ForestHISMHighlightInnerRadius` / `ForestHISMHighlightOuterRadius` | `0.20 / 0.50` |
+| 山脉 | `MountainHISMHighlightInnerRadius` / `MountainHISMHighlightOuterRadius` | `0.20 / 0.50` |
+
+| 共享参数 | 推荐值 |
 | --- | --- |
-| `HighlightInnerRadius` | `0.40` |
-| `HighlightOuterRadius` | `0.50` |
 | `HighlightStrength` | `1.5` |
 | `HighlightBaseTintBlend` | `0.25`，仅在启用 BaseColor 染色时需要 |
 

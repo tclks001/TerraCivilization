@@ -381,6 +381,22 @@ PIE 验证：是否有蓝图在 BeginPlay 重新生成或重新显示它
 - 星空不被雾化，行星不再像被巨大透明大气球罩住。
 - 不启用 `ExponentialHeightFog`、体积云、`SkyAtmosphere` 或任何世界 Z 高度雾。
 
+### SL4.6：地表晨昏散射带
+
+详稿：[SL4_6_TerminatorScatteringBandDesign.md](SL4_6_TerminatorScatteringBandDesign.md)。
+
+**工作内容**
+
+- 新建 `MPC_SpaceLighting`，以 `PlanetCenterWS` 与从地表指向太阳的 `SunDirectionWS` 为三类地表材质提供统一世界参数。
+- 在共同地表母材质新增基于径向球面法线的 Custom HLSL 晨昏带，输出低饱和弱 Emissive 散射色。
+- 将晨昏散射与现有 CPU 驱动的 `HISMHighlightEmissive` 通过 `Add` 合并后输出到 `Emissive Color`，不替换既有高亮链路。
+
+**验收成果**
+
+- 晨昏线不再是双向平行光共同衰减形成的黑色腰带，而是连续、略偏夜侧的柔和空气过渡。
+- 山体阴影仍只由 `DL_Sun` 决定；散射带不产生第二套投影，也不受地表 Normal Map 打碎。
+- 黄色选中、蓝色行动范围和阵营棋子仍高于散射带的视觉优先级。
+
 ### SL5：回归验收与参数固化
 
 **工作内容**
