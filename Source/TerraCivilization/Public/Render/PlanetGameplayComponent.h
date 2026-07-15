@@ -5,6 +5,7 @@
 #include "TerraGameplayContainer.h"
 #include "TerraNpcMcpGameplayBridge.h"
 #include "Tutorial/TerraTutorialScenarioData.h"
+#include "Engine/TimerHandle.h"
 #include "PlanetGameplayComponent.generated.h"
 
 class APlanetTessellatedMesh;
@@ -97,15 +98,23 @@ public:
     FTerraGameplayContainer* GetGameplayContainer() { return GameplayContainer.Get(); }
     int32 GetLastHighlightedFactionId() const { return G2_5LastHighlightedFactionId; }
     bool HasInitializedGameplay() const { return GameplayContainer.IsValid() && GameplayContainer->IsInitialized(); }
+    bool IsTurnActivationReady() const { return bTurnActivationReady; }
 
 private:
     APlanetTessellatedMesh* GetHost() const;
     void BuildNpcMcpInteractionState_(FTerraNpcMcpGameplayBridge::FInteractionStateSnapshot& OutState) const;
     void FillNpcMcpReviewResult_(FTerraNpcMcpGameplayBridge::FUiReviewResult& OutResult, bool bOk, const FString& Error) const;
+    void BeginTurnActivationGate_(int32 ExpectedTurnIndex, int32 ExpectedFactionId, float DelaySeconds);
+    void OpenTurnActivationGate_(int32 ExpectedTurnIndex, int32 ExpectedFactionId);
 
     TUniquePtr<FTerraGameplayContainer> GameplayContainer;
     int32 G2_5LastHighlightedFactionId = INDEX_NONE;
     TArray<FTerraG1DebugPiece> G1DebugPieces;
     TArray<FTerraTutorialNpcAction> TutorialNpcActionSequence;
     bool bTutorialNpcScriptFailed = false;
+    // Rules may already point at the next faction, but no input, camera turn focus, or NPC decision may start until this gate opens.
+    bool bTurnActivationReady = true;
+    int32 PendingTurnActivationTurnIndex = INDEX_NONE;
+    int32 PendingTurnActivationFactionId = INDEX_NONE;
+    FTimerHandle TurnActivationTimerHandle;
 };

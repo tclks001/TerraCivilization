@@ -15,6 +15,7 @@
 
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 #include "Logging/LogMacros.h"
 
 UPlanetGameplayComponent::UPlanetGameplayComponent()
@@ -44,6 +45,10 @@ void UPlanetGameplayComponent::BuildNpcMcpInteractionState_(FTerraNpcMcpGameplay
     OutState.CurrentFactionId = GameplayContainer->GetCurrentFactionId();
     OutState.InteractionPhase = GameplayContainer->GetInteractionPhase();
     OutState.SelectedPieceId = GameplayContainer->GetSelectedPieceId();
+    if (!bTurnActivationReady)
+    {
+        return;
+    }
     if (OutState.SelectedPieceId != INDEX_NONE)
     {
         GameplayContainer->TryGetPieceCellId(OutState.SelectedPieceId, OutState.SelectedPieceCellId);
@@ -108,6 +113,13 @@ void UPlanetGameplayComponent::RebuildGameplay()
     {
         Camera->ClearDelayedTurnStartFocusTimer();
     }
+    if (UWorld* World = Host->GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(TurnActivationTimerHandle);
+    }
+    bTurnActivationReady = true;
+    PendingTurnActivationTurnIndex = INDEX_NONE;
+    PendingTurnActivationFactionId = INDEX_NONE;
 
     if (!Host->CellTopology.IsValid() || !Host->Generator.IsValid())
     {
@@ -907,6 +919,64 @@ bool UPlanetGameplayComponent::HandleHISMUndo()
     return true;
 }
 
+void UPlanetGameplayComponent::BeginTurnActivationGate_(int32 ExpectedTurnIndex, int32 ExpectedFactionId, float DelaySeconds)
+{
+    APlanetTessellatedMesh* Host = GetHost();
+    UWorld* World = Host ? Host->GetWorld() : nullptr;
+    if (!World || !World->IsGameWorld())
+    {
+        OpenTurnActivationGate_(ExpectedTurnIndex, ExpectedFactionId);
+        return;
+    }
+
+    bTurnActivationReady = false;
+    PendingTurnActivationTurnIndex = ExpectedTurnIndex;
+    PendingTurnActivationFactionId = ExpectedFactionId;
+    World->GetTimerManager().ClearTimer(TurnActivationTimerHandle);
+    World->GetTimerManager().SetTimer(
+        TurnActivationTimerHandle,
+        FTimerDelegate::CreateUObject(this, &UPlanetGameplayComponent::OpenTurnActivationGate_, ExpectedTurnIndex, ExpectedFactionId),
+        FMath::Max(DelaySeconds, 0.001f),
+        false);
+
+    UE_LOG(LogPlanetGameplayComponent, Log,
+        TEXT("[Gameplay][TurnActivation] Closed. Faction=%d Turn=%d Delay=%.3f"),
+        ExpectedFactionId,
+        ExpectedTurnIndex,
+        DelaySeconds);
+}
+
+void UPlanetGameplayComponent::OpenTurnActivationGate_(int32 ExpectedTurnIndex, int32 ExpectedFactionId)
+{
+    if (!GameplayContainer.IsValid()
+        || !GameplayContainer->IsInitialized()
+        || GameplayContainer->GetTurnIndex() != ExpectedTurnIndex
+        || GameplayContainer->GetCurrentFactionId() != ExpectedFactionId)
+    {
+        UE_LOG(LogPlanetGameplayComponent, Verbose,
+            TEXT("[Gameplay][TurnActivation] Skip stale activation. ExpectedFaction=%d ExpectedTurn=%d"),
+            ExpectedFactionId,
+            ExpectedTurnIndex);
+        return;
+    }
+
+    bTurnActivationReady = true;
+    PendingTurnActivationTurnIndex = INDEX_NONE;
+    PendingTurnActivationFactionId = INDEX_NONE;
+    if (APlanetTessellatedMesh* Host = GetHost())
+    {
+        if (UPlanetCameraComponent* Camera = Host->GetPlanetCameraComponent())
+        {
+            Camera->ExecuteC6_5DelayedTurnStartFocus(ExpectedTurnIndex, ExpectedFactionId);
+        }
+    }
+
+    UE_LOG(LogPlanetGameplayComponent, Log,
+        TEXT("[Gameplay][TurnActivation] Opened. Faction=%d Turn=%d"),
+        ExpectedFactionId,
+        ExpectedTurnIndex);
+}
+
 bool UPlanetGameplayComponent::HandleGameplayCellClick(int32 CellId, const TCHAR* SourceLabel, int32 InstanceIndex, const FString& ComponentName)
 {
     APlanetTessellatedMesh* Host = GetHost();
@@ -919,6 +989,15 @@ bool UPlanetGameplayComponent::HandleGameplayCellClick(int32 CellId, const TCHAR
             InstanceIndex,
             *ComponentName);
         return true;
+    }
+
+    if (!bTurnActivationReady)
+    {
+        UE_LOG(LogPlanetGameplayComponent, Verbose,
+            TEXT("[Gameplay][TurnActivation] %s ignored: previous action presentation is still active. Cell=%d"),
+            SourceLabel ? SourceLabel : TEXT("CellClick"),
+            CellId);
+        return false;
     }
 
     GameplayContainer->SetDebugKeepSameFactionOnEndTurn(bG3DebugKeepSameFactionOnEndTurn);
@@ -1066,23 +1145,20 @@ bool UPlanetGameplayComponent::HandleGameplayCellClick(int32 CellId, const TCHAR
     }
     Host->SyncP1PiecePresentation_(P2MoveEvents, P3CaptureEvents);
 
-    if (bTurnChanged
-        && (!Host->GetPlanetCameraComponent() || !Host->GetPlanetCameraComponent()->TryRequestC6_5DelayedTurnStartFocus(
-            NewTurnIndex,
-            NewFactionId,
-            P2MoveEvents,
-            P3CaptureEvents)))
+    if (bTurnChanged)
     {
-        UE_LOG(LogPlanetGameplayComponent, Log,
-            TEXT("[PlanetGameplay][C6.5] Falling back to immediate turn focus. Faction=%d Turn=%d FactionChanged=%d P2MoveEvents=%d P3CaptureEvents=%d"),
-            NewFactionId,
-            NewTurnIndex,
-            bFactionChanged ? 1 : 0,
-            P2MoveEvents.Num(),
-            P3CaptureEvents.Num());
-        if (UPlanetCameraComponent* Camera = Host->GetPlanetCameraComponent())
+        UPlanetCameraComponent* Camera = Host->GetPlanetCameraComponent();
+        const float DelaySeconds = Camera && Camera->bEnableC6_5DelayTurnStartFocusUntilActionPresentationEnds
+            ? Camera->GetC6_5ActionPresentationDelaySeconds(P2MoveEvents, P3CaptureEvents)
+                + FMath::Max(Camera->C6_5TurnStartFocusDelayPaddingSeconds, 0.0f)
+            : 0.0f;
+        if (DelaySeconds > KINDA_SMALL_NUMBER)
         {
-            Camera->FocusCameraOnCurrentFactionBase();
+            BeginTurnActivationGate_(NewTurnIndex, NewFactionId, DelaySeconds);
+        }
+        else
+        {
+            OpenTurnActivationGate_(NewTurnIndex, NewFactionId);
         }
     }
 
@@ -1146,6 +1222,10 @@ bool UPlanetGameplayComponent::TryExecuteNpcValidatedAction(
     if (GameplayContainer->IsMatchEnded())
     {
         return Reject(TEXT("match_ended"));
+    }
+    if (!bTurnActivationReady)
+    {
+        return Reject(TEXT("turn_activation_pending"));
     }
     if (GameplayContainer->GetInteractionPhase() != ETerraGameplayInteractionPhase::Idle)
     {

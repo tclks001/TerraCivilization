@@ -94,14 +94,13 @@ Root
    │  ├─ Decorator: bMatchEnded == true
    │  └─ Task: StopBrain
    │
-   ├─ Sequence: 当前是本 NPC 阵营回合
-   │  ├─ Decorator: bGameplayReady && bIsMyTurn
-   │  ├─ Service: UpdateTurnContext
-   │  ├─ Task: SelectDeterministicAction
-   │  ├─ Task: ExecuteValidatedAction
-   │  └─ Task: ClearTurnState
-   │
-   └─ Task: WaitForTurn
+   ├─ Selector: 回合分发器 [Service: UpdateTurnContext]
+   │  ├─ Sequence: 当前是本 NPC 阵营回合
+   │  │  ├─ Decorator: bGameplayReady && bIsMyTurn
+   │  │  ├─ Task: SelectDeterministicAction
+   │  │  ├─ Task: ExecuteValidatedAction
+   │  │  └─ Task: ClearTurnState
+   │  └─ Task: WaitForTurn
 ```
 
 UE 行为树是事件驱动的。条件应尽量放在 Decorator，周期性刷新轻量状态放在 Service，实际工作放在 Task。`WaitForTurn` 不应每帧轮询 Gameplay；应使用低频 Service、Gameplay 回合变化事件，或两者结合唤醒 Blackboard 条件。
@@ -140,6 +139,8 @@ Blackboard 只保存轻量、可观察、适合分支判断的数据。复杂的
 ### BT1：无 LLM 的行为树最小闭环
 
 目标：非玩家阵营回合能由行为树执行一次合法行动并正常推进回合。
+
+状态：已进入 C++ 与编辑器资产配置阶段。详细落地与验收见 [BT1_NpcFactionBehaviorTreeMinimalLoopDesign.md](BT1_NpcFactionBehaviorTreeMinimalLoopDesign.md)。
 
 范围：
 
@@ -316,14 +317,13 @@ Content/AI/NPC
 
 ## 10. 本阶段不做什么
 
-本设计稿不要求现在实现：
+本设计稿不在总稿中展开实现细节：
 
-- C++ 行为树节点、Pawn、AIController 或任何 `.uasset`。
+- BT1 的 C++ 行为树节点、Pawn、AIController 或任何 `.uasset` 的编辑器配置；详见 BT1 独立设计稿。
 - 每个棋子的独立 AI。
 - NavMesh、路径寻找或移动到世界坐标。
 - LLM 长期记忆、外交、自然语言角色扮演。
 - 把 API key、模型 SDK 或外部网络请求嵌入 UE。
 - 更改现有 MCP tool 的执行语义。
 
-下一次落地应严格从 BT1 开始，并以“一个 NPC 阵营在非玩家回合做一次合法行动”作为唯一验收目标。
-
+BT1 以“一个 NPC 阵营在非玩家回合做一次合法行动”为唯一验收目标；BT2-BT4 仍保持未开始状态。

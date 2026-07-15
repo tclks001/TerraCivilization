@@ -119,6 +119,9 @@ public:
     bool RequestC4SelectionFocus(int32 CellId) const;
     void RequestC6ActionCameraTrackingForMoveEvents(const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents) const;
     float GetC6ActionCameraBlendSeconds(ETerraPiecePresentationMoveType MoveType) const;
+    float GetC6_5ActionPresentationDelaySeconds(
+        const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents,
+        const TArray<FTerraPiecePresentationCaptureEvent>& CaptureEvents) const;
     bool TryRequestC6_5DelayedTurnStartFocus(
         int32 ExpectedTurnIndex,
         int32 ExpectedFactionId,
@@ -152,9 +155,6 @@ public:
 
 private:
     APlanetTessellatedMesh* GetHost() const;
-    float GetC6_5ActionPresentationDelaySeconds(
-        const TArray<FTerraPiecePresentationMoveEvent>& MoveEvents,
-        const TArray<FTerraPiecePresentationCaptureEvent>& CaptureEvents) const;
     float GetC6_5AttackAnimationDurationSeconds(ETerraGameplayPieceType PieceType, UAnimationAsset* AttackAnimation, float FallbackSeconds) const;
     float GetC6_5AnimationLengthSeconds(UAnimationAsset* AnimationAsset, float FallbackSeconds) const;
     bool FocusCameraOnCurrentFactionWarZoneHard();
