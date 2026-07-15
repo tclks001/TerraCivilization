@@ -38,6 +38,64 @@ enum class ETerraGameplayInteractionPhase : uint8
     PieceJumpingCanContinue UMETA(DisplayName = "Piece Jumping Can Continue"),
 };
 
+/** A committed G7 action, retained in memory for UI and later history/replay work. */
+USTRUCT(BlueprintType)
+struct GAMEPLAY_API FTerraGameplayCapturedPieceLog
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    int32 PieceId = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    int32 FactionId = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    ETerraGameplayPieceType PieceType = ETerraGameplayPieceType::Infantry;
+};
+
+USTRUCT(BlueprintType)
+struct GAMEPLAY_API FTerraGameplayActionLogEntry
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    int32 TurnIndex = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    int32 PlayerId = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    int32 PieceId = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    ETerraGameplayPieceType ActionPieceType = ETerraGameplayPieceType::Infantry;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    bool bPromoted = false;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    ETerraGameplayPieceType PromotedPieceType = ETerraGameplayPieceType::Infantry;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    TArray<int32> PathCellIds;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    TArray<int32> CapturedPieceIds;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    TArray<int32> AttackerPieceIds;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    TArray<int32> VanguardPieceIds;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    TArray<FTerraGameplayCapturedPieceLog> CapturedPieces;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    TArray<int32> DefeatedFactionIds;
+};
+
 UENUM(BlueprintType)
 enum class ETerraGameplayTechnologyId : uint8
 {

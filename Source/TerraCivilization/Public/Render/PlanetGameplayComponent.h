@@ -12,6 +12,8 @@ class APlanetTessellatedMesh;
 struct FTerraPiecePresentationMoveEvent;
 struct FTerraPiecePresentationCaptureEvent;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FTerraGameplayActionLogCommitted, const FTerraGameplayActionLogEntry&, Entry);
+
 enum class ETerraG1DebugPieceType : uint8
 {
     Base,
@@ -77,6 +79,9 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay T0")
     FTerraGameplayTechnologyProgressionConfig T0TechnologyProgressionConfig;
 
+    UPROPERTY(BlueprintAssignable, Category = "Terra UI|Action Log")
+    FTerraGameplayActionLogCommitted OnActionLogCommitted;
+
     void RebuildGameplay();
     bool InitializeTutorialScenario(const UTerraTutorialScenarioData& Scenario, FString& OutError);
     void TickTutorialNpcScript();
@@ -97,11 +102,21 @@ public:
     void RebuildG1DebugPieces();
     void DrawG1DebugPieces() const;
 
+    UFUNCTION(BlueprintPure, Category = "PlanetTopology|Tess|SimpleGameplay T0")
+    bool GetT0FactionOwnedTechnologies(int32 FactionId, TArray<ETerraGameplayTechnologyId>& OutTechnologies) const;
+
+    UFUNCTION(BlueprintPure, Category = "PlanetTopology|Tess|SimpleGameplay T0")
+    bool GetT0FactionTechnologyScore(int32 FactionId, int32& OutScore) const;
+
+    UFUNCTION(BlueprintPure, Category = "PlanetTopology|Tess|SimpleGameplay T0")
+    void GetT0AllFactionTechnologyStates(TArray<FTerraGameplayFactionTechnologyState>& OutStates) const;
+
     const FTerraGameplayContainer* GetGameplayContainer() const { return GameplayContainer.Get(); }
     FTerraGameplayContainer* GetGameplayContainer() { return GameplayContainer.Get(); }
     int32 GetLastHighlightedFactionId() const { return G2_5LastHighlightedFactionId; }
     bool HasInitializedGameplay() const { return GameplayContainer.IsValid() && GameplayContainer->IsInitialized(); }
     bool IsTurnActivationReady() const { return bTurnActivationReady; }
+    void CollectCommittedActionLogEntries(TArray<FTerraGameplayActionLogEntry>& OutEntries) const;
 
 private:
     APlanetTessellatedMesh* GetHost() const;

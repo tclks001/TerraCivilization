@@ -49,6 +49,9 @@ public:
     /** C2/C3：外部自动镜头写入 C3 焦点式相机状态，避免下一帧被旧 C3 状态覆盖。 */
     bool SetC3FocusCameraState(const FVector& FocusUnitDir, float DistanceToFocusCM, float YawAroundFocusDeg);
 
+    /** Captures the currently rendered camera view into C3 before a modal pause stops controller ticks. */
+    bool CaptureCurrentViewForPause();
+
 private:
     /** C3：是否已经从当前视角同步过焦点式手动相机状态。 */
     bool bC3FocusCameraInitialized = false;

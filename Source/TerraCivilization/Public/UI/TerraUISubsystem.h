@@ -13,6 +13,8 @@ enum class ETerraUIRoute : uint8
     None,
     MainMenu,
     NewGameSetup,
+    InGame,
+    Paused,
 };
 
 /** The UI0 subset of the deterministic match-start configuration. */
@@ -54,10 +56,21 @@ public:
     void CloseFrontEnd();
 
     UFUNCTION(BlueprintCallable, Category="Terra UI")
+    void TogglePauseMenu();
+
+    UFUNCTION(BlueprintCallable, Category="Terra UI")
+    void ResumeGame();
+
+    UFUNCTION(BlueprintCallable, Category="Terra UI")
     bool StartNewGame(const FTerraNewGameConfig& Config);
 
     UFUNCTION(BlueprintPure, Category="Terra UI")
-    bool IsBlockingGameInput() const { return ActiveRoute != ETerraUIRoute::None; }
+    bool IsBlockingGameInput() const
+    {
+        return ActiveRoute == ETerraUIRoute::MainMenu
+            || ActiveRoute == ETerraUIRoute::NewGameSetup
+            || ActiveRoute == ETerraUIRoute::Paused;
+    }
 
     UFUNCTION(BlueprintPure, Category="Terra UI")
     ETerraUIRoute GetActiveRoute() const { return ActiveRoute; }
@@ -73,10 +86,14 @@ public:
 
 private:
     void ShowRoute_(ETerraUIRoute Route, TSubclassOf<UUserWidget> FallbackClass);
+    void EnsureInGameHUD_();
     void ApplyFrontEndInput_(bool bEnable);
 
     UPROPERTY(Transient)
     TObjectPtr<UUserWidget> ActiveScreen;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UUserWidget> InGameHUD;
 
     ETerraUIRoute ActiveRoute = ETerraUIRoute::None;
     FTerraNewGameConfig LastNewGameConfig;

@@ -143,6 +143,11 @@ void UPlanetPiecePresentationComponent::SyncPresentation(
     }
 
     const FTerraPieceVisualConfig VisualConfig = BuildVisualConfig();
+    const int32 CurrentFactionId = Gameplay->GetCurrentFactionId();
+    if (GameplayComp->IsTurnActivationReady() || PresentedNeutralFactionId == INDEX_NONE)
+    {
+        PresentedNeutralFactionId = CurrentFactionId;
+    }
 
     TArray<FTerraPiecePresentationSnapshot> Snapshots;
     const TArray<FTerraGameplayPieceState>& Pieces = Gameplay->GetPieces();
@@ -163,7 +168,7 @@ void UPlanetPiecePresentationComponent::SyncPresentation(
 
         FTerraPiecePresentationSnapshot& Snapshot = Snapshots.AddDefaulted_GetRef();
         Snapshot.PieceId = Piece.PieceId;
-        Snapshot.OwnerFactionId = Piece.bIsNeutral ? Gameplay->GetCurrentFactionId() : Piece.OwnerFactionId;
+        Snapshot.OwnerFactionId = Piece.bIsNeutral ? PresentedNeutralFactionId : Piece.OwnerFactionId;
         Snapshot.CellId = Piece.CellId;
         Snapshot.PieceType = Piece.PieceType;
         Snapshot.WorldTransform = PieceWorldTransform;

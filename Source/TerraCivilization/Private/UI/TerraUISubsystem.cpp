@@ -6,8 +6,12 @@
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Render/PlanetTessellatedMesh.h"
+#include "Render/PlanetCameraComponent.h"
+#include "Interaction/PlanetInteractionController.h"
 #include "UI/TerraMainMenuWidget.h"
 #include "UI/TerraNewGameSetupWidget.h"
+#include "UI/TerraInGameHUDWidget.h"
+#include "UI/TerraPauseMenuWidget.h"
 #include "UI/TerraUISettings.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogTerraUI, Log, All);
@@ -18,6 +22,11 @@ void UTerraUISubsystem::Deinitialize()
     {
         ActiveScreen->RemoveFromParent();
         ActiveScreen = nullptr;
+    }
+    if (InGameHUD)
+    {
+        InGameHUD->RemoveFromParent();
+        InGameHUD = nullptr;
     }
     ActiveRoute = ETerraUIRoute::None;
     Super::Deinitialize();
@@ -42,6 +51,52 @@ void UTerraUISubsystem::CloseFrontEnd()
     }
     ActiveRoute = ETerraUIRoute::None;
     ApplyFrontEndInput_(false);
+    EnsureInGameHUD_();
+    if (APlanetTessellatedMesh* Planet = Cast<APlanetTessellatedMesh>(
+            UGameplayStatics::GetActorOfClass(GetWorld(), APlanetTessellatedMesh::StaticClass())))
+    {
+        if (UPlanetCameraComponent* Camera = Planet->GetPlanetCameraComponent())
+        {
+            Camera->FocusCameraOnCurrentFactionBase();
+        }
+    }
+    ActiveRoute = ETerraUIRoute::InGame;
+    OnRouteChanged.Broadcast(ActiveRoute);
+}
+
+void UTerraUISubsystem::TogglePauseMenu()
+{
+    if (ActiveRoute == ETerraUIRoute::Paused)
+    {
+        ResumeGame();
+        return;
+    }
+    if (ActiveRoute != ETerraUIRoute::InGame)
+    {
+        return;
+    }
+    if (APlanetInteractionController* InteractionController = Cast<APlanetInteractionController>(GetLocalPlayer()->GetPlayerController(GetWorld())))
+    {
+        InteractionController->CaptureCurrentViewForPause();
+    }
+    UGameplayStatics::SetGamePaused(GetWorld(), true);
+    ShowRoute_(ETerraUIRoute::Paused, UTerraPauseMenuWidget::StaticClass());
+}
+
+void UTerraUISubsystem::ResumeGame()
+{
+    if (ActiveRoute != ETerraUIRoute::Paused)
+    {
+        return;
+    }
+    if (ActiveScreen)
+    {
+        ActiveScreen->RemoveFromParent();
+        ActiveScreen = nullptr;
+    }
+    ApplyFrontEndInput_(false);
+    UGameplayStatics::SetGamePaused(GetWorld(), false);
+    ActiveRoute = ETerraUIRoute::InGame;
     OnRouteChanged.Broadcast(ActiveRoute);
 }
 
@@ -98,6 +153,10 @@ void UTerraUISubsystem::ShowRoute_(ETerraUIRoute Route, TSubclassOf<UUserWidget>
     {
         ConfiguredClass = Settings->NewGameSetupWidgetClass;
     }
+    else if (Route == ETerraUIRoute::Paused)
+    {
+        ConfiguredClass = Settings->PauseMenuWidgetClass;
+    }
     TSubclassOf<UUserWidget> WidgetClass = FallbackClass;
     if (!ConfiguredClass.IsNull())
     {
@@ -126,6 +185,39 @@ void UTerraUISubsystem::ShowRoute_(ETerraUIRoute Route, TSubclassOf<UUserWidget>
     ActiveRoute = Route;
     ApplyFrontEndInput_(true);
     OnRouteChanged.Broadcast(ActiveRoute);
+}
+
+void UTerraUISubsystem::EnsureInGameHUD_()
+{
+    if (InGameHUD)
+    {
+        return;
+    }
+
+    ULocalPlayer* LocalPlayer = GetLocalPlayer();
+    APlayerController* PlayerController = LocalPlayer ? LocalPlayer->GetPlayerController(GetWorld()) : nullptr;
+    if (!PlayerController)
+    {
+        return;
+    }
+
+    const UTerraUISettings* Settings = GetDefault<UTerraUISettings>();
+    TSubclassOf<UUserWidget> WidgetClass = UTerraInGameHUDWidget::StaticClass();
+    if (!Settings->InGameHUDWidgetClass.IsNull())
+    {
+        WidgetClass = Settings->InGameHUDWidgetClass.LoadSynchronous();
+    }
+    if (!WidgetClass)
+    {
+        UE_LOG(LogTerraUI, Error, TEXT("[UI1] Could not resolve in-game HUD widget class."));
+        return;
+    }
+
+    InGameHUD = CreateWidget<UUserWidget>(PlayerController, WidgetClass);
+    if (InGameHUD)
+    {
+        InGameHUD->AddToViewport(10);
+    }
 }
 
 void UTerraUISubsystem::ApplyFrontEndInput_(bool bEnable)

@@ -43,6 +43,10 @@ void APlanetInteractionController::BeginPlay()
     // 但默认 Pawn 仍会沿前向移动，表现成“高度被偷偷改了”。
     SetIgnoreMoveInput(true);
 
+    // The planet is controlled by cursor hit tests plus the explicit WSAD/QE camera path.
+    // Never let GameOnly input recapture turn raw mouse movement into default controller look.
+    SetIgnoreLookInput(true);
+
     // 关卡里只期望存在唯一一个 PlanetBinder。这里做缓存查找，
     // 失败时打日志并保持 CachedBinder 为 null（PlayerTick 会安全跳过）。
     CachedBinder = Cast<APlanetBinder>(
@@ -66,9 +70,16 @@ void APlanetInteractionController::PlayerTick(float DeltaTime)
 
     if (ULocalPlayer* LocalPlayer = GetLocalPlayer())
     {
-        if (const UTerraUISubsystem* UI = LocalPlayer->GetSubsystem<UTerraUISubsystem>(); UI && UI->IsBlockingGameInput())
+        if (UTerraUISubsystem* UI = LocalPlayer->GetSubsystem<UTerraUISubsystem>())
         {
-            return;
+            if (WasInputKeyJustPressed(EKeys::Escape))
+            {
+                UI->TogglePauseMenu();
+            }
+            if (UI->IsBlockingGameInput())
+            {
+                return;
+            }
         }
     }
 
@@ -169,13 +180,15 @@ bool APlanetInteractionController::InitializeC3FocusCameraState_(APlanetTessella
     }
 
     FVector CameraWorldPosition = FVector::ZeroVector;
-    if (AActor* ViewTarget = GetViewTarget())
-    {
-        CameraWorldPosition = ViewTarget->GetActorLocation();
-    }
-    else if (PlayerCameraManager)
+    // PlayerCameraManager is the final rendered view. ViewTarget can be a DefaultPawn whose
+    // transform lags or differs from the camera manager during controller/camera transitions.
+    if (PlayerCameraManager)
     {
         CameraWorldPosition = PlayerCameraManager->GetCameraLocation();
+    }
+    else if (AActor* ViewTarget = GetViewTarget())
+    {
+        CameraWorldPosition = ViewTarget->GetActorLocation();
     }
     else
     {
@@ -284,6 +297,20 @@ bool APlanetInteractionController::SetC3FocusCameraState(const FVector& FocusUni
         FMath::Atan2(static_cast<float>(C3FocusUnitDir.Y), static_cast<float>(C3FocusUnitDir.X))));
     bC3FocusCameraInitialized = true;
     bC4SelectionFocusBlendActive = false;
+    return true;
+}
+
+bool APlanetInteractionController::CaptureCurrentViewForPause()
+{
+    APlanetTessellatedMesh* Tess = CachedBinder ? CachedBinder->GetTessellatedMesh() : nullptr;
+    if (!Tess || !InitializeC3FocusCameraState_(Tess))
+    {
+        return false;
+    }
+
+    // A paused camera must resume from the rendered pose, not from a stale C4/C6 blend target.
+    bC4SelectionFocusBlendActive = false;
+    UpdateC3FocusCameraControl_(0.0f, Tess);
     return true;
 }
 

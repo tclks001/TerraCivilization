@@ -221,6 +221,7 @@ public:
         TArray<int32> CurrentActionPathCellIds;
         int32 SelectedPieceId = INDEX_NONE;
         int32 SelectedPieceStartCellId = INDEX_NONE;
+        ETerraGameplayPieceType SelectedPieceInitialType = ETerraGameplayPieceType::Infantry;
         int32 LastJumpStartCellId = INDEX_NONE;
         ETerraGameplayInteractionPhase InteractionPhase = ETerraGameplayInteractionPhase::Idle;
     };
@@ -247,6 +248,9 @@ public:
     int32 GetWinningFactionId() const { return WinningFactionId; }
     bool IsFactionWaitingForTechnologyChoice(int32 FactionId) const;
     bool GetFactionTechnologyState(int32 FactionId, FTerraGameplayFactionTechnologyState& OutState) const;
+    bool GetFactionOwnedTechnologies(int32 FactionId, TArray<ETerraGameplayTechnologyId>& OutTechnologies) const;
+    bool GetFactionTechnologyScore(int32 FactionId, int32& OutScore) const;
+    void CollectFactionTechnologyStates(TArray<FTerraGameplayFactionTechnologyState>& OutStates) const;
     bool GetPendingTechnologyChoices(int32 FactionId, TArray<ETerraGameplayTechnologyId>& OutChoices) const;
     bool ChoosePendingTechnology(int32 FactionId, ETerraGameplayTechnologyId TechnologyId, FString& OutError);
 
@@ -276,6 +280,7 @@ public:
     bool QueryCurrentFactionPieceTurnSurvey(int32 PieceId, FPieceTurnSurvey& OutSurvey) const;
     bool BuildLocalTacticalSituationCard(const FLegalActionQuery& Action, FLocalTacticalSituationCard& OutCard) const;
     bool BuildCurrentFactionStrategicSnapshot(FCurrentFactionStrategicSnapshot& OutSnapshot) const;
+    void CollectCommittedActionLogEntries(TArray<FTerraGameplayActionLogEntry>& OutEntries) const;
     bool BuildLocalTopologyObservation(int32 CenterCellId, FLocalTopologyObservation& OutObservation) const;
     const TArray<FTerraGameplayPieceState>& GetPieces() const { return Pieces; }
     const TArray<FTerraGameplayFactionState>& GetFactions() const { return Factions; }
@@ -343,7 +348,7 @@ private:
     TArray<FTerraGameplayCaptureEntry> GetSortedPendingCaptureEntries_() const;
     FString BuildActionLogJson_(int32 ActionTurnIndex, int32 PlayerId, int32 PieceId, const TArray<int32>& PathCellIds, const TArray<FTerraGameplayCaptureEntry>& CaptureEntries) const;
     void AppendActionLogToFile_(const FString& ActionLogJson) const;
-    void EmitActionLog_(int32 ActionTurnIndex, int32 PlayerId, int32 PieceId, const TArray<int32>& PathCellIds, const TArray<FTerraGameplayCaptureEntry>& CaptureEntries) const;
+    void EmitActionLog_(int32 ActionTurnIndex, int32 PlayerId, int32 PieceId, ETerraGameplayPieceType ActionPieceType, ETerraGameplayPieceType ResultPieceType, const TArray<int32>& PathCellIds, const TArray<FTerraGameplayCaptureEntry>& CaptureEntries, const TArray<FTerraGameplayCapturedPieceLog>& CapturedPieces, const TArray<int32>& DefeatedFactionIds);
 
     bool TrySelectPieceAtCell_(int32 CellId, TArray<int32>& OutDirtyCellIds);
     bool TryMoveSelectedPieceToOrdinaryTarget_(int32 TargetCellId, TArray<int32>& OutDirtyCellIds);
@@ -383,8 +388,10 @@ private:
     int32 WinningFactionId = INDEX_NONE;
     int32 SelectedPieceId = INDEX_NONE;
     int32 SelectedPieceStartCellId = INDEX_NONE;
+    ETerraGameplayPieceType SelectedPieceInitialType = ETerraGameplayPieceType::Infantry;
     int32 LastJumpStartCellId = INDEX_NONE;
     FString ActionLogFilePath;
+    TArray<FTerraGameplayActionLogEntry> CommittedActionLogEntries;
     TArray<int32> CurrentActionPathCellIds;
     TArray<FInteractionUndoSnapshot> InteractionUndoSnapshots;
     ETerraGameplayInteractionPhase InteractionPhase = ETerraGameplayInteractionPhase::Idle;

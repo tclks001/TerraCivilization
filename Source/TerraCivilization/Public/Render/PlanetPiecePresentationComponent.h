@@ -420,6 +420,9 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<UTerraPiecePresentationManager> PiecePresentationManager;
 
+    // Neutral pieces retain this presentation faction while the next turn is gated.
+    int32 PresentedNeutralFactionId = INDEX_NONE;
+
     /** SimpleGameplay P1：确保 PiecePresentationManager 存在（懒创建）。返回是否可用。 */
     bool EnsurePiecePresentationManager_();
 };

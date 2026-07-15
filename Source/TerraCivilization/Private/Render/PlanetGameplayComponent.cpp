@@ -929,6 +929,29 @@ bool UPlanetGameplayComponent::HandleHISMUndo()
     return true;
 }
 
+bool UPlanetGameplayComponent::GetT0FactionOwnedTechnologies(int32 FactionId, TArray<ETerraGameplayTechnologyId>& OutTechnologies) const
+{
+    OutTechnologies.Reset();
+    return GameplayContainer.IsValid()
+        && GameplayContainer->GetFactionOwnedTechnologies(FactionId, OutTechnologies);
+}
+
+bool UPlanetGameplayComponent::GetT0FactionTechnologyScore(int32 FactionId, int32& OutScore) const
+{
+    OutScore = 0;
+    return GameplayContainer.IsValid()
+        && GameplayContainer->GetFactionTechnologyScore(FactionId, OutScore);
+}
+
+void UPlanetGameplayComponent::GetT0AllFactionTechnologyStates(TArray<FTerraGameplayFactionTechnologyState>& OutStates) const
+{
+    OutStates.Reset();
+    if (GameplayContainer.IsValid())
+    {
+        GameplayContainer->CollectFactionTechnologyStates(OutStates);
+    }
+}
+
 void UPlanetGameplayComponent::BeginTurnActivationGate_(int32 ExpectedTurnIndex, int32 ExpectedFactionId, float DelaySeconds)
 {
     APlanetTessellatedMesh* Host = GetHost();
@@ -975,6 +998,8 @@ void UPlanetGameplayComponent::OpenTurnActivationGate_(int32 ExpectedTurnIndex, 
     PendingTurnActivationFactionId = INDEX_NONE;
     if (APlanetTessellatedMesh* Host = GetHost())
     {
+        // Neutral-piece presentation switches faction only when the new turn can act.
+        Host->SyncP1PiecePresentation_();
         if (UPlanetCameraComponent* Camera = Host->GetPlanetCameraComponent())
         {
             Camera->ExecuteC6_5DelayedTurnStartFocus(ExpectedTurnIndex, ExpectedFactionId);
@@ -1034,6 +1059,9 @@ bool UPlanetGameplayComponent::HandleGameplayCellClick(int32 CellId, const TCHAR
         GameplayContainer->CollectPendingCaptureEntries(PendingCaptureEntriesBeforeClick);
     }
 
+    TArray<FTerraGameplayActionLogEntry> ActionLogsBeforeClick;
+    GameplayContainer->CollectCommittedActionLogEntries(ActionLogsBeforeClick);
+
     TArray<int32> DirtyCellIds;
     const bool bGameplayHandled = GameplayContainer->HandleCellClick(CellId, DirtyCellIds);
     RefreshGameplayHighlights(DirtyCellIds);
@@ -1047,6 +1075,12 @@ bool UPlanetGameplayComponent::HandleGameplayCellClick(int32 CellId, const TCHAR
     const int32 NewTurnIndex = GameplayContainer->GetTurnIndex();
     const int32 NewSelectedPieceId = GameplayContainer->GetSelectedPieceId();
     const ETerraGameplayInteractionPhase NewPhase = GameplayContainer->GetInteractionPhase();
+    TArray<FTerraGameplayActionLogEntry> ActionLogsAfterClick;
+    GameplayContainer->CollectCommittedActionLogEntries(ActionLogsAfterClick);
+    if (bGameplayHandled && ActionLogsAfterClick.Num() > ActionLogsBeforeClick.Num())
+    {
+        OnActionLogCommitted.Broadcast(ActionLogsAfterClick.Last());
+    }
     int32 NewSelectedPieceCellId = INDEX_NONE;
     if (NewSelectedPieceId != INDEX_NONE)
     {
@@ -1148,13 +1182,6 @@ bool UPlanetGameplayComponent::HandleGameplayCellClick(int32 CellId, const TCHAR
         }
     }
 
-    RebuildG1DebugPieces();
-    if (UPlanetCameraComponent* Camera = Host->GetPlanetCameraComponent())
-    {
-        Camera->RequestC6ActionCameraTrackingForMoveEvents(P2MoveEvents);
-    }
-    Host->SyncP1PiecePresentation_(P2MoveEvents, P3CaptureEvents);
-
     if (bTurnChanged)
     {
         UPlanetCameraComponent* Camera = Host->GetPlanetCameraComponent();
@@ -1172,6 +1199,13 @@ bool UPlanetGameplayComponent::HandleGameplayCellClick(int32 CellId, const TCHAR
         }
     }
 
+    RebuildG1DebugPieces();
+    if (UPlanetCameraComponent* Camera = Host->GetPlanetCameraComponent())
+    {
+        Camera->RequestC6ActionCameraTrackingForMoveEvents(P2MoveEvents);
+    }
+    Host->SyncP1PiecePresentation_(P2MoveEvents, P3CaptureEvents);
+
     UE_LOG(LogPlanetGameplayComponent, Log,
         TEXT("[PlanetGameplay][G2] %s -> Gameplay Cell=%d Instance=%d Component=%s Handled=%d CurrentFaction=%d Turn=%d Phase=%d P2MoveEvents=%d P3CaptureEvents=%d"),
         SourceLabel ? SourceLabel : TEXT("CellClick"),
@@ -1186,6 +1220,15 @@ bool UPlanetGameplayComponent::HandleGameplayCellClick(int32 CellId, const TCHAR
         P3CaptureEvents.Num());
 
     return true;
+}
+
+void UPlanetGameplayComponent::CollectCommittedActionLogEntries(TArray<FTerraGameplayActionLogEntry>& OutEntries) const
+{
+    OutEntries.Reset();
+    if (GameplayContainer.IsValid())
+    {
+        GameplayContainer->CollectCommittedActionLogEntries(OutEntries);
+    }
 }
 
 bool UPlanetGameplayComponent::TryExecuteNpcMcpValidatedAction(
