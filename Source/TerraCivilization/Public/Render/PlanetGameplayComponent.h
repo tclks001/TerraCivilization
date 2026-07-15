@@ -70,11 +70,15 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G10", meta = (ClampMin = "0"))
     int32 G10NeutralArcherCount = 20;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlanetTopology|Tess|SimpleGameplay G10")
+    int32 G10NeutralSpawnSeed = 0;
+
     void RebuildGameplay();
     bool InitializeTutorialScenario(const UTerraTutorialScenarioData& Scenario, FString& OutError);
     void TickTutorialNpcScript();
     void RefreshGameplayHighlights(const TArray<int32>& DirtyCellIds);
     bool HandleGameplayCellClick(int32 CellId, const TCHAR* SourceLabel, int32 InstanceIndex, const FString& ComponentName);
+    bool TryExecuteNpcValidatedAction(int32 ExpectedTurnIndex, int32 ExpectedFactionId, int32 PieceId, int32 ToCellId, FTerraGameplayContainer::FValidatedActionExecutionResult& OutResult);
     bool TryExecuteNpcMcpValidatedAction(int32 ExpectedTurnIndex, int32 ExpectedFactionId, int32 PieceId, int32 ToCellId, FTerraGameplayContainer::FValidatedActionExecutionResult& OutResult);
     bool TryNpcMcpUiBeginTurnReview(FTerraNpcMcpGameplayBridge::FUiReviewResult& OutResult);
     bool TryNpcMcpUiSelectPiece(int32 PieceId, FTerraNpcMcpGameplayBridge::FUiReviewResult& OutResult);

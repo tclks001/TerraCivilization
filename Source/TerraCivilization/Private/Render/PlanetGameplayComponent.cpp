@@ -190,6 +190,7 @@ void UPlanetGameplayComponent::RebuildGameplay()
     NeutralSpawnConfig.InfantryCount = FMath::Max(G10NeutralInfantryCount, 0);
     NeutralSpawnConfig.CavalryCount = FMath::Max(G10NeutralCavalryCount, 0);
     NeutralSpawnConfig.ArcherCount = FMath::Max(G10NeutralArcherCount, 0);
+    NeutralSpawnConfig.SpawnSeed = G10NeutralSpawnSeed;
     GameplayContainer->Initialize(GameplayCells, NeutralSpawnConfig);
     GameplayContainer->SetDebugKeepSameFactionOnEndTurn(bG3DebugKeepSameFactionOnEndTurn);
     FTerraNpcMcpGameplayBridge::RegisterGameplayContainer(GameplayContainer.Get());
@@ -1102,6 +1103,16 @@ bool UPlanetGameplayComponent::HandleGameplayCellClick(int32 CellId, const TCHAR
 }
 
 bool UPlanetGameplayComponent::TryExecuteNpcMcpValidatedAction(
+    int32 ExpectedTurnIndex,
+    int32 ExpectedFactionId,
+    int32 PieceId,
+    int32 ToCellId,
+    FTerraGameplayContainer::FValidatedActionExecutionResult& OutResult)
+{
+    return TryExecuteNpcValidatedAction(ExpectedTurnIndex, ExpectedFactionId, PieceId, ToCellId, OutResult);
+}
+
+bool UPlanetGameplayComponent::TryExecuteNpcValidatedAction(
     int32 ExpectedTurnIndex,
     int32 ExpectedFactionId,
     int32 PieceId,

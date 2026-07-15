@@ -47,17 +47,19 @@ void FTerraGameplayContainer::Initialize(const TArray<FTerraGameplayCellState>& 
     ResetRuntimeState_();
     InitializeActionLogFilePath_();
     BuildInitialPieces_();
+    NeutralSpawnRandomStream.Initialize(InNeutralSpawnConfig.SpawnSeed);
     BuildNeutralPieces_(InNeutralSpawnConfig);
 
     bInitialized = true;
     CurrentFactionId = Factions.Num() > 0 ? Factions[0].FactionId : INDEX_NONE;
 
     UE_LOG(LogTerraGameplay, Log,
-        TEXT("[Gameplay][G10] Initialized. Cells=%d Factions=%d Pieces=%d CurrentFaction=%d"),
+        TEXT("[Gameplay][G10] Initialized. Cells=%d Factions=%d Pieces=%d CurrentFaction=%d NeutralSpawnSeed=%d"),
         Cells.Num(),
         Factions.Num(),
         Pieces.Num(),
-        CurrentFactionId);
+        CurrentFactionId,
+        InNeutralSpawnConfig.SpawnSeed);
 }
 
 bool FTerraGameplayContainer::HandleCellClick(int32 CellId, TArray<int32>& OutDirtyCellIds)
@@ -2708,7 +2710,7 @@ bool FTerraGameplayContainer::TryAddNeutralPiece_(ETerraGameplayPieceType PieceT
         return false;
     }
 
-    const int32 SelectedCellIndex = FMath::RandRange(0, CandidateCellIds.Num() - 1);
+    const int32 SelectedCellIndex = NeutralSpawnRandomStream.RandRange(0, CandidateCellIds.Num() - 1);
     if (!AddPiece_(INDEX_NONE, CandidateCellIds[SelectedCellIndex], PieceType, OutPieceId))
     {
         return false;

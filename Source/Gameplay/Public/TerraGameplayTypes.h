@@ -47,6 +47,7 @@ struct GAMEPLAY_API FTerraGameplayNeutralSpawnConfig
     int32 InfantryCount = 20;
     int32 CavalryCount = 20;
     int32 ArcherCount = 20;
+    int32 SpawnSeed = 0;
 };
 
 USTRUCT(BlueprintType)

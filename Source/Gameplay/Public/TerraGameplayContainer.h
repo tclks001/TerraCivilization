@@ -350,6 +350,7 @@ private:
     TArray<FTerraGameplayPieceState> Pieces;
     TArray<FTerraGameplayFactionState> Factions;
     TArray<int32> CellToPieceId;
+    FRandomStream NeutralSpawnRandomStream;
     TMap<int32, FTerraGameplayEquipmentDropState> EquipmentDropsByCellId;
     TMap<int32, FTerraGameplayCellHighlight> GameplayHighlights;
     TSet<int32> OrdinaryMoveTargetCellIds;

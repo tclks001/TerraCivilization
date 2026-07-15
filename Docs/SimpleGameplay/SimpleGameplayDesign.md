@@ -859,8 +859,8 @@ struct FTerraFactionState
 
 #### 配置与生成
 
-- `G10NeutralCommanderCount`、`G10NeutralInfantryCount`、`G10NeutralCavalryCount`、`G10NeutralArcherCount` 是 Gameplay 组件暴露给编辑器与蓝图的开局配置，默认值均为 `20`；每局分别尝试生成对应数量。
-- 生成顺序固定为主将、步兵、骑兵、弓兵；每一个单位都从当前合法候选 Cell 中均匀随机选取，因此相同配置下每次重建棋盘都可能产生不同布局。
+- `G10NeutralCommanderCount`、`G10NeutralInfantryCount`、`G10NeutralCavalryCount`、`G10NeutralArcherCount` 是 Gameplay 组件暴露给编辑器与蓝图的开局配置，默认值均为 `20`；每局分别尝试生成对应数量。`G10NeutralSpawnSeed` 是同一分类下的可编辑随机数种子，默认 `0`。
+- 生成顺序固定为主将、步兵、骑兵、弓兵；每一个单位都从当前合法候选 Cell 中均匀随机选取。生成只使用 G10 自己的 `FRandomStream`：在棋盘拓扑、地形、四类数量和种子相同的条件下，重建后必定得到相同布局，不受其它系统随机调用影响。
 - 合法候选 Cell 必须为空，且不得与任何已经生成的中立单位相邻；普通 Cell 使用 6 个邻接槽，五边形 Cell 只使用其有效的 5 个邻接槽。
 - 骑兵候选 Cell 不能是山脉，保持“骑兵不可进入山脉”的兵种规则。其它中立兵种可在平原、森林或山脉生成。
 - 当剩余合法候选 Cell 不足时，停止该兵种的后续生成并输出警告；不会为凑数量而覆盖已有棋子或破坏不相邻约束。
