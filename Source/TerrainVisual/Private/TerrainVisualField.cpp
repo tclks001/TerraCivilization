@@ -39,6 +39,7 @@ bool FTerrainVisualField::Initialize(
     CellTopology = &InCellTopology;
     GeoCells = &InGeoCells;
     Config = InConfig;
+    InitializeNoise_();
 
     for (int32 CellId = 0; CellId < CellCount; ++CellId)
     {
@@ -127,14 +128,46 @@ FTerrainSurfaceQueryResult FTerrainVisualField::QueryBaseSurface(const FVector& 
 
 float FTerrainVisualField::EvaluateMacroHeightCM_(const FVector& UnitDirection) const
 {
-    const float MountainHeight = EvaluateMountainRidgeHeightCM_(UnitDirection);
+    const float MountainWeight = EvaluateMountainRidgeWeight_(UnitDirection);
+    const float MountainHeight = Config.MountainHeightCM
+        * FMath::Pow(MountainWeight, FMath::Max(Config.MountainFalloffExponent, 1.0f));
     const float ForestHeight = EvaluateForestHeightCM_(UnitDirection);
-    return MountainHeight + ForestHeight;
+    return MountainHeight + ForestHeight + EvaluateMediumFrequencyHeightCM_(UnitDirection, MountainWeight);
 }
 
-float FTerrainVisualField::EvaluateMountainRidgeHeightCM_(const FVector& UnitDirection) const
+float FTerrainVisualField::EvaluateMediumFrequencyHeightCM_(const FVector& UnitDirection, float MountainWeight) const
 {
-    if (MountainRidgeSegments.IsEmpty() || Config.MountainHeightCM <= KINDA_SMALL_NUMBER)
+    if (!Config.bEnableMediumFrequencyErosion)
+    {
+        return 0.0f;
+    }
+
+    const FVector NoisePosition = GetNoisePosition_(UnitDirection);
+    const float CrestVariation = CrestNoise.GetNoise(NoisePosition.X, NoisePosition.Y, NoisePosition.Z)
+        * FMath::Max(Config.CrestNoiseAmplitudeCM, 0.0f)
+        * MountainWeight;
+
+    float WarpedX = NoisePosition.X;
+    float WarpedY = NoisePosition.Y;
+    float WarpedZ = NoisePosition.Z;
+    ErosionWarpNoise.DomainWarp(WarpedX, WarpedY, WarpedZ);
+    const float RidgedNoise = ErosionNoise.GetNoise(WarpedX, WarpedY, WarpedZ);
+    const float ValleyMask = FMath::Pow(
+        1.0f - FMath::Clamp((RidgedNoise + 1.0f) * 0.5f, 0.0f, 1.0f),
+        FMath::Max(Config.ErosionValleySharpness, 0.01f));
+    const float SlopeMask = 4.0f * MountainWeight * (1.0f - MountainWeight);
+    const float MountainErosion = FMath::Max(Config.ErosionAmplitudeCM, 0.0f) * SlopeMask * ValleyMask;
+
+    const float LowlandMask = 1.0f - MountainWeight;
+    const float LowlandUndulation = LowlandNoise.GetNoise(NoisePosition.X, NoisePosition.Y, NoisePosition.Z)
+        * FMath::Max(Config.LowlandNoiseAmplitudeCM, 0.0f)
+        * LowlandMask;
+    return CrestVariation - MountainErosion + LowlandUndulation;
+}
+
+float FTerrainVisualField::EvaluateMountainRidgeWeight_(const FVector& UnitDirection) const
+{
+    if (MountainRidgeSegments.IsEmpty())
     {
         return 0.0f;
     }
@@ -156,8 +189,13 @@ float FTerrainVisualField::EvaluateMountainRidgeHeightCM_(const FVector& UnitDir
         return 0.0f;
     }
 
-    const float SdfInterior = FMath::Max(0.0f, 1.0f - MinimumDistance / SupportRadians);
-    return Config.MountainHeightCM * FMath::Pow(SdfInterior, FMath::Max(Config.MountainFalloffExponent, 1.0f));
+    return FMath::Max(0.0f, 1.0f - MinimumDistance / SupportRadians);
+}
+
+float FTerrainVisualField::EvaluateMountainRidgeHeightCM_(const FVector& UnitDirection) const
+{
+    return Config.MountainHeightCM
+        * FMath::Pow(EvaluateMountainRidgeWeight_(UnitDirection), FMath::Max(Config.MountainFalloffExponent, 1.0f));
 }
 
 float FTerrainVisualField::EvaluateForestHeightCM_(const FVector& UnitDirection) const
@@ -225,6 +263,55 @@ float FTerrainVisualField::EvaluateNormalizedSigmoid_(float Interior, float Stee
     const float AtZero = Logistic(0.0f);
     const float AtOne = Logistic(1.0f);
     return FMath::Clamp((Logistic(ClampedInterior) - AtZero) / FMath::Max(AtOne - AtZero, KINDA_SMALL_NUMBER), 0.0f, 1.0f);
+}
+
+FVector FTerrainVisualField::GetNoisePosition_(const FVector& UnitDirection) const
+{
+    return NoiseRotation.RotateVector(UnitDirection.GetSafeNormal());
+}
+
+void FTerrainVisualField::InitializeNoise_()
+{
+    FRandomStream Random(Config.GlobalVisualSeed ^ 0x4D455252);
+    FVector RotationAxis(
+        Random.FRandRange(-1.0f, 1.0f),
+        Random.FRandRange(-1.0f, 1.0f),
+        Random.FRandRange(-1.0f, 1.0f));
+    if (RotationAxis.IsNearlyZero())
+    {
+        RotationAxis = FVector::UpVector;
+    }
+    NoiseRotation = FQuat(RotationAxis.GetSafeNormal(), FMath::DegreesToRadians(Random.FRandRange(0.0f, 360.0f)));
+
+    const float Frequency = FMath::Max(Config.MediumFrequencyNoiseFrequency, 0.001f);
+    CrestNoise = FastNoiseLite(Config.GlobalVisualSeed + 101);
+    CrestNoise.SetNoiseType(FastNoiseLite::NoiseType::NoiseType_OpenSimplex2S);
+    CrestNoise.SetFractalType(FastNoiseLite::FractalType::FractalType_FBm);
+    CrestNoise.SetFractalOctaves(4);
+    CrestNoise.SetFractalGain(0.5f);
+    CrestNoise.SetFrequency(Frequency);
+
+    ErosionWarpNoise = FastNoiseLite(Config.GlobalVisualSeed + 211);
+    ErosionWarpNoise.SetNoiseType(FastNoiseLite::NoiseType::NoiseType_OpenSimplex2S);
+    ErosionWarpNoise.SetFractalType(FastNoiseLite::FractalType::FractalType_DomainWarpProgressive);
+    ErosionWarpNoise.SetFractalOctaves(3);
+    ErosionWarpNoise.SetFrequency(Frequency * 0.8f);
+    ErosionWarpNoise.SetDomainWarpType(FastNoiseLite::DomainWarpType::DomainWarpType_OpenSimplex2Reduced);
+    ErosionWarpNoise.SetDomainWarpAmp(FMath::Max(Config.ErosionDomainWarpAmplitude, 0.0f));
+
+    ErosionNoise = FastNoiseLite(Config.GlobalVisualSeed + 307);
+    ErosionNoise.SetNoiseType(FastNoiseLite::NoiseType::NoiseType_OpenSimplex2S);
+    ErosionNoise.SetFractalType(FastNoiseLite::FractalType::FractalType_Ridged);
+    ErosionNoise.SetFractalOctaves(3);
+    ErosionNoise.SetFractalGain(0.55f);
+    ErosionNoise.SetFrequency(Frequency * 1.35f);
+
+    LowlandNoise = FastNoiseLite(Config.GlobalVisualSeed + 401);
+    LowlandNoise.SetNoiseType(FastNoiseLite::NoiseType::NoiseType_OpenSimplex2S);
+    LowlandNoise.SetFractalType(FastNoiseLite::FractalType::FractalType_FBm);
+    LowlandNoise.SetFractalOctaves(2);
+    LowlandNoise.SetFractalGain(0.5f);
+    LowlandNoise.SetFrequency(Frequency * 0.55f);
 }
 
 float FTerrainVisualField::EvaluateSurfaceRadiusCM_(const FVector& UnitDirection) const

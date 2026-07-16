@@ -25,6 +25,15 @@ struct TERRAINVISUAL_API FTerrainVisualConfig
     float ForestHeightCM = 500.0f;
     float ForestSigmoidSteepness = 8.0f;
     float LandformSupportScale = 1.25f;
+
+    // SV4.5: deterministic medium-frequency erosion detail.
+    bool bEnableMediumFrequencyErosion = true;
+    float CrestNoiseAmplitudeCM = 420.0f;
+    float ErosionAmplitudeCM = 260.0f;
+    float LowlandNoiseAmplitudeCM = 55.0f;
+    float MediumFrequencyNoiseFrequency = 5.5f;
+    float ErosionDomainWarpAmplitude = 0.42f;
+    float ErosionValleySharpness = 2.2f;
 };
 
 struct TERRAINVISUAL_API FTerrainSurfaceQueryResult

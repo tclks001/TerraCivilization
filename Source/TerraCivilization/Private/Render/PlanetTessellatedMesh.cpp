@@ -388,6 +388,13 @@ void APlanetTessellatedMesh::RebuildTerrainVisualSurface_()
     VisualConfig.MountainFalloffExponent = TerrainVisualMountainFalloffExponent;
     VisualConfig.ForestHeightCM = TerrainVisualForestHeightCM;
     VisualConfig.ForestSigmoidSteepness = TerrainVisualForestSigmoidSteepness;
+    VisualConfig.bEnableMediumFrequencyErosion = bEnableTerrainVisualMediumFrequencyErosion;
+    VisualConfig.CrestNoiseAmplitudeCM = TerrainVisualCrestNoiseAmplitudeCM;
+    VisualConfig.ErosionAmplitudeCM = TerrainVisualErosionAmplitudeCM;
+    VisualConfig.LowlandNoiseAmplitudeCM = TerrainVisualLowlandNoiseAmplitudeCM;
+    VisualConfig.MediumFrequencyNoiseFrequency = TerrainVisualMediumFrequencyNoiseFrequency;
+    VisualConfig.ErosionDomainWarpAmplitude = TerrainVisualErosionDomainWarpAmplitude;
+    VisualConfig.ErosionValleySharpness = TerrainVisualErosionValleySharpness;
 
     if (!TerrainVisualCoordinator.IsValid())
     {

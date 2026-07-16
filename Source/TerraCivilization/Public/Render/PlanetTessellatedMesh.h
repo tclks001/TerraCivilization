@@ -111,6 +111,28 @@ public:
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV4 Macro Height", meta = (ClampMin = "1.0", ClampMax = "20.0"))
     float TerrainVisualForestSigmoidSteepness = 8.0f;
 
+    /** SV4.5：启用山脊起伏、山坡侵蚀沟槽和低地缓起伏。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV4.5 Medium Frequency")
+    bool bEnableTerrainVisualMediumFrequencyErosion = true;
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV4.5 Medium Frequency", meta = (ClampMin = "0.0", ClampMax = "2000.0"))
+    float TerrainVisualCrestNoiseAmplitudeCM = 420.0f;
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV4.5 Medium Frequency", meta = (ClampMin = "0.0", ClampMax = "2000.0"))
+    float TerrainVisualErosionAmplitudeCM = 260.0f;
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV4.5 Medium Frequency", meta = (ClampMin = "0.0", ClampMax = "500.0"))
+    float TerrainVisualLowlandNoiseAmplitudeCM = 55.0f;
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV4.5 Medium Frequency", meta = (ClampMin = "0.1", ClampMax = "30.0"))
+    float TerrainVisualMediumFrequencyNoiseFrequency = 5.5f;
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV4.5 Medium Frequency", meta = (ClampMin = "0.0", ClampMax = "3.0"))
+    float TerrainVisualErosionDomainWarpAmplitude = 0.42f;
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV4.5 Medium Frequency", meta = (ClampMin = "0.5", ClampMax = "8.0"))
+    float TerrainVisualErosionValleySharpness = 2.2f;
+
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV2 Highlight")
     FLinearColor TerrainVisualBaseGroundColor = FLinearColor(0.08f, 0.10f, 0.06f, 1.0f);
 
