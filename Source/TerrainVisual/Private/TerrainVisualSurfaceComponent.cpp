@@ -1,6 +1,7 @@
 #include "TerrainVisualSurfaceComponent.h"
 
 #include "FSphereTopology.h"
+#include "CellGeoData.h"
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
 
@@ -209,6 +210,71 @@ bool UTerrainVisualSurfaceComponent::InitializeHighlightResources(const FSphereT
     return true;
 }
 
+bool UTerrainVisualSurfaceComponent::InitializeTerrainResources(const TArray<FCellGeoData>& GeoCells, int32 VisualSeed)
+{
+    if (GeoCells.IsEmpty())
+    {
+        SurfaceTerrainLUT = nullptr;
+        return false;
+    }
+
+    TArray<FColor> TerrainPixels;
+    TerrainPixels.Reserve(GeoCells.Num());
+    FRandomStream Random(VisualSeed);
+    for (int32 CellId = 0; CellId < GeoCells.Num(); ++CellId)
+    {
+        const FCellGeoData& Geo = GeoCells[CellId];
+        if (Geo.CellId != CellId)
+        {
+            SurfaceTerrainLUT = nullptr;
+            return false;
+        }
+
+        uint8 TerrainClass = 0;
+        switch (Geo.SimpleTerrainType)
+        {
+        case ETerraSimpleTerrainType::Forest:
+            TerrainClass = 127;
+            break;
+        case ETerraSimpleTerrainType::Mountain:
+            TerrainClass = 255;
+            break;
+        case ETerraSimpleTerrainType::Plain:
+        default:
+            break;
+        }
+
+        const uint8 Variation = static_cast<uint8>(Random.RandRange(24, 231));
+        const uint8 DetailScale = static_cast<uint8>(Random.RandRange(96, 191));
+        const uint8 Roughness = Geo.SimpleTerrainType == ETerraSimpleTerrainType::Mountain ? 230 : 190;
+        TerrainPixels.Add(FColor(TerrainClass, Variation, DetailScale, Roughness));
+    }
+
+    SurfaceTerrainLUT = UTexture2D::CreateTransient(
+        TerrainPixels.Num(),
+        1,
+        PF_B8G8R8A8,
+        TEXT("SurfaceTerrainLUT_Transient"),
+        MakeArrayView(reinterpret_cast<const uint8*>(TerrainPixels.GetData()), sizeof(FColor) * TerrainPixels.Num()));
+    if (!SurfaceTerrainLUT)
+    {
+        return false;
+    }
+
+    SurfaceTerrainLUT->Filter = TF_Nearest;
+    SurfaceTerrainLUT->SRGB = false;
+    SurfaceTerrainLUT->NeverStream = true;
+    SurfaceTerrainLUT->MipGenSettings = TMGS_NoMipmaps;
+    SurfaceTerrainLUT->CompressionSettings = TC_VectorDisplacementmap;
+    SurfaceTerrainLUT->UpdateResource();
+
+    if (HighlightMID)
+    {
+        HighlightMID->SetTextureParameterValue(TEXT("SurfaceTerrainLUT"), SurfaceTerrainLUT);
+    }
+    return true;
+}
+
 void UTerrainVisualSurfaceComponent::SetHighlightMaterial(UMaterialInterface* InMaterial)
 {
     HighlightMID = InMaterial ? CreateDynamicMaterialInstance(1, InMaterial) : nullptr;
@@ -218,6 +284,7 @@ void UTerrainVisualSurfaceComponent::SetHighlightMaterial(UMaterialInterface* In
     {
         HighlightMID->SetTextureParameterValue(TEXT("SurfaceCellDirectionLUT"), SurfaceCellDirectionLUT);
         HighlightMID->SetTextureParameterValue(TEXT("SurfaceHighlightLUT"), SurfaceHighlightLUT);
+        HighlightMID->SetTextureParameterValue(TEXT("SurfaceTerrainLUT"), SurfaceTerrainLUT);
     }
 }
 

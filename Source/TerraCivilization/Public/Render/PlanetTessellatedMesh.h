@@ -90,6 +90,10 @@ public:
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV2 Highlight")
     TObjectPtr<UMaterialInterface> TerrainVisualHighlightMaterial;
 
+    /** SV3 连续表面地形材质；为空时继续使用 SV2 高亮材质。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV3 Surface")
+    TObjectPtr<UMaterialInterface> TerrainVisualSurfaceMaterial;
+
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV2 Highlight")
     FLinearColor TerrainVisualBaseGroundColor = FLinearColor(0.08f, 0.10f, 0.06f, 1.0f);
 
@@ -165,6 +169,10 @@ public:
 
 #if WITH_EDITOR
     virtual bool ShouldTickIfViewportsOnly() const override;
+
+    /** 连续表面网格为运行时派生数据；保存时剥离，避免写入 External Actor 包。 */
+    virtual void PreSave(FObjectPreSaveContext SaveContext) override;
+    virtual void PostSaveRoot(FObjectPostSaveRootContext SaveContext) override;
 #endif
 
     // 注：不 override BeginDestroy()。
@@ -385,6 +393,11 @@ public:
 
     /** TerrainVisual SV0/SV1：只读视觉场和 Cell 查询协调器。 */
     TUniquePtr<FTerrainVisualCoordinator> TerrainVisualCoordinator;
+
+#if WITH_EDITOR
+    /** 本轮保存前是否剥离了连续表面，需要在保存完成后恢复编辑器预览。 */
+    bool bRestoreTerrainVisualAfterSave = false;
+#endif
 
     /** HISM 瓦片渲染、实例索引、命中反查与 PerInstanceCustomData 高亮状态。 */
     FPlanetHISMTileRenderer HISMTileRenderer;

@@ -5,6 +5,7 @@
 #include "TerrainVisualSurfaceComponent.generated.h"
 
 class FSphereTopology;
+struct FCellGeoData;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 class UTexture2D;
@@ -24,6 +25,7 @@ public:
     void ClearSurface();
 
     bool InitializeHighlightResources(const FSphereTopology& CellTopology);
+    bool InitializeTerrainResources(const TArray<FCellGeoData>& GeoCells, int32 VisualSeed);
     void SetHighlightMaterial(UMaterialInterface* InMaterial);
     void SetHighlightParameters(
         const FVector& PlanetCenter,
@@ -48,6 +50,9 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UTexture2D> SurfaceHighlightLUT;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UTexture2D> SurfaceTerrainLUT;
 
     UPROPERTY(Transient)
     TObjectPtr<UMaterialInstanceDynamic> HighlightMID;

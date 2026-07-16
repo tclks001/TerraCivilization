@@ -37,6 +37,7 @@
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Tutorial/TerraTutorialScenarioData.h"
+#include "UObject/ObjectSaveContext.h"
 DEFINE_LOG_CATEGORY_STATIC(LogPlanetTess, Log, All);
 
 // ===================================================================
@@ -177,11 +178,50 @@ void APlanetTessellatedMesh::BeginPlay()
             || !Generator.IsValid()
             || !PlanetGameplayComponent
             || !PlanetGameplayComponent->GetGameplayContainer()
-            || !PlanetGameplayComponent->GetGameplayContainer()->IsInitialized()))
+            || !PlanetGameplayComponent->GetGameplayContainer()->IsInitialized()
+            // ProceduralMesh sections are intentionally stripped before map save.
+            // Rebuild all runtime-only state when loading such a map into PIE/game.
+            || (TerrainVisualMode == ETerrainVisualMode::ContinuousSurface
+                && (!TerrainVisualSurfaceComp || !TerrainVisualSurfaceComp->HasBuiltSurface()))))
     {
         RebuildAll_();
     }
 }
+
+#if WITH_EDITOR
+void APlanetTessellatedMesh::PreSave(FObjectPreSaveContext SaveContext)
+{
+    Super::PreSave(SaveContext);
+
+    bRestoreTerrainVisualAfterSave =
+        TerrainVisualMode == ETerrainVisualMode::ContinuousSurface
+        && TerrainVisualSurfaceComp
+        && TerrainVisualSurfaceComp->HasBuiltSurface();
+
+    if (bRestoreTerrainVisualAfterSave)
+    {
+        // UProceduralMeshComponent serializes ProcMeshSections by default. They are
+        // deterministically rebuilt from topology/worldgen after the save instead.
+        TerrainVisualSurfaceComp->ClearSurface();
+        UE_LOG(LogPlanetTess, Verbose, TEXT("[TerrainVisual] Stripped runtime surface mesh before saving '%s'."), *GetPathName());
+    }
+}
+
+void APlanetTessellatedMesh::PostSaveRoot(FObjectPostSaveRootContext SaveContext)
+{
+    Super::PostSaveRoot(SaveContext);
+
+    if (!bRestoreTerrainVisualAfterSave)
+    {
+        return;
+    }
+
+    bRestoreTerrainVisualAfterSave = false;
+    RebuildTerrainVisualSurface_();
+    ApplyRenderModeVisibility_();
+    UE_LOG(LogPlanetTess, Verbose, TEXT("[TerrainVisual] Restored runtime surface mesh after saving '%s'."), *GetPathName());
+}
+#endif
 
 void APlanetTessellatedMesh::Tick(float DeltaSeconds)
 {
@@ -385,7 +425,12 @@ void APlanetTessellatedMesh::RebuildTerrainVisualSurface_()
     {
         UE_LOG(LogPlanetTess, Warning, TEXT("[TerrainVisual][SV2] Failed to initialize highlight LUT resources."));
     }
-    TerrainVisualSurfaceComp->SetHighlightMaterial(TerrainVisualHighlightMaterial);
+    if (!TerrainVisualSurfaceComp->InitializeTerrainResources(Generator->GetCellData(), VisualConfig.GlobalVisualSeed))
+    {
+        UE_LOG(LogPlanetTess, Warning, TEXT("[TerrainVisual][SV3] Failed to initialize terrain LUT resources."));
+    }
+    TerrainVisualSurfaceComp->SetHighlightMaterial(
+        TerrainVisualSurfaceMaterial ? TerrainVisualSurfaceMaterial.Get() : TerrainVisualHighlightMaterial.Get());
     TerrainVisualSurfaceComp->SetHighlightParameters(
         GetPlanetCenterWorld_(),
         TerrainVisualBaseGroundColor,
