@@ -86,6 +86,21 @@ public:
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual")
     TObjectPtr<UMaterialInterface> TerrainVisualBaseMaterial;
 
+    /** SV2 连续表面 Hex/Pent 高亮材质；为空时保留 SV1 基础表面 Section 0。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV2 Highlight")
+    TObjectPtr<UMaterialInterface> TerrainVisualHighlightMaterial;
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV2 Highlight")
+    FLinearColor TerrainVisualBaseGroundColor = FLinearColor(0.08f, 0.10f, 0.06f, 1.0f);
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV2 Highlight",
+              meta = (ClampMin = "0.001", ClampMax = "0.15"))
+    float TerrainVisualHighlightPaddingRad = 0.03f;
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV2 Highlight",
+              meta = (ClampMin = "0.0", ClampMax = "5.0"))
+    float TerrainVisualHighlightStrength = 1.50f;
+
     /** 连续模式下是否显示旧 HISM 瓦片，仅用于与基础表面对照。默认隐藏。 */
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|Debug")
     bool bShowLegacyHISMDebugInContinuousSurfaceMode = false;
@@ -241,6 +256,9 @@ private:
     void WriteHISMHighlightForCell_(int32 CellId, bool bMarkRenderStateDirty = true);
     void RefreshG4CapturePreviewCellsForActionTarget_(int32 ActionTargetCellId, bool bMarkLastRenderStateDirty = true);
     void UpdateHISMHoverCell_(int32 NewCellId);
+    void WriteTerrainVisualHighlightForCell_(int32 CellId);
+    void RefreshTerrainVisualCapturePreviewCells_(int32 ActionTargetCellId);
+    void RefreshAllTerrainVisualHighlights_();
 
     void RebuildGameplay_();
     void RefreshGameplayHighlights_(const TArray<int32>& DirtyCellIds);

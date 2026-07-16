@@ -402,10 +402,7 @@ void UPlanetGameplayComponent::RefreshGameplayHighlights(const TArray<int32>& Di
 
     for (const int32 CellId : DirtyCellIds)
     {
-        if (Host->GetPlanetHISMInteractionComponent())
-        {
-            Host->GetPlanetHISMInteractionComponent()->WriteHISMHighlightForCell(CellId);
-        }
+        Host->WriteHISMHighlightForCell_(CellId);
     }
 }
 
@@ -425,10 +422,7 @@ void UPlanetGameplayComponent::RefreshFactionPieceHighlights(int32 FactionId)
 
     for (const int32 CellId : PieceCellIds)
     {
-        if (Host->GetPlanetHISMInteractionComponent())
-        {
-            Host->GetPlanetHISMInteractionComponent()->WriteHISMHighlightForCell(CellId);
-        }
+        Host->WriteHISMHighlightForCell_(CellId);
     }
 }
 
@@ -448,10 +442,7 @@ void UPlanetGameplayComponent::RefreshCurrentFactionPieceHighlights()
 
     for (const int32 CellId : PieceCellIds)
     {
-        if (Host->GetPlanetHISMInteractionComponent())
-        {
-            Host->GetPlanetHISMInteractionComponent()->WriteHISMHighlightForCell(CellId);
-        }
+        Host->WriteHISMHighlightForCell_(CellId);
     }
 }
 
@@ -908,11 +899,7 @@ bool UPlanetGameplayComponent::HandleHISMUndo()
 
     RefreshGameplayHighlights(DirtyCellIds);
     RefreshCurrentFactionPieceHighlights();
-    if (Host->GetPlanetHISMInteractionComponent())
-    {
-        Host->GetPlanetHISMInteractionComponent()->RefreshCapturePreviewCellsForActionTarget(
-            Host->GetPlanetHISMInteractionComponent()->GetLastHISMPickedCellId());
-    }
+    Host->RefreshG4CapturePreviewCellsForActionTarget_(Host->GetLastHISMPickedCellId());
     RebuildG1DebugPieces();
     if (UPlanetCameraComponent* Camera = Host->GetPlanetCameraComponent())
     {
@@ -1065,11 +1052,7 @@ bool UPlanetGameplayComponent::HandleGameplayCellClick(int32 CellId, const TCHAR
     TArray<int32> DirtyCellIds;
     const bool bGameplayHandled = GameplayContainer->HandleCellClick(CellId, DirtyCellIds);
     RefreshGameplayHighlights(DirtyCellIds);
-    if (Host->GetPlanetHISMInteractionComponent())
-    {
-        Host->GetPlanetHISMInteractionComponent()->RefreshCapturePreviewCellsForActionTarget(
-            Host->GetPlanetHISMInteractionComponent()->GetLastHISMPickedCellId());
-    }
+    Host->RefreshG4CapturePreviewCellsForActionTarget_(Host->GetLastHISMPickedCellId());
 
     const int32 NewFactionId = GameplayContainer->GetCurrentFactionId();
     const int32 NewTurnIndex = GameplayContainer->GetTurnIndex();

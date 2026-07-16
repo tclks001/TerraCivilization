@@ -187,9 +187,23 @@ void APlanetTessellatedMesh::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
 
+    const int32 HoverBeforeFadeTick = IsContinuousTerrainVisualActive()
+        ? HISMTileRenderer.GetCurrentHoverCellId()
+        : INDEX_NONE;
     if (PlanetHISMInteractionComponent)
     {
         PlanetHISMInteractionComponent->TickHoverFade(DeltaSeconds);
+    }
+    if (IsContinuousTerrainVisualActive())
+    {
+        const int32 HoverAfterFadeTick = HISMTileRenderer.GetCurrentHoverCellId();
+        if (HoverBeforeFadeTick != HoverAfterFadeTick)
+        {
+            WriteTerrainVisualHighlightForCell_(HoverBeforeFadeTick);
+            RefreshTerrainVisualCapturePreviewCells_(HoverBeforeFadeTick);
+            WriteTerrainVisualHighlightForCell_(HoverAfterFadeTick);
+            RefreshTerrainVisualCapturePreviewCells_(HoverAfterFadeTick);
+        }
     }
 
     if (PlanetCameraComponent)
@@ -300,6 +314,12 @@ void APlanetTessellatedMesh::RebuildHISMTileInstances_()
 
 void APlanetTessellatedMesh::WriteHISMHighlightForCell_(int32 CellId, bool bMarkRenderStateDirty)
 {
+    if (IsContinuousTerrainVisualActive())
+    {
+        WriteTerrainVisualHighlightForCell_(CellId);
+        return;
+    }
+
     if (PlanetHISMInteractionComponent)
     {
         PlanetHISMInteractionComponent->WriteHISMHighlightForCell(CellId, bMarkRenderStateDirty);
@@ -343,7 +363,10 @@ void APlanetTessellatedMesh::RebuildTerrainVisualSurface_()
 
     FSphereTopology SurfaceTopology(VisualConfig.SurfaceSubdivisionLevel);
     SurfaceTopology.Build();
-    const bool bBuilt = TerrainVisualSurfaceComp->RebuildBaseSphere(SurfaceTopology, VisualConfig.GlobeRadiusCM);
+    const bool bBuilt = TerrainVisualSurfaceComp->RebuildBaseSphere(
+        SurfaceTopology,
+        *CellTopology,
+        VisualConfig.GlobeRadiusCM);
     TerrainVisualCoordinator->SetContinuousSurfaceAvailable(bBuilt);
     if (!bBuilt)
     {
@@ -358,6 +381,16 @@ void APlanetTessellatedMesh::RebuildTerrainVisualSurface_()
     {
         TerrainVisualSurfaceComp->SetMaterial(0, TerrainVisualBaseMaterial);
     }
+    if (!TerrainVisualSurfaceComp->InitializeHighlightResources(*CellTopology))
+    {
+        UE_LOG(LogPlanetTess, Warning, TEXT("[TerrainVisual][SV2] Failed to initialize highlight LUT resources."));
+    }
+    TerrainVisualSurfaceComp->SetHighlightMaterial(TerrainVisualHighlightMaterial);
+    TerrainVisualSurfaceComp->SetHighlightParameters(
+        GetPlanetCenterWorld_(),
+        TerrainVisualBaseGroundColor,
+        TerrainVisualHighlightPaddingRad,
+        TerrainVisualHighlightStrength);
 
     UE_LOG(LogPlanetTess, Log,
         TEXT("[TerrainVisual][SV1] Rebuilt base surface: Sub=%d Tris=%d Radius=%.1fcm."),
@@ -368,6 +401,12 @@ void APlanetTessellatedMesh::RebuildTerrainVisualSurface_()
 
 void APlanetTessellatedMesh::RefreshG4CapturePreviewCellsForActionTarget_(int32 ActionTargetCellId, bool bMarkLastRenderStateDirty)
 {
+    if (IsContinuousTerrainVisualActive())
+    {
+        RefreshTerrainVisualCapturePreviewCells_(ActionTargetCellId);
+        return;
+    }
+
     if (PlanetHISMInteractionComponent)
     {
         PlanetHISMInteractionComponent->RefreshCapturePreviewCellsForActionTarget(ActionTargetCellId, bMarkLastRenderStateDirty);
@@ -376,9 +415,107 @@ void APlanetTessellatedMesh::RefreshG4CapturePreviewCellsForActionTarget_(int32 
 
 void APlanetTessellatedMesh::UpdateHISMHoverCell_(int32 NewCellId)
 {
+    const int32 OldHoverCellId = HISMTileRenderer.GetCurrentHoverCellId();
     if (PlanetHISMInteractionComponent)
     {
         PlanetHISMInteractionComponent->UpdateHISMHoverCell(NewCellId);
+    }
+
+    if (IsContinuousTerrainVisualActive())
+    {
+        WriteTerrainVisualHighlightForCell_(OldHoverCellId);
+        RefreshTerrainVisualCapturePreviewCells_(OldHoverCellId);
+        WriteTerrainVisualHighlightForCell_(NewCellId);
+        RefreshTerrainVisualCapturePreviewCells_(NewCellId);
+    }
+}
+
+void APlanetTessellatedMesh::WriteTerrainVisualHighlightForCell_(int32 CellId)
+{
+    if (!IsContinuousTerrainVisualActive()
+        || !TerrainVisualSurfaceComp
+        || !CellTopology.IsValid()
+        || !CellTopology->Cells.IsValidIndex(CellId))
+    {
+        return;
+    }
+
+    const FTerraGameplayContainer* Gameplay = PlanetGameplayComponent
+        ? PlanetGameplayComponent->GetGameplayContainer()
+        : nullptr;
+    const FPlanetHISMHighlightConfig Config = BuildHISMHighlightConfig_();
+    const float HoverIntensity = HISMTileRenderer.GetCurrentHoverCellId() == CellId ? 1.0f : 0.0f;
+    FLinearColor FinalColor = FLinearColor::Black;
+    float FinalIntensity = 0.0f;
+
+    FTerraGameplayCellHighlight GameplayHighlight;
+    const bool bHasGameplayHighlight = Gameplay && Gameplay->GetHighlightForCell(CellId, GameplayHighlight);
+    const bool bIsCurrentFactionPieceCell = Gameplay && Gameplay->IsCurrentFactionPieceCell(CellId);
+    if (bHasGameplayHighlight)
+    {
+        const bool bCaptureTargetHover = Gameplay
+            && HISMTileRenderer.GetCurrentHoverCellId() != INDEX_NONE
+            && Gameplay->IsCapturePreviewCellForActionTarget(CellId, HISMTileRenderer.GetCurrentHoverCellId());
+        const bool bActionTargetHover = Gameplay
+            && HoverIntensity > KINDA_SMALL_NUMBER
+            && Gameplay->IsCurrentActionTargetCell(CellId);
+        FinalColor = bCaptureTargetHover
+            ? Config.CaptureTargetHoverColor
+            : (bActionTargetHover ? Config.ActionTargetHoverColor : GameplayHighlight.Color);
+        FinalIntensity = GameplayHighlight.Intensity;
+    }
+    else if (bIsCurrentFactionPieceCell && HoverIntensity > KINDA_SMALL_NUMBER)
+    {
+        FinalColor = Config.CurrentFactionPieceHoverColor;
+        FinalIntensity = 1.0f;
+    }
+    else if (bIsCurrentFactionPieceCell)
+    {
+        FinalColor = Config.CurrentFactionPieceColor;
+        FinalIntensity = 1.0f;
+    }
+    else if (HoverIntensity > KINDA_SMALL_NUMBER)
+    {
+        FinalColor = Config.HoverColor;
+        FinalIntensity = HoverIntensity;
+    }
+
+    TerrainVisualSurfaceComp->WriteHighlightCell(
+        CellId,
+        FinalColor,
+        FMath::Clamp(FinalIntensity, 0.0f, 1.0f));
+}
+
+void APlanetTessellatedMesh::RefreshTerrainVisualCapturePreviewCells_(int32 ActionTargetCellId)
+{
+    const FTerraGameplayContainer* Gameplay = PlanetGameplayComponent
+        ? PlanetGameplayComponent->GetGameplayContainer()
+        : nullptr;
+    if (!Gameplay || ActionTargetCellId == INDEX_NONE)
+    {
+        return;
+    }
+
+    TArray<int32> CaptureCellIds;
+    if (Gameplay->CollectCapturePreviewCellIdsForActionTarget(ActionTargetCellId, CaptureCellIds))
+    {
+        for (const int32 CellId : CaptureCellIds)
+        {
+            WriteTerrainVisualHighlightForCell_(CellId);
+        }
+    }
+}
+
+void APlanetTessellatedMesh::RefreshAllTerrainVisualHighlights_()
+{
+    if (!IsContinuousTerrainVisualActive() || !CellTopology.IsValid())
+    {
+        return;
+    }
+
+    for (int32 CellId = 0; CellId < CellTopology->Cells.Num(); ++CellId)
+    {
+        WriteTerrainVisualHighlightForCell_(CellId);
     }
 }
 
@@ -396,6 +533,13 @@ void APlanetTessellatedMesh::RefreshGameplayHighlights_(const TArray<int32>& Dir
     {
         PlanetGameplayComponent->RefreshGameplayHighlights(DirtyCellIds);
     }
+    if (IsContinuousTerrainVisualActive())
+    {
+        for (const int32 CellId : DirtyCellIds)
+        {
+            WriteTerrainVisualHighlightForCell_(CellId);
+        }
+    }
 }
 
 void APlanetTessellatedMesh::RefreshFactionPieceHighlights_(int32 FactionId)
@@ -404,6 +548,7 @@ void APlanetTessellatedMesh::RefreshFactionPieceHighlights_(int32 FactionId)
     {
         PlanetGameplayComponent->RefreshFactionPieceHighlights(FactionId);
     }
+    RefreshAllTerrainVisualHighlights_();
 }
 
 void APlanetTessellatedMesh::RefreshCurrentFactionPieceHighlights_()
@@ -412,6 +557,7 @@ void APlanetTessellatedMesh::RefreshCurrentFactionPieceHighlights_()
     {
         PlanetGameplayComponent->RefreshCurrentFactionPieceHighlights();
     }
+    RefreshAllTerrainVisualHighlights_();
 }
 
 bool APlanetTessellatedMesh::GetCellSurfaceWorldPosition_(int32 CellId, float RadiusOffsetCM, FVector& OutWorldPosition) const
@@ -697,14 +843,17 @@ bool APlanetTessellatedMesh::HandleHISMUndo()
 
 void APlanetTessellatedMesh::ClearHISMHover()
 {
-    if (PlanetHISMInteractionComponent)
-    {
-        PlanetHISMInteractionComponent->ClearHISMHover();
-    }
+    UpdateHISMHoverCell_(INDEX_NONE);
 }
 
 void APlanetTessellatedMesh::ClearAllHISMHighlights()
 {
+    if (IsContinuousTerrainVisualActive())
+    {
+        RefreshAllTerrainVisualHighlights_();
+        return;
+    }
+
     if (PlanetHISMInteractionComponent)
     {
         PlanetHISMInteractionComponent->ClearAllHISMHighlights();
@@ -752,6 +901,11 @@ void APlanetTessellatedMesh::ApplyTerrainVisualMode_()
         TerrainVisualSurfaceComp->SetCollisionObjectType(ECC_WorldStatic);
         TerrainVisualSurfaceComp->SetCollisionResponseToAllChannels(ECR_Ignore);
         TerrainVisualSurfaceComp->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+        TerrainVisualSurfaceComp->SetHighlightParameters(
+            GetPlanetCenterWorld_(),
+            TerrainVisualBaseGroundColor,
+            TerrainVisualHighlightPaddingRad,
+            TerrainVisualHighlightStrength);
     }
 
     if (!bContinuous)
