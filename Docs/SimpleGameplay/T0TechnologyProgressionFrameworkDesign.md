@@ -84,6 +84,9 @@ UI 使用 Gameplay Container 的以下接口，不应直接访问状态容器：
 ```cpp
 bool IsFactionWaitingForTechnologyChoice(int32 FactionId) const;
 bool GetFactionTechnologyState(int32 FactionId, FTerraGameplayFactionTechnologyState& OutState) const;
+bool GetFactionOwnedTechnologies(int32 FactionId, TArray<ETerraGameplayTechnologyId>& OutTechnologies) const;
+bool GetFactionTechnologyScore(int32 FactionId, int32& OutScore) const;
+void CollectFactionTechnologyStates(TArray<FTerraGameplayFactionTechnologyState>& OutStates) const;
 bool GetPendingTechnologyChoices(int32 FactionId, TArray<ETerraGameplayTechnologyId>& OutChoices) const;
 bool ChoosePendingTechnology(int32 FactionId, ETerraGameplayTechnologyId TechnologyId, FString& OutError);
 ```
@@ -91,6 +94,8 @@ bool ChoosePendingTechnology(int32 FactionId, ETerraGameplayTechnologyId Technol
 ### 4.1 UI 轮询语义
 
 - 在玩家确认行动后，UI 读取 `IsFactionWaitingForTechnologyChoice(CurrentFactionId)`。
+- 需要显示任一阵营时，调用 `GetFactionTechnologyScore` 读取其当前积分；返回值包含已结算累计分和本回合尚未提交的得分。
+- 需要显示任一阵营已获得科技时，调用 `GetFactionOwnedTechnologies`；需要一次性绘制所有阵营面板时，调用 `CollectFactionTechnologyStates`。
 - 返回 `true` 时，读取 `GetPendingTechnologyChoices`，显示返回的三个枚举值。
 - UI 只允许提交当前 `FactionId` 且位于候选数组中的一个 `TechnologyId`。
 - `ChoosePendingTechnology` 成功后，Container 会清除候选并推进回合；UI 应重新读取 `CurrentFactionId`、回合号和等待状态。
@@ -99,6 +104,8 @@ bool ChoosePendingTechnology(int32 FactionId, ETerraGameplayTechnologyId Technol
 ### 4.2 UI 显示数据
 
 T0 仅返回枚举，不在 Gameplay 中保存显示名称、描述、图标或稀有度。UI 可将三个占位枚举映射为本地化文案；未来科技 UI 设计稿负责建立该映射。
+
+`UPlanetGameplayComponent` 将上述数据查询以 BlueprintPure 形式暴露为 `GetT0FactionOwnedTechnologies`、`GetT0FactionTechnologyScore` 和 `GetT0AllFactionTechnologyStates`，供 UMG 直接调用。
 
 ---
 

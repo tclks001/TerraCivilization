@@ -47,6 +47,7 @@ bool UTerraNpcBehaviorTreeSubsystem::QueryTurnContext(FTerraNpcBehaviorTreeTurnC
     OutContext.bMatchEnded = Gameplay->IsMatchEnded();
     OutContext.CurrentFactionId = Gameplay->GetCurrentFactionId();
     OutContext.TurnIndex = Gameplay->GetTurnIndex();
+    OutContext.bNeedsTechnologyChoice = Gameplay->IsFactionWaitingForTechnologyChoice(OutContext.CurrentFactionId);
     return true;
 }
 
@@ -102,4 +103,88 @@ bool UTerraNpcBehaviorTreeSubsystem::ExecuteValidatedAction(
     }
 
     return OutResult.bExecuted;
+}
+
+bool UTerraNpcBehaviorTreeSubsystem::QueryPendingTechnologyChoices(
+    int32 FactionId,
+    TArray<ETerraGameplayTechnologyId>& OutChoices,
+    FString& OutError)
+{
+    OutChoices.Reset();
+    OutError.Reset();
+
+    UPlanetGameplayComponent* Component = ResolveGameplayComponent();
+    const FTerraGameplayContainer* Gameplay = Component ? Component->GetGameplayContainer() : nullptr;
+    if (!Gameplay || !Gameplay->IsInitialized())
+    {
+        OutError = TEXT("gameplay_unavailable");
+        return false;
+    }
+
+    if (Gameplay->IsMatchEnded())
+    {
+        OutError = TEXT("match_ended");
+        return false;
+    }
+
+    if (!Component->IsTurnActivationReady())
+    {
+        OutError = TEXT("turn_activation_not_ready");
+        return false;
+    }
+
+    if (FactionId != Gameplay->GetCurrentFactionId())
+    {
+        OutError = TEXT("not_current_faction");
+        return false;
+    }
+
+    if (!Gameplay->GetPendingTechnologyChoices(FactionId, OutChoices) || OutChoices.IsEmpty())
+    {
+        OutError = TEXT("no_pending_technology_choice");
+        return false;
+    }
+
+    return true;
+}
+
+bool UTerraNpcBehaviorTreeSubsystem::ChoosePendingTechnology(
+    int32 FactionId,
+    ETerraGameplayTechnologyId TechnologyId,
+    FString& OutError)
+{
+    OutError.Reset();
+
+    UPlanetGameplayComponent* Component = ResolveGameplayComponent();
+    const FTerraGameplayContainer* Gameplay = Component ? Component->GetGameplayContainer() : nullptr;
+    if (!Component || !Gameplay || !Gameplay->IsInitialized())
+    {
+        OutError = TEXT("gameplay_unavailable");
+        return false;
+    }
+
+    if (Gameplay->IsMatchEnded())
+    {
+        OutError = TEXT("match_ended");
+        return false;
+    }
+
+    if (!Component->IsTurnActivationReady())
+    {
+        OutError = TEXT("turn_activation_not_ready");
+        return false;
+    }
+
+    if (FactionId != Gameplay->GetCurrentFactionId())
+    {
+        OutError = TEXT("not_current_faction");
+        return false;
+    }
+
+    if (!Component->ChoosePendingTechnology(FactionId, TechnologyId, OutError))
+    {
+        return false;
+    }
+
+    return true;
 }

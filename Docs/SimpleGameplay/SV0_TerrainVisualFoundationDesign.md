@@ -1,6 +1,6 @@
 # SV0：TerrainVisual 新模块与迁移地基设计稿
 
-> 状态：待审阅。本稿是 [SimpleGameplayTerrainVisualPresentationDesign.md](SimpleGameplayTerrainVisualPresentationDesign.md) 的第一个可实施子里程碑。
+> 状态：已落地，待审阅。本稿是 [SimpleGameplayTerrainVisualPresentationDesign.md](SimpleGameplayTerrainVisualPresentationDesign.md) 的第一个可实施子里程碑。
 >
 > 编码：UTF-8，简体中文。
 >
@@ -45,6 +45,7 @@ Source/TerrainVisual/
     TerrainSurfaceQuery.h
     TerrainVisualCoordinator.h
   Private/
+    TerrainVisualModule.cpp
     TerrainVisualField.cpp
     TerrainVisualCoordinator.cpp
 ```
@@ -114,6 +115,7 @@ enum class ETerrainVisualMode : uint8
 | VisualMode | `LegacyHISMDebug` | 防止未经实现的连续模式进入游戏。 |
 | SurfaceSubdivisionLevel | `7` | 只记录 SV1 目标，SV0 不建网格。 |
 | GlobeRadiusCM | 从宿主传入 | 只读快照。 |
+| PlanetCenterWorld | 从宿主传入 | 用于把球面方向转换为世界空间基础表面点。 |
 | GlobalVisualSeed | 从 WorldGen seed 派生 | 只用于未来稳定视觉随机。 |
 | bEnableDiagnostics | `false` | 控制只读诊断日志。 |
 
@@ -144,7 +146,8 @@ SV0 不计算 Mountain 连通组件、不计算高度、不读取不存在的 El
 | `WorldPosition` | `PlanetCenter + UnitDirection * GlobeRadiusCM` | 同一方向的真实连续表面位置。 |
 | `WorldNormal` | `UnitDirection` | 高度场导出的坡面法线。 |
 | `SurfaceRadiusCM` | `GlobeRadiusCM` | 基础半径加视觉高度。 |
-| `bHasSurface` | `false` | 只有 SV1 网格/解析查询可用后才为 true。 |
+| `bIsValid` | 已初始化且输入方向有效时为 `true` | 表示基础球查询成功。 |
+| `bHasContinuousSurface` | `false` | 只有 SV1 网格/解析查询可用后才为 true。 |
 | `CellId` | `INDEX_NONE` | SV1 输入桥接后才填充。 |
 
 这里 `QueryBaseSurface` 与“可被输入/棋子使用的已实现地表查询”必须明确区分。SV0 的结果只用于单元测试和诊断，不能取代现有 HISM 高度与点击路径。
@@ -178,6 +181,14 @@ SV0 的 `CanActivateContinuousSurface()` 必须恒为 false，并返回明确原
 | `Content/...` | **SV0 不改动。** |
 
 因此 SV0 的首次编译验收应不产生关卡、蓝图、材质或 Gameplay 回归风险。
+
+### 5.1 本次落地结果
+
+- 已新增 `TerrainVisual` Runtime 模块，并在 `.uproject` 注册。
+- 已实现 `ETerrainVisualMode`、视觉配置、表面查询结果、诊断快照、`FTerrainVisualField` 与 `FTerrainVisualCoordinator`。
+- `FTerrainVisualField::Initialize` 验证拓扑 Cell 数、`FCellGeoData` 数和正球半径；只缓存只读指针，不写入输入数据。
+- `QueryBaseSurface` 返回基础球位置与径向法线；`CanActivateContinuousSurface` 恒为 `false` 并返回 SV1 未实现原因。
+- 已使用 `TerraCivilizationEditor Win64 Development` 编译验证通过。
 
 ## 6. 诊断与验收
 
@@ -216,3 +227,15 @@ SV0 的 `CanActivateContinuousSurface()` 必须恒为 false，并返回明确原
 - LOD、局部 stamp 和动态网格重建。
 
 > SV0 的价值是把新旧两条视觉路径隔离开。只有新模块独立存在、连续模式不可误启用、旧 HISM 行为零变化，SV1 才有安全的落点。
+
+---
+
+## 8. SV1 接线记录
+
+SV1 已在 `APlanetTessellatedMesh` 接入新模块的连续基础表面组件：
+
+- `TerrainVisualMode=LegacyHISMDebug` 保持当前 HISM 行为不变；
+- `TerrainVisualMode=ContinuousSurface` 时，新表面以 `sub=7`、`ECC_Visibility`、`QueryOnly` 接收鼠标射线；
+- 表面命中点转为 actor 局部球面方向，由 `TerrainVisualCoordinator` 查询回既有 `CellId`，再调用原有 Gameplay click/hover 入口；
+- Legacy HISM 在连续模式中默认隐藏、忽略 `ECC_Visibility`，却保留 `ECC_WorldStatic` 阻挡，以兼容 P2.5 棋子高度射线；
+- 高度位移、SDF、表面高亮和 HISM Decor 仍未实施。

@@ -30,4 +30,7 @@ public:
 
     UPROPERTY(Config, EditAnywhere, Category="In Game", meta=(AllowedClasses="/Script/UMG.UserWidget"))
     TSoftClassPtr<UUserWidget> PauseMenuWidgetClass;
+
+    UPROPERTY(Config, EditAnywhere, Category="In Game", meta=(AllowedClasses="/Script/UMG.UserWidget"))
+    TSoftClassPtr<UUserWidget> TechnologyChoiceWidgetClass;
 };

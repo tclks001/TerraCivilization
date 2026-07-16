@@ -13,6 +13,8 @@ struct FTerraPiecePresentationMoveEvent;
 struct FTerraPiecePresentationCaptureEvent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FTerraGameplayActionLogCommitted, const FTerraGameplayActionLogEntry&, Entry);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FTerraTechnologyChoiceRequested, int32, FactionId);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FTerraTechnologyStateChanged);
 
 enum class ETerraG1DebugPieceType : uint8
 {
@@ -82,6 +84,12 @@ public:
     UPROPERTY(BlueprintAssignable, Category = "Terra UI|Action Log")
     FTerraGameplayActionLogCommitted OnActionLogCommitted;
 
+    UPROPERTY(BlueprintAssignable, Category = "Terra UI|Technology")
+    FTerraTechnologyChoiceRequested OnTechnologyChoiceRequested;
+
+    UPROPERTY(BlueprintAssignable, Category = "Terra UI|Technology")
+    FTerraTechnologyStateChanged OnTechnologyStateChanged;
+
     void RebuildGameplay();
     bool InitializeTutorialScenario(const UTerraTutorialScenarioData& Scenario, FString& OutError);
     void TickTutorialNpcScript();
@@ -117,6 +125,11 @@ public:
     bool HasInitializedGameplay() const { return GameplayContainer.IsValid() && GameplayContainer->IsInitialized(); }
     bool IsTurnActivationReady() const { return bTurnActivationReady; }
     void CollectCommittedActionLogEntries(TArray<FTerraGameplayActionLogEntry>& OutEntries) const;
+    bool GetFactionTechnologyState(int32 FactionId, FTerraGameplayFactionTechnologyState& OutState) const;
+    void CollectFactionTechnologyStates(TArray<FTerraGameplayFactionTechnologyState>& OutStates) const;
+    void CollectFactionStates(TArray<FTerraGameplayFactionState>& OutStates) const;
+    FTerraGameplayTechnologyProgressionConfig GetTechnologyProgressionConfig() const { return T0TechnologyProgressionConfig; }
+    bool ChoosePendingTechnology(int32 FactionId, ETerraGameplayTechnologyId TechnologyId, FString& OutError);
 
 private:
     APlanetTessellatedMesh* GetHost() const;

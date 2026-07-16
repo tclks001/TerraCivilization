@@ -6,6 +6,7 @@
 #include "TerraUISubsystem.generated.h"
 
 class UUserWidget;
+class UPlanetGameplayComponent;
 
 UENUM(BlueprintType)
 enum class ETerraUIRoute : uint8
@@ -15,6 +16,7 @@ enum class ETerraUIRoute : uint8
     NewGameSetup,
     InGame,
     Paused,
+    TechnologyChoice,
 };
 
 /** The UI0 subset of the deterministic match-start configuration. */
@@ -62,6 +64,9 @@ public:
     void ResumeGame();
 
     UFUNCTION(BlueprintCallable, Category="Terra UI")
+    void CloseTechnologyChoice();
+
+    UFUNCTION(BlueprintCallable, Category="Terra UI")
     bool StartNewGame(const FTerraNewGameConfig& Config);
 
     UFUNCTION(BlueprintPure, Category="Terra UI")
@@ -69,7 +74,8 @@ public:
     {
         return ActiveRoute == ETerraUIRoute::MainMenu
             || ActiveRoute == ETerraUIRoute::NewGameSetup
-            || ActiveRoute == ETerraUIRoute::Paused;
+            || ActiveRoute == ETerraUIRoute::Paused
+            || ActiveRoute == ETerraUIRoute::TechnologyChoice;
     }
 
     UFUNCTION(BlueprintPure, Category="Terra UI")
@@ -87,6 +93,11 @@ public:
 private:
     void ShowRoute_(ETerraUIRoute Route, TSubclassOf<UUserWidget> FallbackClass);
     void EnsureInGameHUD_();
+    void BindGameplayTechnologyEvents_();
+    UFUNCTION()
+    void HandleTechnologyChoiceRequested(int32 FactionId);
+    UFUNCTION()
+    void HandleTechnologyStateChanged();
     void ApplyFrontEndInput_(bool bEnable);
 
     UPROPERTY(Transient)
@@ -94,6 +105,9 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UUserWidget> InGameHUD;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UPlanetGameplayComponent> BoundGameplayComponent;
 
     ETerraUIRoute ActiveRoute = ETerraUIRoute::None;
     FTerraNewGameConfig LastNewGameConfig;

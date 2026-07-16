@@ -14,6 +14,7 @@ namespace TerraNpcBTKeys
     static const FName GameplayReady(TEXT("bGameplayReady"));
     static const FName MatchEnded(TEXT("bMatchEnded"));
     static const FName IsMyTurn(TEXT("bIsMyTurn"));
+    static const FName NeedsTechnologyChoice(TEXT("bNeedsTechnologyChoice"));
     static const FName LastError(TEXT("LastError"));
 }
 
@@ -43,6 +44,7 @@ void UBTService_TerraUpdateTurnContext::TickNode(UBehaviorTreeComponent& OwnerCo
     Blackboard->SetValueAsInt(TerraNpcBTKeys::ControlledFactionId, Brain->ControlledFactionId);
     Blackboard->SetValueAsBool(TerraNpcBTKeys::GameplayReady, bReady && Context.bGameplayReady);
     Blackboard->SetValueAsBool(TerraNpcBTKeys::MatchEnded, bReady && Context.bMatchEnded);
+    Blackboard->SetValueAsBool(TerraNpcBTKeys::NeedsTechnologyChoice, bReady && Context.bNeedsTechnologyChoice);
     Blackboard->SetValueAsInt(TerraNpcBTKeys::CurrentFactionId, Context.CurrentFactionId);
     Blackboard->SetValueAsInt(TerraNpcBTKeys::TurnIndex, Context.TurnIndex);
     Blackboard->SetValueAsBool(TerraNpcBTKeys::IsMyTurn,

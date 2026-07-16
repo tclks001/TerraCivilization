@@ -132,6 +132,8 @@ SDF 在本文中是**地表材质**技术，不是体素几何生成器。材质
 - `ImpactPoint -> UnitDirection -> CellTopology -> CellId` 后调用当前同一套 Gameplay click/hover 入口。
 - 首次验收中旧 HISM 不得可见地遮住基础表面。
 
+> **SV1 实施修订**：为保持现有 P2.5 棋子高度链路，连续模式下旧 HISM 暂不完全关闭碰撞：它隐藏且忽略鼠标 `ECC_Visibility`，但继续阻挡 `ECC_WorldStatic`，供既有棋子高度多射线查询使用。连续基础表面只阻挡 `ECC_Visibility` 并承担鼠标命中。SV4 迁移棋子高度到 `SurfaceQuery` 后，才移除这条 HISM 高度兼容路径。
+
 ### SV2：高亮迁移
 
 - 创建并绑定 `CellHighlightLUT`。
@@ -167,7 +169,7 @@ SV5 稳定后再考虑水壳、视觉 stamp 的局部重建和分块更新。球
 ## 5. 跨系统同步表
 
 | 消费者 | 当前来源 | 新来源 | 迁移阶段 | 未同步风险 |
-| --- | --- | --- | --- |
+| --- | --- | --- | --- | --- |
 | 鼠标 hover/click | HISM `Hit.Item` | 表面命中 -> 方向 -> CellTopology | SV1 | 点击装饰或无法得到 CellId。 |
 | Gameplay 行为 | `CellId` | 同一 `CellId` | SV1 | 违反本设计范围。 |
 | 高亮 | HISM PICD | `CellHighlightLUT` | SV2 | 双高亮或关闭 HISM 后无高亮。 |

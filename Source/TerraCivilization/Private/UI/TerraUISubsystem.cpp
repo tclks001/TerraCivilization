@@ -6,12 +6,14 @@
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Render/PlanetTessellatedMesh.h"
+#include "Render/PlanetGameplayComponent.h"
 #include "Render/PlanetCameraComponent.h"
 #include "Interaction/PlanetInteractionController.h"
 #include "UI/TerraMainMenuWidget.h"
 #include "UI/TerraNewGameSetupWidget.h"
 #include "UI/TerraInGameHUDWidget.h"
 #include "UI/TerraPauseMenuWidget.h"
+#include "UI/TerraTechnologyChoiceWidget.h"
 #include "UI/TerraUISettings.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogTerraUI, Log, All);
@@ -27,6 +29,12 @@ void UTerraUISubsystem::Deinitialize()
     {
         InGameHUD->RemoveFromParent();
         InGameHUD = nullptr;
+    }
+    if (BoundGameplayComponent)
+    {
+        BoundGameplayComponent->OnTechnologyChoiceRequested.RemoveDynamic(this, &UTerraUISubsystem::HandleTechnologyChoiceRequested);
+        BoundGameplayComponent->OnTechnologyStateChanged.RemoveDynamic(this, &UTerraUISubsystem::HandleTechnologyStateChanged);
+        BoundGameplayComponent = nullptr;
     }
     ActiveRoute = ETerraUIRoute::None;
     Super::Deinitialize();
@@ -100,6 +108,22 @@ void UTerraUISubsystem::ResumeGame()
     OnRouteChanged.Broadcast(ActiveRoute);
 }
 
+void UTerraUISubsystem::CloseTechnologyChoice()
+{
+    if (ActiveRoute != ETerraUIRoute::TechnologyChoice)
+    {
+        return;
+    }
+    if (ActiveScreen)
+    {
+        ActiveScreen->RemoveFromParent();
+        ActiveScreen = nullptr;
+    }
+    ApplyFrontEndInput_(false);
+    ActiveRoute = ETerraUIRoute::InGame;
+    OnRouteChanged.Broadcast(ActiveRoute);
+}
+
 bool UTerraUISubsystem::StartNewGame(const FTerraNewGameConfig& Config)
 {
     UWorld* World = GetWorld();
@@ -156,6 +180,10 @@ void UTerraUISubsystem::ShowRoute_(ETerraUIRoute Route, TSubclassOf<UUserWidget>
     else if (Route == ETerraUIRoute::Paused)
     {
         ConfiguredClass = Settings->PauseMenuWidgetClass;
+    }
+    else if (Route == ETerraUIRoute::TechnologyChoice)
+    {
+        ConfiguredClass = Settings->TechnologyChoiceWidgetClass;
     }
     TSubclassOf<UUserWidget> WidgetClass = FallbackClass;
     if (!ConfiguredClass.IsNull())
@@ -217,6 +245,47 @@ void UTerraUISubsystem::EnsureInGameHUD_()
     if (InGameHUD)
     {
         InGameHUD->AddToViewport(10);
+    }
+    BindGameplayTechnologyEvents_();
+}
+
+void UTerraUISubsystem::BindGameplayTechnologyEvents_()
+{
+    APlanetTessellatedMesh* Planet = Cast<APlanetTessellatedMesh>(
+        UGameplayStatics::GetActorOfClass(GetWorld(), APlanetTessellatedMesh::StaticClass()));
+    BoundGameplayComponent = Planet ? Planet->GetPlanetGameplayComponent() : nullptr;
+    if (BoundGameplayComponent)
+    {
+        BoundGameplayComponent->OnTechnologyChoiceRequested.AddUniqueDynamic(this, &UTerraUISubsystem::HandleTechnologyChoiceRequested);
+        BoundGameplayComponent->OnTechnologyStateChanged.AddUniqueDynamic(this, &UTerraUISubsystem::HandleTechnologyStateChanged);
+    }
+}
+
+void UTerraUISubsystem::HandleTechnologyChoiceRequested(int32 FactionId)
+{
+    // Technology selection is only interactive for the local player faction. NPC factions
+    // resolve their choices through their behavior tree and must never take over the HUD.
+    if (FactionId != 0 || ActiveRoute == ETerraUIRoute::TechnologyChoice)
+    {
+        return;
+    }
+    ShowRoute_(ETerraUIRoute::TechnologyChoice, UTerraTechnologyChoiceWidget::StaticClass());
+}
+
+void UTerraUISubsystem::HandleTechnologyStateChanged()
+{
+    if (ActiveRoute != ETerraUIRoute::TechnologyChoice || !BoundGameplayComponent)
+    {
+        return;
+    }
+
+    const FTerraGameplayContainer* GameplayContainer = BoundGameplayComponent->GetGameplayContainer();
+    const bool bPlayerStillChoosing = GameplayContainer
+        && GameplayContainer->GetCurrentFactionId() == 0
+        && GameplayContainer->IsFactionWaitingForTechnologyChoice(0);
+    if (!bPlayerStillChoosing)
+    {
+        CloseTechnologyChoice();
     }
 }
 

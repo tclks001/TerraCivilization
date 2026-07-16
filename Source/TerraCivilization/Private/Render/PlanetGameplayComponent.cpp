@@ -1081,6 +1081,14 @@ bool UPlanetGameplayComponent::HandleGameplayCellClick(int32 CellId, const TCHAR
     {
         OnActionLogCommitted.Broadcast(ActionLogsAfterClick.Last());
     }
+    if (bGameplayHandled)
+    {
+        OnTechnologyStateChanged.Broadcast();
+        if (GameplayContainer->IsFactionWaitingForTechnologyChoice(NewFactionId))
+        {
+            OnTechnologyChoiceRequested.Broadcast(NewFactionId);
+        }
+    }
     int32 NewSelectedPieceCellId = INDEX_NONE;
     if (NewSelectedPieceId != INDEX_NONE)
     {
@@ -1229,6 +1237,68 @@ void UPlanetGameplayComponent::CollectCommittedActionLogEntries(TArray<FTerraGam
     {
         GameplayContainer->CollectCommittedActionLogEntries(OutEntries);
     }
+}
+
+bool UPlanetGameplayComponent::GetFactionTechnologyState(int32 FactionId, FTerraGameplayFactionTechnologyState& OutState) const
+{
+    OutState = FTerraGameplayFactionTechnologyState();
+    return GameplayContainer.IsValid() && GameplayContainer->GetFactionTechnologyState(FactionId, OutState);
+}
+
+void UPlanetGameplayComponent::CollectFactionTechnologyStates(TArray<FTerraGameplayFactionTechnologyState>& OutStates) const
+{
+    OutStates.Reset();
+    if (GameplayContainer.IsValid())
+    {
+        GameplayContainer->CollectFactionTechnologyStates(OutStates);
+    }
+}
+
+void UPlanetGameplayComponent::CollectFactionStates(TArray<FTerraGameplayFactionState>& OutStates) const
+{
+    OutStates.Reset();
+    if (GameplayContainer.IsValid())
+    {
+        OutStates = GameplayContainer->GetFactions();
+    }
+}
+
+bool UPlanetGameplayComponent::ChoosePendingTechnology(int32 FactionId, ETerraGameplayTechnologyId TechnologyId, FString& OutError)
+{
+    if (!GameplayContainer.IsValid() || !GameplayContainer->IsInitialized())
+    {
+        OutError = TEXT("gameplay_not_ready");
+        return false;
+    }
+
+    const int32 PreviousFactionId = GameplayContainer->GetCurrentFactionId();
+    const int32 PreviousTurnIndex = GameplayContainer->GetTurnIndex();
+    if (!GameplayContainer->ChoosePendingTechnology(FactionId, TechnologyId, OutError))
+    {
+        return false;
+    }
+
+    const int32 NewFactionId = GameplayContainer->GetCurrentFactionId();
+    const int32 NewTurnIndex = GameplayContainer->GetTurnIndex();
+    RefreshFactionPieceHighlights(PreviousFactionId);
+    RefreshFactionPieceHighlights(NewFactionId);
+    G2_5LastHighlightedFactionId = NewFactionId;
+    RebuildG1DebugPieces();
+    if (APlanetTessellatedMesh* Host = GetHost())
+    {
+        Host->SyncP1PiecePresentation_();
+    }
+    if (NewTurnIndex != PreviousTurnIndex)
+    {
+        OpenTurnActivationGate_(NewTurnIndex, NewFactionId);
+    }
+
+    OnTechnologyStateChanged.Broadcast();
+    if (GameplayContainer->IsFactionWaitingForTechnologyChoice(NewFactionId))
+    {
+        OnTechnologyChoiceRequested.Broadcast(NewFactionId);
+    }
+    return true;
 }
 
 bool UPlanetGameplayComponent::TryExecuteNpcMcpValidatedAction(

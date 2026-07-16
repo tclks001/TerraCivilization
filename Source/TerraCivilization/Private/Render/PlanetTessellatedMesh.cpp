@@ -5,9 +5,12 @@
 #include "Render/PlanetGameplayComponent.h"
 #include "Render/PlanetHISMInteractionComponent.h"
 #include "Render/PlanetPiecePresentationComponent.h"
+#include "TerrainVisualCoordinator.h"
+#include "TerrainVisualSurfaceComponent.h"
 #include "TerraNpcMcpGameplayBridge.h"
 
 #include "FSphereTopology.h"
+#include "FSphereTopologyQuery.h"
 #include "FCell.h"
 
 // T4：WorldGen 接入——仅在 cpp 侧 include（头文件仅使用前向声明）
@@ -20,6 +23,7 @@
 #include "Components/SceneComponent.h"
 #include "Logging/LogMacros.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/SkeletalMesh.h"
@@ -71,6 +75,11 @@ APlanetTessellatedMesh::APlanetTessellatedMesh()
     MountainTileHISMComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
     MountainTileHISMComp->SetCollisionObjectType(ECC_WorldStatic);
     MountainTileHISMComp->SetCollisionResponseToAllChannels(ECR_Block);
+
+    TerrainVisualSurfaceComp = CreateDefaultSubobject<UTerrainVisualSurfaceComponent>(TEXT("TerrainVisualSurfaceComp"));
+    TerrainVisualSurfaceComp->SetupAttachment(RootScene);
+    TerrainVisualSurfaceComp->SetVisibility(false);
+    TerrainVisualSurfaceComp->SetHiddenInGame(true);
 
     PlanetCameraComponent = CreateDefaultSubobject<UPlanetCameraComponent>(TEXT("PlanetCameraComponent"));
     PlanetGameplayComponent = CreateDefaultSubobject<UPlanetGameplayComponent>(TEXT("PlanetGameplayComponent"));
@@ -218,6 +227,7 @@ void APlanetTessellatedMesh::RebuildAll_()
     }
 
     RebuildHISMTileInstances_();
+    RebuildTerrainVisualSurface_();
     ApplyRenderModeVisibility_();
     if (PlanetGameplayComponent)
     {
@@ -294,6 +304,66 @@ void APlanetTessellatedMesh::WriteHISMHighlightForCell_(int32 CellId, bool bMark
     {
         PlanetHISMInteractionComponent->WriteHISMHighlightForCell(CellId, bMarkRenderStateDirty);
     }
+}
+
+void APlanetTessellatedMesh::RebuildTerrainVisualSurface_()
+{
+    if (!TerrainVisualSurfaceComp || !CellTopology.IsValid() || !Generator.IsValid())
+    {
+        return;
+    }
+
+    FTerrainVisualConfig VisualConfig;
+    VisualConfig.VisualMode = TerrainVisualMode;
+    VisualConfig.SurfaceSubdivisionLevel = FMath::Clamp(TerrainVisualSurfaceSubdivisionLevel, 1, 7);
+    // SV1 must share the HISM nominal radius while P2.5 still resolves piece height from HISM.
+    VisualConfig.GlobeRadiusCM = FMath::Max(GlobeRadiusCM + HISMTileRadiusOffsetCM, 1.0f);
+    VisualConfig.GlobalVisualSeed = WorldGenSettings.RandomSeed;
+    VisualConfig.PlanetCenterWorld = GetPlanetCenterWorld_();
+
+    if (!TerrainVisualCoordinator.IsValid())
+    {
+        TerrainVisualCoordinator = MakeUnique<FTerrainVisualCoordinator>();
+    }
+
+    FString InitError;
+    if (!TerrainVisualCoordinator->Initialize(*CellTopology, Generator->GetCellData(), VisualConfig, InitError))
+    {
+        UE_LOG(LogPlanetTess, Warning, TEXT("[TerrainVisual][SV1] Initialization failed: %s"), *InitError);
+        TerrainVisualSurfaceComp->ClearSurface();
+        return;
+    }
+
+    if (TerrainVisualMode != ETerrainVisualMode::ContinuousSurface)
+    {
+        TerrainVisualSurfaceComp->ClearSurface();
+        TerrainVisualCoordinator->SetContinuousSurfaceAvailable(false);
+        return;
+    }
+
+    FSphereTopology SurfaceTopology(VisualConfig.SurfaceSubdivisionLevel);
+    SurfaceTopology.Build();
+    const bool bBuilt = TerrainVisualSurfaceComp->RebuildBaseSphere(SurfaceTopology, VisualConfig.GlobeRadiusCM);
+    TerrainVisualCoordinator->SetContinuousSurfaceAvailable(bBuilt);
+    if (!bBuilt)
+    {
+        UE_LOG(LogPlanetTess, Warning,
+            TEXT("[TerrainVisual][SV1] Failed to build base surface (Sub=%d Radius=%.1fcm)."),
+            VisualConfig.SurfaceSubdivisionLevel,
+            GlobeRadiusCM);
+        return;
+    }
+
+    if (TerrainVisualBaseMaterial)
+    {
+        TerrainVisualSurfaceComp->SetMaterial(0, TerrainVisualBaseMaterial);
+    }
+
+    UE_LOG(LogPlanetTess, Log,
+        TEXT("[TerrainVisual][SV1] Rebuilt base surface: Sub=%d Tris=%d Radius=%.1fcm."),
+        VisualConfig.SurfaceSubdivisionLevel,
+        SurfaceTopology.PrimalTris.Num(),
+        VisualConfig.GlobeRadiusCM);
 }
 
 void APlanetTessellatedMesh::RefreshG4CapturePreviewCellsForActionTarget_(int32 ActionTargetCellId, bool bMarkLastRenderStateDirty)
@@ -534,6 +604,55 @@ bool APlanetTessellatedMesh::HandleHISMClickHit(const FHitResult& Hit)
         : false;
 }
 
+bool APlanetTessellatedMesh::IsContinuousTerrainVisualActive() const
+{
+    return TerrainVisualMode == ETerrainVisualMode::ContinuousSurface
+        && TerrainVisualSurfaceComp
+        && TerrainVisualSurfaceComp->HasBuiltSurface()
+        && TerrainVisualCoordinator.IsValid()
+        && TerrainVisualCoordinator->GetDiagnostics().bCanActivateContinuousSurface;
+}
+
+bool APlanetTessellatedMesh::TryResolveContinuousSurfaceHitToCellId_(const FHitResult& Hit, int32& OutCellId) const
+{
+    OutCellId = INDEX_NONE;
+    if (!IsContinuousTerrainVisualActive() || Hit.GetComponent() != TerrainVisualSurfaceComp)
+    {
+        return false;
+    }
+
+    const FVector LocalImpact = GetActorTransform().InverseTransformPosition(Hit.ImpactPoint);
+    OutCellId = TerrainVisualCoordinator->ResolveCellId(LocalImpact.GetSafeNormal());
+    return OutCellId != INDEX_NONE;
+}
+
+bool APlanetTessellatedMesh::HandleContinuousSurfaceHoverHit(const FHitResult& Hit)
+{
+    int32 CellId = INDEX_NONE;
+    if (!TryResolveContinuousSurfaceHitToCellId_(Hit, CellId))
+    {
+        return false;
+    }
+
+    UpdateHISMHoverCell_(CellId);
+    return true;
+}
+
+bool APlanetTessellatedMesh::HandleContinuousSurfaceClickHit(const FHitResult& Hit)
+{
+    int32 CellId = INDEX_NONE;
+    if (!TryResolveContinuousSurfaceHitToCellId_(Hit, CellId))
+    {
+        return false;
+    }
+
+    return HandleGameplayCellClick_(
+        CellId,
+        TEXT("ContinuousSurface"),
+        INDEX_NONE,
+        GetNameSafe(TerrainVisualSurfaceComp));
+}
+
 int32 APlanetTessellatedMesh::GetLastHISMPickedCellId() const
 {
     return PlanetHISMInteractionComponent
@@ -612,12 +731,56 @@ void APlanetTessellatedMesh::DrawG1DebugPieces_() const
 void APlanetTessellatedMesh::ApplyRenderModeVisibility_()
 {
     HISMTileRenderer.ApplyVisibility(bEnableHISMTileRendering, bEnableHISMTileCollision);
+    ApplyTerrainVisualMode_();
 
     const bool bNeedTick = (PlanetHISMInteractionComponent
             && PlanetHISMInteractionComponent->bEnableHISMInstanceHighlight
-            && bEnableHISMTileRendering)
+            && (bEnableHISMTileRendering || IsContinuousTerrainVisualActive()))
         || (PlanetGameplayComponent && PlanetGameplayComponent->bEnableG1DebugPieces);
     PrimaryActorTick.SetTickFunctionEnable(bNeedTick);
+}
+
+void APlanetTessellatedMesh::ApplyTerrainVisualMode_()
+{
+    const bool bContinuous = IsContinuousTerrainVisualActive();
+    if (TerrainVisualSurfaceComp)
+    {
+        TerrainVisualSurfaceComp->SetVisibility(bContinuous, true);
+        TerrainVisualSurfaceComp->SetHiddenInGame(!bContinuous);
+        TerrainVisualSurfaceComp->SetCollisionEnabled(
+            bContinuous ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
+        TerrainVisualSurfaceComp->SetCollisionObjectType(ECC_WorldStatic);
+        TerrainVisualSurfaceComp->SetCollisionResponseToAllChannels(ECR_Ignore);
+        TerrainVisualSurfaceComp->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+    }
+
+    if (!bContinuous)
+    {
+        return;
+    }
+
+    const ECollisionEnabled::Type LegacyCollision = bEnableHISMTileCollision
+        ? ECollisionEnabled::QueryOnly
+        : ECollisionEnabled::NoCollision;
+    const auto ApplyLegacyHISM = [this, LegacyCollision](UHierarchicalInstancedStaticMeshComponent* Comp)
+    {
+        if (!Comp)
+        {
+            return;
+        }
+
+        Comp->SetVisibility(bShowLegacyHISMDebugInContinuousSurfaceMode, true);
+        Comp->SetHiddenInGame(!bShowLegacyHISMDebugInContinuousSurfaceMode);
+        Comp->SetCollisionEnabled(LegacyCollision);
+        Comp->SetCollisionObjectType(ECC_WorldStatic);
+        Comp->SetCollisionResponseToAllChannels(ECR_Block);
+        // P2.5 keeps using ECC_WorldStatic. Cursor input uses ECC_Visibility and must hit the surface.
+        Comp->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
+    };
+
+    ApplyLegacyHISM(PlainTileHISMComp);
+    ApplyLegacyHISM(ForestTileHISMComp);
+    ApplyLegacyHISM(MountainTileHISMComp);
 }
 
 // ===================================================================

@@ -8,6 +8,7 @@
 #include "Render/PlanetHISMTileRenderer.h"
 #include "TerraGameplayContainer.h"
 #include "TerraPiecePresentationTypes.h"
+#include "TerrainVisualTypes.h"
 #include "Templates/UniquePtr.h"
 #include "WorldGenSettings.h"   // T4：UPROPERTY 直接持有 FWorldGenSettings → 完整类型可见
 #include "PlanetTessellatedMesh.generated.h"
@@ -25,6 +26,8 @@ class UPlanetCameraComponent;
 class UPlanetGameplayComponent;
 class UPlanetHISMInteractionComponent;
 class UPlanetPiecePresentationComponent;
+class UTerrainVisualSurfaceComponent;
+class FTerrainVisualCoordinator;
 struct FTerraGameplayPieceState;
 struct FTerraGameplayCaptureEntry;
 struct FHitResult;
@@ -66,6 +69,26 @@ public:
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess",
               meta = (ClampMin = "100.0"))
     float GlobeRadiusCM = 15000.0f;
+
+    //----------------------------------------------------------
+    // SimpleGameplay：TerrainVisual SV1 连续基础表面
+    //----------------------------------------------------------
+
+    /** TerrainVisual 独立视觉路径；默认保留 Legacy HISM Debug 行为。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual")
+    ETerrainVisualMode TerrainVisualMode = ETerrainVisualMode::LegacyHISMDebug;
+
+    /** SV1 连续基础球面的独立渲染细分层级；不影响 Gameplay CellTopology。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual", meta = (ClampMin = "1", ClampMax = "7"))
+    int32 TerrainVisualSurfaceSubdivisionLevel = 7;
+
+    /** SV1 连续基础表面材质；为空时使用引擎默认材质作流程验收。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual")
+    TObjectPtr<UMaterialInterface> TerrainVisualBaseMaterial;
+
+    /** 连续模式下是否显示旧 HISM 瓦片，仅用于与基础表面对照。默认隐藏。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|Debug")
+    bool bShowLegacyHISMDebugInContinuousSurfaceMode = false;
 
     /** Deprecated compatibility hook. HISM highlight now uses per-instance custom data. */
     void SetHighlightLUT(class UTexture2D* InLUT);
@@ -151,6 +174,14 @@ public:
     /** 输入层 click 命中 HISM 时调用；成功处理返回 true。 */
     bool HandleHISMClickHit(const FHitResult& Hit);
 
+    /** SV1：连续基础表面命中后解析 CellId，并复用既有 Gameplay hover 入口。 */
+    bool HandleContinuousSurfaceHoverHit(const FHitResult& Hit);
+
+    /** SV1：连续基础表面命中后解析 CellId，并复用既有 Gameplay click 入口。 */
+    bool HandleContinuousSurfaceClickHit(const FHitResult& Hit);
+
+    bool IsContinuousTerrainVisualActive() const;
+
     /** 输入层 Tab / Shift+Tab 循环当前阵营可行动棋子时调用；成功处理返回 true。 */
     bool HandleC5NavigateCurrentFactionPiece(bool bReverse);
 
@@ -196,12 +227,15 @@ private:
 
     /** SimpleGameplay：按 WorldGen 三地形输出重建平原 / 森林 / 山脉三套 HISM 实例。 */
     void RebuildHISMTileInstances_();
+    void RebuildTerrainVisualSurface_();
 
     FPlanetHISMTileRenderConfig BuildHISMTileRenderConfig_() const;
     FPlanetHISMHighlightConfig BuildHISMHighlightConfig_() const;
 
     /** SimpleGameplay：统一应用 HISM 显示 / 碰撞开关。 */
     void ApplyRenderModeVisibility_();
+    void ApplyTerrainVisualMode_();
+    bool TryResolveContinuousSurfaceHitToCellId_(const FHitResult& Hit, int32& OutCellId) const;
 
     /** SimpleGameplay：把单个 Cell 当前 Gameplay/hover 逻辑合成为最终 RGB + Intensity 自定义数据。 */
     void WriteHISMHighlightForCell_(int32 CellId, bool bMarkRenderStateDirty = true);
@@ -325,6 +359,14 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Tess|HISM Tiles",
               meta = (AllowPrivateAccess = "true", NoEditInline))
     TObjectPtr<UHierarchicalInstancedStaticMeshComponent> MountainTileHISMComp;
+
+    /** TerrainVisual SV1：连续基础表面，独立于旧 HISM 渲染组件。 */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Terrain Visual",
+              meta = (AllowPrivateAccess = "true", NoEditInline))
+    TObjectPtr<UTerrainVisualSurfaceComponent> TerrainVisualSurfaceComp;
+
+    /** TerrainVisual SV0/SV1：只读视觉场和 Cell 查询协调器。 */
+    TUniquePtr<FTerrainVisualCoordinator> TerrainVisualCoordinator;
 
     /** HISM 瓦片渲染、实例索引、命中反查与 PerInstanceCustomData 高亮状态。 */
     FPlanetHISMTileRenderer HISMTileRenderer;

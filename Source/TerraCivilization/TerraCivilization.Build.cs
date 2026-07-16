@@ -8,7 +8,7 @@ public class TerraCivilization : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 	
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "Grid", "ProceduralTerrainGenerator", "ProceduralMeshComponent", "WorldGen", "GameplayTags", "TerrainTags", "Gameplay", "PiecePresentation", "NpcMcp", "UMG", "DeveloperSettings" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "Grid", "ProceduralTerrainGenerator", "ProceduralMeshComponent", "WorldGen", "TerrainVisual", "GameplayTags", "TerrainTags", "Gameplay", "PiecePresentation", "NpcMcp", "UMG", "DeveloperSettings" });
 
 		PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });
 

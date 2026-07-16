@@ -123,6 +123,26 @@ void APlanetInteractionController::PlayerTick(float DeltaTime)
         }
     }
 
+    const bool bUseContinuousSurfacePath = Tess && Tess->IsContinuousTerrainVisualActive();
+    if (bUseContinuousSurfacePath)
+    {
+        const bool bContinuousHoverHandled = bHit && Tess->HandleContinuousSurfaceHoverHit(Hit);
+        if (bContinuousHoverHandled)
+        {
+            bWasHovering = true;
+            if (WasInputKeyJustPressed(EKeys::LeftMouseButton))
+            {
+                Tess->HandleContinuousSurfaceClickHit(Hit);
+            }
+        }
+        else
+        {
+            Tess->ClearHISMHover();
+            bWasHovering = false;
+        }
+        return;
+    }
+
     const bool bUseHISMHighlightPath = Tess
         && Tess->GetPlanetHISMInteractionComponent()
         && Tess->GetPlanetHISMInteractionComponent()->bEnableHISMInstanceHighlight;

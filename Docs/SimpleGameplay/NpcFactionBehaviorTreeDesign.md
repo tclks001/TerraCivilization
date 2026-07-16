@@ -21,6 +21,13 @@
 
 第一阶段不接入 MCP、不请求外部 Agent、不调用 LLM。这样可以先证明 UE 内部的回合编排和权威执行稳定，再逐步引入更复杂的策略与外部提案。
 
+## 阶段设计稿索引
+
+| 阶段 | 设计稿 | 验收目标 |
+| --- | --- | --- |
+| BT1 | [BT1_NpcFactionBehaviorTreeMinimalLoopDesign.md](BT1_NpcFactionBehaviorTreeMinimalLoopDesign.md) | NPC 阵营在非玩家回合执行一次合法行动 |
+| BT1.1 | [BT1_1_NpcTechnologyChoiceDesign.md](BT1_1_NpcTechnologyChoiceDesign.md) | NPC 阵营在待选科技时自主选择一个合法科技 |
+
 ## 1. 为什么需要行为树
 
 行为树解决的是“NPC 当前该走哪一条流程”：等待玩家、识别自己的回合、收集上下文、选择方案、执行、失败回退、结束回合。
