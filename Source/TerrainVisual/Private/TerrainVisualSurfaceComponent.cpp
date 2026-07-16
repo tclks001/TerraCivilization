@@ -1,6 +1,7 @@
 #include "TerrainVisualSurfaceComponent.h"
 
 #include "FSphereTopology.h"
+#include "TerrainSurfaceQuery.h"
 #include "CellGeoData.h"
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -21,6 +22,7 @@ UTerrainVisualSurfaceComponent::UTerrainVisualSurfaceComponent(const FObjectInit
 bool UTerrainVisualSurfaceComponent::RebuildBaseSphere(
     const FSphereTopology& SurfaceTopology,
     const FSphereTopology& CellTopology,
+    const ITerrainSurfaceQuery& SurfaceQuery,
     float RadiusCM)
 {
     ClearSurface();
@@ -54,8 +56,15 @@ bool UTerrainVisualSurfaceComponent::RebuildBaseSphere(
             return false;
         }
 
-        Vertices.Add(UnitDirection * RadiusCM);
-        Normals.Add(UnitDirection);
+        const FTerrainSurfaceQueryResult Surface = SurfaceQuery.QueryBaseSurface(UnitDirection);
+        if (!Surface.bIsValid || Surface.SurfaceRadiusCM <= KINDA_SMALL_NUMBER)
+        {
+            ClearSurface();
+            return false;
+        }
+
+        Vertices.Add(UnitDirection * Surface.SurfaceRadiusCM);
+        Normals.Add(Surface.WorldNormal.GetSafeNormal());
         UV0.Add(FVector2D::ZeroVector);
         VertexColors.Add(FLinearColor::White);
     }

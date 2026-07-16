@@ -15,7 +15,7 @@ CellTopology + Gameplay（保持 CellId 契约不变）
         |
         +-- TerrainVisual 新模块
               |
-              +-- 连续基础表面：宏观轮廓、地表命中、高亮、材质、水体
+              +-- 连续基础表面：宏观轮廓、地表命中、高亮、材质、低频高度与水文承载
               +-- TerrainVisualField：连续高度、法线、视觉掩码、装饰随机种子
               +-- HISM Decor：Nanite 山脊、岩石、草、树等高频视觉细节
 ```
@@ -74,7 +74,7 @@ Height(UnitDirection) =
 ```
 
 - `MacroLandform`：由 Plain/Forest/Mountain 的视觉解释连续插值得到。
-- `RidgeField`：从连通的 Mountain Cell 组件及邻接关系提取山脊链，避免每个 Mountain Cell 变成孤立山头。
+- `RidgeField`：直接消费 WorldGen 山脉生长过程输出、由 Gameplay 持有的 Mountain Cell 中心测地线弧段；禁止从 Mountain Cell 邻接关系反推山脊链。
 - `OptionalVisualStamps`：保留给未来视觉挖坑、筑坝、山崩等；不改变当前玩法通行规则。
 - 结构性高度不得依赖 HISM 局部 UV、独立瓦片高度图或实例随机旋转，否则接缝无法连续。
 
@@ -141,30 +141,38 @@ SDF 在本文中是**地表材质**技术，不是体素几何生成器。材质
 - HISM PICD 高亮仅保留为 Debug 对照，正常连续模式中禁用。
 - 每个渲染三角形携带固定三 Cell 材质上下文；仅材质属性展开顶点，几何位置/法线在共享边一致。
 
-### SV3：SDF 地表材质与材质水体
+### SV3：SDF 地表材质
 
 - 以 `CellVisualLUT` 装配 Plain/Forest/Mountain 的连续 SDF 材质。
 - 采用世界球面方向/三平面采样和全局 seed，禁止跨 Cell UV 接缝。
-- 增加地表材质水、湿润度和岸边效果；基础表面仍不做几何高度位移。
-- 验收昼夜、天光、大气散射、粗糙度、法线方向和水面高光。
+- 基础表面仍不做几何高度位移；不做河流、湖泊、湿润度或独立水面。
+- 验收昼夜、天光、大气散射、粗糙度、法线方向和高亮叠加。
 
 ### SV4：宏观高度与表现层对齐
 
-- 接入 `TerrainVisualField` 高度，重建连续 `sub=7` 表面。
-- 高度显著后必须更新表面法线；单纯 `+UnitDirection` 会使山坡光照错误。
-- 棋子高度从 P2.5 HISM 多射线迁到 `SurfaceQuery`；失败时只允许显式记录的球半径 fallback。
-- 相机 Cell 焦点与回合开始焦点迁到 `SurfaceQuery`。
+- 接入 `TerrainVisualField` 的低频高度，重建连续 `sub=7` 表面；不加入高频高度噪声。
+- 山地由 WorldGen 输出的 Mountain Cell 中心测地线弧段构成 Ridge SDF，点到短弧段的距离以大圆垂足和端点退化求得，采用大于一次的横向衰减指数制造连续、尖锐的山脊；森林采用端点归一化 sigmoid 中心距离函数形成边缘平缓的丘陵；平原保持零低频偏移。
+- 高度显著后必须同步更新查询法线和网格顶点法线；单纯 `+UnitDirection` 会使山坡光照错误。
+- 棋子高度从 P2.5 HISM 多射线迁到 `SurfaceQuery`；位置读取高度但旋转和额外偏移保持标准球体径向方向，失败时只允许显式记录的球半径 fallback。
+- 相机 Cell 焦点、战争区焦点与轨道计算保持标准球体的径向位置和法线，不读取 `SurfaceQuery` 的高度或坡面法线。
 - 光环、脚底选中圈、移动轨迹、吃子/投射物起止位置同步使用同一表面点和法线。
 
-### SV5：Nanite HISM Decor 与连续山脊
+### SV5：装饰性河网与材质水体
+
+- 河网只服务视觉，不把完整 Cell 解释为水域，也不改变 Gameplay 地形或移动规则。
+- 基于 SV4 的确定性高度场选择山地/高地源点，沿局部最陡下降方向生成可汇流的河道 DAG；河道宽度不得超过 Cell 视觉直径的一半。
+- 首版作为地表材质内略微下凹的河道 SDF、湿润岸带与水面高光，不增加碰撞或独立水体网格。
+- 河道高度、流向、岸边法线和材质参数必须全部来自同一 `TerrainVisualField`，禁止随机横穿山脊。
+
+### SV6：Nanite HISM Decor 与连续山脊
 
 - 恢复高密度山脊、岩石、草和树等装饰，但它们只读取 `SurfaceQuery`，不再接管地表。
 - 长条山脊按连通 Mountain 链方向放置；遗留整 Cell 瓦片只允许作为有安静边缘带的过渡资产。
 - Decor HISM 统一 `NoCollision`；其阴影、法线、WPO、粗糙度和大气散射需与现有光照联验。
 
-### SV6：可选水壳与局部动态视觉形变
+### SV7：可选水壳与局部动态视觉形变
 
-SV5 稳定后再考虑水壳、视觉 stamp 的局部重建和分块更新。球面自适应 LOD 不是前置条件，必须由 profile 驱动。
+SV6 稳定后再考虑水壳、视觉 stamp 的局部重建和分块更新。球面自适应 LOD 不是前置条件，必须由 profile 驱动。
 
 ## 5. 跨系统同步表
 
@@ -175,9 +183,9 @@ SV5 稳定后再考虑水壳、视觉 stamp 的局部重建和分块更新。球
 | 高亮 | HISM PICD | `CellHighlightLUT` | SV2 | 双高亮或关闭 HISM 后无高亮。 |
 | 地表视觉 | 瓦片材质 | 连续 SDF 材质 | SV3 | UV/材质边界断裂。 |
 | 棋子高度 | HISM 多命中射线 | `SurfaceQuery` | SV4 | 浮空、下沉或站在树石上。 |
-| 相机焦点 | 固定球半径 | `SurfaceQuery` | SV4 | 穿山或悬于谷地。 |
+| 相机焦点 | 固定球半径 | 固定球半径与径向法线（显式保持） | SV4 | 使用坡面法线会导致轨道镜头乱转。 |
 | 光照法线 | 径向/瓦片法线 | 高度感知表面法线 | SV4 | 山体仍像光滑球或出现光照接缝。 |
-| 近景细节 | 整 Cell HISM | Decor HISM | SV5 | 重新引入碰撞与视觉接缝。 |
+| 近景细节 | 整 Cell HISM | Decor HISM | SV6 | 重新引入碰撞与视觉接缝。 |
 
 ## 6. 验收原则
 

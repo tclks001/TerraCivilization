@@ -8,6 +8,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogTerrainVisual, Log, All);
 bool FTerrainVisualCoordinator::Initialize(
     const FSphereTopology& InCellTopology,
     const TArray<FCellGeoData>& InGeoCells,
+    const TArray<FIntPoint>& InMountainRidgeSegments,
     const FTerrainVisualConfig& InConfig,
     FString& OutError)
 {
@@ -18,7 +19,7 @@ bool FTerrainVisualCoordinator::Initialize(
     Diagnostics.GeoCellCount = InGeoCells.Num();
     Diagnostics.ContinuousSurfaceStatus = TEXT("SV1 continuous surface component is not implemented.");
 
-    if (!VisualField.Initialize(InCellTopology, InGeoCells, InConfig, OutError))
+    if (!VisualField.Initialize(InCellTopology, InGeoCells, InMountainRidgeSegments, InConfig, OutError))
     {
         Diagnostics.ContinuousSurfaceStatus = FString::Printf(
             TEXT("TerrainVisual initialization failed: %s"),

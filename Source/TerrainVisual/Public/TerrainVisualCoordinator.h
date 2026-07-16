@@ -12,6 +12,7 @@ public:
     bool Initialize(
         const FSphereTopology& InCellTopology,
         const TArray<FCellGeoData>& InGeoCells,
+        const TArray<FIntPoint>& InMountainRidgeSegments,
         const FTerrainVisualConfig& InConfig,
         FString& OutError);
 

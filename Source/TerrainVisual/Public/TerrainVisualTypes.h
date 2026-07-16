@@ -18,6 +18,13 @@ struct TERRAINVISUAL_API FTerrainVisualConfig
     int32 GlobalVisualSeed = 0;
     bool bEnableDiagnostics = false;
     FVector PlanetCenterWorld = FVector::ZeroVector;
+
+    // SV4: deterministic, visual-only macro landform parameters.
+    float MountainHeightCM = 2400.0f;
+    float MountainFalloffExponent = 3.0f;
+    float ForestHeightCM = 500.0f;
+    float ForestSigmoidSteepness = 8.0f;
+    float LandformSupportScale = 1.25f;
 };
 
 struct TERRAINVISUAL_API FTerrainSurfaceQueryResult

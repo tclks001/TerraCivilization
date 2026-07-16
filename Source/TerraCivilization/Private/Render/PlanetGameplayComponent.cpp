@@ -28,6 +28,11 @@ APlanetTessellatedMesh* UPlanetGameplayComponent::GetHost() const
     return Cast<APlanetTessellatedMesh>(GetOwner());
 }
 
+void UPlanetGameplayComponent::SetMountainRidgeSegments(const TArray<FIntPoint>& InSegments)
+{
+    MountainRidgeSegments = InSegments;
+}
+
 namespace
 {
 DEFINE_LOG_CATEGORY_STATIC(LogPlanetGameplayComponent, Log, All);

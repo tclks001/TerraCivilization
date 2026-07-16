@@ -48,6 +48,7 @@ class TERRACIVILIZATION_API APlanetTessellatedMesh : public AActor
     friend class UPlanetCameraComponent;
     friend class UPlanetGameplayComponent;
     friend class UPlanetHISMInteractionComponent;
+    friend class UPlanetPiecePresentationComponent;
 
 public:
     APlanetTessellatedMesh();
@@ -93,6 +94,22 @@ public:
     /** SV3 连续表面地形材质；为空时继续使用 SV2 高亮材质。 */
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV3 Surface")
     TObjectPtr<UMaterialInterface> TerrainVisualSurfaceMaterial;
+
+    /** SV4：山地 SDF 距离场的最大宏观径向高度，只影响视觉表现。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV4 Macro Height", meta = (ClampMin = "0.0", ClampMax = "10000.0"))
+    float TerrainVisualMountainHeightCM = 2400.0f;
+
+    /** SV4：值越大，山脊越尖；建议保持大于 1。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV4 Macro Height", meta = (ClampMin = "1.0", ClampMax = "8.0"))
+    float TerrainVisualMountainFalloffExponent = 3.0f;
+
+    /** SV4：森林 SDF 距离场的最大宏观径向高度，只影响视觉表现。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV4 Macro Height", meta = (ClampMin = "0.0", ClampMax = "5000.0"))
+    float TerrainVisualForestHeightCM = 500.0f;
+
+    /** SV4：森林高度 sigmoid 的陡峭度；值越低，森林边缘到丘陵中心的过渡越平缓。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV4 Macro Height", meta = (ClampMin = "1.0", ClampMax = "20.0"))
+    float TerrainVisualForestSigmoidSteepness = 8.0f;
 
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV2 Highlight")
     FLinearColor TerrainVisualBaseGroundColor = FLinearColor(0.08f, 0.10f, 0.06f, 1.0f);
@@ -277,6 +294,7 @@ private:
 
     /** SimpleGameplay G2.5：根据 CellId 计算球面 Cell 中心世界坐标。 */
     bool GetCellSurfaceWorldPosition_(int32 CellId, float RadiusOffsetCM, FVector& OutWorldPosition) const;
+    bool QueryTerrainSurface_(const FVector& LocalUnitDirection, FTerrainSurfaceQueryResult& OutSurface) const;
 
     /** SimpleGameplay C6.5：timer 到点后校验仍是同一回合，再调用既有 C2/C2.5 回合镜头入口。 */
     void ExecuteC6_5DelayedTurnStartFocus_(int32 ExpectedTurnIndex, int32 ExpectedFactionId);

@@ -6,6 +6,7 @@
 
 class FSphereTopology;
 struct FCellGeoData;
+class ITerrainSurfaceQuery;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 class UTexture2D;
@@ -21,6 +22,7 @@ public:
     bool RebuildBaseSphere(
         const FSphereTopology& SurfaceTopology,
         const FSphereTopology& CellTopology,
+        const ITerrainSurfaceQuery& SurfaceQuery,
         float RadiusCM);
     void ClearSurface();
 

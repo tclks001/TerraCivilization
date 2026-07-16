@@ -47,6 +47,7 @@ void FWorldGenerator::InitSimpleTerrainAsPlain()
 
     CellData.SetNum(N);
     SimpleTerrainField.Init(ETerraSimpleTerrainType::Plain, N);
+    MountainRidgeSegments.Reset();
     bProtectedCell.Init(false, N);
     BaseCellIds.Reset();
 
@@ -345,6 +346,7 @@ void FWorldGenerator::GrowMountainStrip(int32 TargetCount)
 
     SimpleTerrainField[SeedA] = ETerraSimpleTerrainType::Mountain;
     SimpleTerrainField[SeedB] = ETerraSimpleTerrainType::Mountain;
+    MountainRidgeSegments.Emplace(SeedA, SeedB);
     LastMountainCount += 2;
 
     FMountainGrowTip TipA;
@@ -384,6 +386,7 @@ bool FWorldGenerator::TryGrowMountainTip(FMountainGrowTip& Tip, int32& Remaining
     }
 
     SimpleTerrainField[NextCellId] = ETerraSimpleTerrainType::Mountain;
+    MountainRidgeSegments.Emplace(Tip.CurCellId, NextCellId);
     ++LastMountainCount;
     --RemainingCount;
 

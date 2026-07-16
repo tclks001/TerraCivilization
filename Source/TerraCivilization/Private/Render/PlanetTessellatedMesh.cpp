@@ -278,6 +278,10 @@ void APlanetTessellatedMesh::RebuildAll_()
     {
         Generator = MakeUnique<FWorldGenerator>(CellTopology.Get(), WorldGenSettings);
         Generator->Generate();
+        if (PlanetGameplayComponent)
+        {
+            PlanetGameplayComponent->SetMountainRidgeSegments(Generator->GetMountainRidgeSegments());
+        }
     }
 
     RebuildHISMTileInstances_();
@@ -380,6 +384,10 @@ void APlanetTessellatedMesh::RebuildTerrainVisualSurface_()
     VisualConfig.GlobeRadiusCM = FMath::Max(GlobeRadiusCM + HISMTileRadiusOffsetCM, 1.0f);
     VisualConfig.GlobalVisualSeed = WorldGenSettings.RandomSeed;
     VisualConfig.PlanetCenterWorld = GetPlanetCenterWorld_();
+    VisualConfig.MountainHeightCM = TerrainVisualMountainHeightCM;
+    VisualConfig.MountainFalloffExponent = TerrainVisualMountainFalloffExponent;
+    VisualConfig.ForestHeightCM = TerrainVisualForestHeightCM;
+    VisualConfig.ForestSigmoidSteepness = TerrainVisualForestSigmoidSteepness;
 
     if (!TerrainVisualCoordinator.IsValid())
     {
@@ -387,7 +395,10 @@ void APlanetTessellatedMesh::RebuildTerrainVisualSurface_()
     }
 
     FString InitError;
-    if (!TerrainVisualCoordinator->Initialize(*CellTopology, Generator->GetCellData(), VisualConfig, InitError))
+    const TArray<FIntPoint>& MountainRidges = PlanetGameplayComponent
+        ? PlanetGameplayComponent->GetMountainRidgeSegments()
+        : Generator->GetMountainRidgeSegments();
+    if (!TerrainVisualCoordinator->Initialize(*CellTopology, Generator->GetCellData(), MountainRidges, VisualConfig, InitError))
     {
         UE_LOG(LogPlanetTess, Warning, TEXT("[TerrainVisual][SV1] Initialization failed: %s"), *InitError);
         TerrainVisualSurfaceComp->ClearSurface();
@@ -406,6 +417,7 @@ void APlanetTessellatedMesh::RebuildTerrainVisualSurface_()
     const bool bBuilt = TerrainVisualSurfaceComp->RebuildBaseSphere(
         SurfaceTopology,
         *CellTopology,
+        *TerrainVisualCoordinator,
         VisualConfig.GlobeRadiusCM);
     TerrainVisualCoordinator->SetContinuousSurfaceAvailable(bBuilt);
     if (!bBuilt)
@@ -612,10 +624,33 @@ bool APlanetTessellatedMesh::GetCellSurfaceWorldPosition_(int32 CellId, float Ra
         return false;
     }
 
-    const float Radius = GlobeRadiusCM + RadiusOffsetCM;
-    const FVector LocalPosition = CellTopology->Cells[CellId].UnitCenter * Radius;
+    // Camera focus deliberately remains on the unmodified reference sphere. Macro
+    // terrain height and slope normals are presentation data, not camera orbit data.
+    const FVector LocalPosition = CellTopology->Cells[CellId].UnitCenter * (GlobeRadiusCM + RadiusOffsetCM);
     OutWorldPosition = GetActorTransform().TransformPosition(LocalPosition);
     return true;
+}
+
+bool APlanetTessellatedMesh::QueryTerrainSurface_(const FVector& LocalUnitDirection, FTerrainSurfaceQueryResult& OutSurface) const
+{
+    OutSurface = FTerrainSurfaceQueryResult();
+    const FVector SafeLocalDirection = LocalUnitDirection.GetSafeNormal();
+    if (SafeLocalDirection.IsNearlyZero() || !TerrainVisualCoordinator.IsValid())
+    {
+        return false;
+    }
+
+    const FTerrainSurfaceQueryResult LocalSurface = TerrainVisualCoordinator->QueryBaseSurface(SafeLocalDirection);
+    if (!LocalSurface.bIsValid)
+    {
+        return false;
+    }
+
+    const FTransform ActorTransform = GetActorTransform();
+    OutSurface = LocalSurface;
+    OutSurface.WorldPosition = ActorTransform.TransformPosition(SafeLocalDirection * LocalSurface.SurfaceRadiusCM);
+    OutSurface.WorldNormal = ActorTransform.TransformVectorNoScale(LocalSurface.WorldNormal).GetSafeNormal();
+    return !OutSurface.WorldNormal.IsNearlyZero();
 }
 
 void APlanetTessellatedMesh::SyncP1PiecePresentation_(

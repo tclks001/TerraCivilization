@@ -91,6 +91,9 @@ public:
     FTerraTechnologyStateChanged OnTechnologyStateChanged;
 
     void RebuildGameplay();
+    /** WorldGen 输出的视觉山脊线；后续动态造山只需替换该数组并请求表面重建。 */
+    void SetMountainRidgeSegments(const TArray<FIntPoint>& InSegments);
+    const TArray<FIntPoint>& GetMountainRidgeSegments() const { return MountainRidgeSegments; }
     bool InitializeTutorialScenario(const UTerraTutorialScenarioData& Scenario, FString& OutError);
     void TickTutorialNpcScript();
     void RefreshGameplayHighlights(const TArray<int32>& DirtyCellIds);
@@ -141,6 +144,7 @@ private:
     TUniquePtr<FTerraGameplayContainer> GameplayContainer;
     int32 G2_5LastHighlightedFactionId = INDEX_NONE;
     TArray<FTerraG1DebugPiece> G1DebugPieces;
+    TArray<FIntPoint> MountainRidgeSegments;
     TArray<FTerraTutorialNpcAction> TutorialNpcActionSequence;
     bool bTutorialNpcScriptFailed = false;
     // Rules may already point at the next faction, but no input, camera turn focus, or NPC decision may start until this gate opens.

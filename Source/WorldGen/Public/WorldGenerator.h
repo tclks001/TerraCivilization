@@ -30,6 +30,8 @@ public:
     const TArray<FCellGeoData>& GetCellData() const { return CellData; }
     const TArray<int32>& GetBaseCellIds() const { return BaseCellIds; }
     const TArray<ETerraSimpleTerrainType>& GetSimpleTerrainField() const { return SimpleTerrainField; }
+    /** 山脉生长过程直接输出的山脊线段，X/Y 为相邻 Mountain CellId。 */
+    const TArray<FIntPoint>& GetMountainRidgeSegments() const { return MountainRidgeSegments; }
     void OverrideSimpleTerrainField(const TArray<ETerraSimpleTerrainType>& InTerrainField);
 
 private:
@@ -75,6 +77,7 @@ private:
     TArray<FCellGeoData> CellData;
     TArray<int32> BaseCellIds;
     TArray<ETerraSimpleTerrainType> SimpleTerrainField;
+    TArray<FIntPoint> MountainRidgeSegments;
     TArray<bool> bProtectedCell;
 
     int32 LastProtectedCount = 0;

@@ -241,30 +241,42 @@ bool UPlanetPiecePresentationComponent::BuildPieceWorldTransform(int32 CellId, E
         return false;
     }
 
-    FVector TraceWorldUp = WorldUp;
-    float TraceAngularOffsetDeg = 0.0f;
-    if (PieceType == ETerraGameplayPieceType::Cavalry || PieceType == ETerraGameplayPieceType::ArcherCavalry)
+    FVector WorldPosition = FVector::ZeroVector;
+    FVector SurfaceUp = WorldUp;
+    FTerrainSurfaceQueryResult Surface;
+    if (Host->IsContinuousTerrainVisualActive() && Host->QueryTerrainSurface_(LocalUp, Surface))
     {
-        const float RequestedOffsetDeg = FMath::Clamp(P2_6CavalryHeightTraceAngularOffsetDeg, 0.0f, 15.0f);
-        if (RequestedOffsetDeg > KINDA_SMALL_NUMBER)
+        // Terrain height determines the standing position, while piece orientation
+        // remains radial so visual slope normals never tilt animated characters.
+        WorldPosition = Surface.WorldPosition + WorldUp * FMath::Max(0.0f, P1PieceRadiusOffsetCM);
+    }
+    else
+    {
+        FVector TraceWorldUp = WorldUp;
+        float TraceAngularOffsetDeg = 0.0f;
+        if (PieceType == ETerraGameplayPieceType::Cavalry || PieceType == ETerraGameplayPieceType::ArcherCavalry)
         {
-            const FVector RotationAxis = FVector::CrossProduct(WorldUp, WorldForward).GetSafeNormal();
-            if (!RotationAxis.IsNearlyZero())
+            const float RequestedOffsetDeg = FMath::Clamp(P2_6CavalryHeightTraceAngularOffsetDeg, 0.0f, 15.0f);
+            if (RequestedOffsetDeg > KINDA_SMALL_NUMBER)
             {
-                TraceWorldUp = WorldUp.RotateAngleAxis(RequestedOffsetDeg, RotationAxis).GetSafeNormal();
-                TraceAngularOffsetDeg = RequestedOffsetDeg;
+                const FVector RotationAxis = FVector::CrossProduct(WorldUp, WorldForward).GetSafeNormal();
+                if (!RotationAxis.IsNearlyZero())
+                {
+                    TraceWorldUp = WorldUp.RotateAngleAxis(RequestedOffsetDeg, RotationAxis).GetSafeNormal();
+                    TraceAngularOffsetDeg = RequestedOffsetDeg;
+                }
             }
+        }
+
+        if (!TryResolvePieceHeightFromHISM(CellId, TraceWorldUp, WorldUp, TraceAngularOffsetDeg, WorldPosition))
+        {
+            const FVector LocalPosition = LocalUp * (Host->GlobeRadiusCM + FMath::Max(0.0f, P1PieceRadiusOffsetCM));
+            WorldPosition = ActorTransform.TransformPosition(LocalPosition);
         }
     }
 
-    FVector WorldPosition = FVector::ZeroVector;
-    if (!TryResolvePieceHeightFromHISM(CellId, TraceWorldUp, WorldUp, TraceAngularOffsetDeg, WorldPosition))
-    {
-        const FVector LocalPosition = LocalUp * (Host->GlobeRadiusCM + FMath::Max(0.0f, P1PieceRadiusOffsetCM));
-        WorldPosition = ActorTransform.TransformPosition(LocalPosition);
-    }
-
-    OutWorldTransform = FTransform(FRotationMatrix::MakeFromXZ(WorldForward, WorldUp).ToQuat(), WorldPosition, FVector::OneVector);
+    const FVector SurfaceForward = FVector::VectorPlaneProject(WorldForward, SurfaceUp).GetSafeNormal();
+    OutWorldTransform = FTransform(FRotationMatrix::MakeFromXZ(SurfaceForward.IsNearlyZero() ? WorldForward : SurfaceForward, SurfaceUp).ToQuat(), WorldPosition, FVector::OneVector);
     return true;
 }
 
