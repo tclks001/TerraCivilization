@@ -67,6 +67,13 @@
 			"Enabled": true
 		},
 		{
+			"Name": "TerraTerrainDecorGenerator",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
 			"Name": "AIModuleToolset",
 			"Enabled": true
 		},
