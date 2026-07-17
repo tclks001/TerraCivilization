@@ -344,7 +344,45 @@ void UTerrainVisualSurfaceComponent::SetHighlightMaterial(UMaterialInterface* In
         HighlightMID->SetTextureParameterValue(TEXT("SurfaceRiverLakeLUT"), SurfaceRiverLakeLUT);
         HighlightMID->SetScalarParameterValue(TEXT("RiverSegmentCount"), RiverSegmentCount);
         HighlightMID->SetScalarParameterValue(TEXT("RiverLakeCount"), RiverLakeCount);
+        ApplySurfaceEnhancementParameters_();
     }
+}
+
+void UTerrainVisualSurfaceComponent::SetSurfaceEnhancementParameters(
+    UTexture2D* InGravelColor, UTexture2D* InGravelNormal, UTexture2D* InGravelRoughness,
+    UTexture2D* InMossColor, UTexture2D* InMossNormal, UTexture2D* InMossRoughness,
+    UTexture2D* InRockColor, UTexture2D* InRockNormal, UTexture2D* InRockRoughness,
+    const FLinearColor& InPlainTint, const FLinearColor& InForestTint, const FLinearColor& InMountainTint,
+    float InTileScaleCM, float InTriplanarSharpness, float InNormalStrength)
+{
+    GravelColorTexture = InGravelColor; GravelNormalTexture = InGravelNormal; GravelRoughnessTexture = InGravelRoughness;
+    MossColorTexture = InMossColor; MossNormalTexture = InMossNormal; MossRoughnessTexture = InMossRoughness;
+    RockColorTexture = InRockColor; RockNormalTexture = InRockNormal; RockRoughnessTexture = InRockRoughness;
+    SurfacePlainTint = InPlainTint; SurfaceForestTint = InForestTint; SurfaceMountainTint = InMountainTint;
+    SurfaceTileScaleCM = FMath::Max(InTileScaleCM, 1.0f);
+    SurfaceTriplanarSharpness = FMath::Max(InTriplanarSharpness, 1.0f);
+    SurfaceNormalStrength = FMath::Clamp(InNormalStrength, 0.0f, 2.0f);
+    ApplySurfaceEnhancementParameters_();
+}
+
+void UTerrainVisualSurfaceComponent::ApplySurfaceEnhancementParameters_()
+{
+    if (!HighlightMID) return;
+    HighlightMID->SetTextureParameterValue(TEXT("GravelColor"), GravelColorTexture);
+    HighlightMID->SetTextureParameterValue(TEXT("GravelNormal"), GravelNormalTexture);
+    HighlightMID->SetTextureParameterValue(TEXT("GravelRoughness"), GravelRoughnessTexture);
+    HighlightMID->SetTextureParameterValue(TEXT("MossColor"), MossColorTexture);
+    HighlightMID->SetTextureParameterValue(TEXT("MossNormal"), MossNormalTexture);
+    HighlightMID->SetTextureParameterValue(TEXT("MossRoughness"), MossRoughnessTexture);
+    HighlightMID->SetTextureParameterValue(TEXT("RockColor"), RockColorTexture);
+    HighlightMID->SetTextureParameterValue(TEXT("RockNormal"), RockNormalTexture);
+    HighlightMID->SetTextureParameterValue(TEXT("RockRoughness"), RockRoughnessTexture);
+    HighlightMID->SetVectorParameterValue(TEXT("PlainTint"), SurfacePlainTint);
+    HighlightMID->SetVectorParameterValue(TEXT("ForestTint"), SurfaceForestTint);
+    HighlightMID->SetVectorParameterValue(TEXT("MountainTint"), SurfaceMountainTint);
+    HighlightMID->SetScalarParameterValue(TEXT("TerrainTileScaleCM"), SurfaceTileScaleCM);
+    HighlightMID->SetScalarParameterValue(TEXT("TerrainTriplanarSharpness"), SurfaceTriplanarSharpness);
+    HighlightMID->SetScalarParameterValue(TEXT("TerrainNormalStrength"), SurfaceNormalStrength);
 }
 
 void UTerrainVisualSurfaceComponent::SetHighlightParameters(

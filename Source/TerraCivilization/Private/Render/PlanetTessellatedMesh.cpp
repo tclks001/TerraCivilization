@@ -466,6 +466,12 @@ void APlanetTessellatedMesh::RebuildTerrainVisualSurface_()
     }
     TerrainVisualSurfaceComp->SetHighlightMaterial(
         TerrainVisualSurfaceMaterial ? TerrainVisualSurfaceMaterial.Get() : TerrainVisualHighlightMaterial.Get());
+    TerrainVisualSurfaceComp->SetSurfaceEnhancementParameters(
+        TerrainVisualGravelColor, TerrainVisualGravelNormal, TerrainVisualGravelRoughness,
+        TerrainVisualMossColor, TerrainVisualMossNormal, TerrainVisualMossRoughness,
+        TerrainVisualRockColor, TerrainVisualRockNormal, TerrainVisualRockRoughness,
+        TerrainVisualPlainTint, TerrainVisualForestTint, TerrainVisualMountainTint,
+        TerrainVisualTileScaleCM, TerrainVisualTriplanarSharpness, TerrainVisualNormalStrength);
     TerrainVisualSurfaceComp->SetHighlightParameters(
         GetPlanetCenterWorld_(),
         TerrainVisualBaseGroundColor,

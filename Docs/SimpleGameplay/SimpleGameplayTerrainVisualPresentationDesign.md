@@ -106,6 +106,8 @@ SDF 在本文中是**地表材质**技术，不是体素几何生成器。材质
 
 高亮复用 `HexHighlightInteractionPlan.md` 的双通道 LUT 状态语义和 `SphericalSDFTerrainDesign.md` 的球面 Hex/Pent 边界数学；渲染目标改为连续表面材质。后处理不是主路径。
 
+> **离散地形类别混合规则**：`SurfaceTerrainLUT` 的地形类别通道是离散标签，不是可插值的物理量。材质必须先对每个候选 Cell 的类别值解码为 Plain/Forest/Mountain 三个 one-hot 掩码，再以对应的 Cell SDF 权重混合三个掩码；禁止先插值类别编码、再通过阈值重新分类。后者会把 Plain/Mountain 的过渡数值错误映射为 Forest，并使视觉颜色过渡偏离真实 Cell 边界和高亮边界。本规则是后续所有连续地表材质混合的基准；历史分阶段设计稿不逐一回改。
+
 水体先以地表材质表现低洼湿润、溪流、浅水、岸边泡沫和波纹；若以后需要反射、独立波面和严格海平面遮挡，再增加无碰撞的连续水壳。水壳不得参与点击、Cell 查询或棋子高度。
 
 ### 3.4 HISM Decor

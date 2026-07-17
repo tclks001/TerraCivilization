@@ -95,6 +95,23 @@ public:
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV3 Surface")
     TObjectPtr<UMaterialInterface> TerrainVisualSurfaceMaterial;
 
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV6-A Surface Enhancement") TObjectPtr<UTexture2D> TerrainVisualGravelColor;
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV6-A Surface Enhancement") TObjectPtr<UTexture2D> TerrainVisualGravelNormal;
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV6-A Surface Enhancement") TObjectPtr<UTexture2D> TerrainVisualGravelRoughness;
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV6-A Surface Enhancement") TObjectPtr<UTexture2D> TerrainVisualMossColor;
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV6-A Surface Enhancement") TObjectPtr<UTexture2D> TerrainVisualMossNormal;
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV6-A Surface Enhancement") TObjectPtr<UTexture2D> TerrainVisualMossRoughness;
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV6-A Surface Enhancement") TObjectPtr<UTexture2D> TerrainVisualRockColor;
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV6-A Surface Enhancement") TObjectPtr<UTexture2D> TerrainVisualRockNormal;
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV6-A Surface Enhancement") TObjectPtr<UTexture2D> TerrainVisualRockRoughness;
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV6-A Surface Enhancement") FLinearColor TerrainVisualPlainTint = FLinearColor(0.72f, 0.82f, 0.48f, 1.0f);
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV6-A Surface Enhancement") FLinearColor TerrainVisualForestTint = FLinearColor(0.18f, 0.42f, 0.20f, 1.0f);
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV6-A Surface Enhancement") FLinearColor TerrainVisualMountainTint = FLinearColor(0.48f, 0.42f, 0.34f, 1.0f);
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV6-A Surface Enhancement", meta = (ClampMin = "50.0", ClampMax = "5000.0")) float TerrainVisualTileScaleCM = 450.0f;
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV6-A Surface Enhancement", meta = (ClampMin = "1.0", ClampMax = "16.0")) float TerrainVisualTriplanarSharpness = 4.0f;
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV6-A Surface Enhancement", meta = (ClampMin = "0.0", ClampMax = "2.0")) float TerrainVisualNormalStrength = 0.55f;
+
     /** SV4：山地 SDF 距离场的最大宏观径向高度，只影响视觉表现。 */
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV4 Macro Height", meta = (ClampMin = "0.0", ClampMax = "10000.0"))
     float TerrainVisualMountainHeightCM = 2400.0f;

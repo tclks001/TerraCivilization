@@ -31,6 +31,12 @@ public:
     bool InitializeTerrainResources(const TArray<FCellGeoData>& GeoCells, int32 VisualSeed);
     bool InitializeRiverResources(const FTerrainVisualRiverSystem& RiverSystem);
     void SetHighlightMaterial(UMaterialInterface* InMaterial);
+    void SetSurfaceEnhancementParameters(
+        UTexture2D* GravelColor, UTexture2D* GravelNormal, UTexture2D* GravelRoughness,
+        UTexture2D* MossColor, UTexture2D* MossNormal, UTexture2D* MossRoughness,
+        UTexture2D* RockColor, UTexture2D* RockNormal, UTexture2D* RockRoughness,
+        const FLinearColor& PlainTint, const FLinearColor& ForestTint, const FLinearColor& MountainTint,
+        float TileScaleCM, float TriplanarSharpness, float NormalStrength);
     void SetHighlightParameters(
         const FVector& PlanetCenter,
         const FLinearColor& BaseGroundColor,
@@ -67,7 +73,25 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<UMaterialInstanceDynamic> HighlightMID;
 
+    UPROPERTY(Transient) TObjectPtr<UTexture2D> GravelColorTexture;
+    UPROPERTY(Transient) TObjectPtr<UTexture2D> GravelNormalTexture;
+    UPROPERTY(Transient) TObjectPtr<UTexture2D> GravelRoughnessTexture;
+    UPROPERTY(Transient) TObjectPtr<UTexture2D> MossColorTexture;
+    UPROPERTY(Transient) TObjectPtr<UTexture2D> MossNormalTexture;
+    UPROPERTY(Transient) TObjectPtr<UTexture2D> MossRoughnessTexture;
+    UPROPERTY(Transient) TObjectPtr<UTexture2D> RockColorTexture;
+    UPROPERTY(Transient) TObjectPtr<UTexture2D> RockNormalTexture;
+    UPROPERTY(Transient) TObjectPtr<UTexture2D> RockRoughnessTexture;
+
+    FLinearColor SurfacePlainTint = FLinearColor::White;
+    FLinearColor SurfaceForestTint = FLinearColor::White;
+    FLinearColor SurfaceMountainTint = FLinearColor::White;
+    float SurfaceTileScaleCM = 450.0f;
+    float SurfaceTriplanarSharpness = 4.0f;
+    float SurfaceNormalStrength = 0.55f;
+
     void UploadHighlightTexture_(int32 CellId = INDEX_NONE);
+    void ApplySurfaceEnhancementParameters_();
     bool FindLogicalCellsForSurfaceTriangle_(
         const FSphereTopology& SurfaceTopology,
         const FSphereTopology& CellTopology,
