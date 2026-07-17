@@ -233,3 +233,65 @@ float sum=max(PlainMask+ForestMask+RockMask,1e-5);float land=(g*PlainMask+m*Fore
 2. Forest 有 Moss002 覆盖，Plain/沟谷有 Gravel042，陡峭 Mountain 有 Rock038。
 3. River 高亮、湿润带与 SV5 流水法线继续工作。
 4. 关闭或移除所有 HISM 后，连续表面仍有可信的中距离材质细节。
+
+## 8. SV6-A.1：地表受光参数校准
+
+### 8.1 目标与边界
+
+本小阶段只校准连续基础表面的 PBR 受光，解决陆地因粗糙度贴图低值、法线过强而产生的湿亮或塑料感。它不改变地形分类、SDF、河流、高亮、光源、大气、曝光或 Gameplay；山脊 HISM 使用独立材质，不受本阶段参数控制，须另行检查其粗糙度和 Specular。
+
+背光侧过暗属于后续行星光照与大气散射阶段的职责，不能用降低陆地粗糙度或提高 Specular 来补偿。本阶段的合格标准是让向光侧的陆地高光收敛、保留岩石层次，并使河流水面仍明显区别于陆地。
+
+### 8.2 新增材质参数
+
+在 `M_TerrainVisual_SurfaceTerrain` 或其材质实例中创建下列 `Scalar Parameter`。最小值和最大值用于将各纹理采样结果重映射到可信的物理粗糙度区间，避免贴图中的极暗像素直接变成镜面反射。
+
+| 参数 | 默认 | 初始可调范围 | 说明 |
+| --- | ---: | ---: | --- |
+| `PlainRoughnessMin` | `0.76` | `0.68-0.88` | Gravel042 的最低陆地粗糙度。 |
+| `PlainRoughnessMax` | `0.92` | `0.82-1.00` | Gravel042 的最高陆地粗糙度。 |
+| `ForestRoughnessMin` | `0.82` | `0.74-0.94` | Moss002 的最低陆地粗糙度。 |
+| `ForestRoughnessMax` | `0.96` | `0.88-1.00` | Moss002 的最高陆地粗糙度。 |
+| `RockRoughnessMin` | `0.62` | `0.50-0.78` | Rock038 的最低粗糙度；不要低到形成湿岩般尖锐高光。 |
+| `RockRoughnessMax` | `0.84` | `0.72-0.96` | Rock038 的最高粗糙度。 |
+| `WetRoughnessScale` | `0.82` | `0.70-0.94` | 岸边湿润带对陆地粗糙度的乘数。 |
+| `RiverRoughness` | `0.18` | `0.10-0.32` | 保持 SV5 水面与陆地的区分。 |
+| `TerrainLandSpecular` | `0.25` | `0.18-0.35` | 非水区域的 Specular。 |
+| `RiverSpecular` | `0.50` | `0.35-0.65` | 水面的 Specular。 |
+| `TerrainNormalStrength` | `0.50` | `0.35-0.60` | 沿用第 6.1 节。法线越强，高光越碎且越亮。 |
+
+所有 `*Min` 必须小于等于同类 `*Max`。参数应先在材质实例调试，确认范围后再决定是否改默认值；不需要 C++ 注入。
+
+### 8.3 替换粗糙度 Custom
+
+将第 6.2 节的 Roughness Custom 替换为以下版本，并在原输入基础上新增表中除 `TerrainLandSpecular`、`RiverSpecular` 外的所有粗糙度参数输入，类型均为 `Float1`。`TerrainLandSpecular` 与 `RiverSpecular` 不进入此节点。
+
+```hlsl
+float3 n=abs(normalize(NormalWS));n=pow(n,max(Sharpness,1));n/=max(n.x+n.y+n.z,1e-5);
+float3 ux=float3(WorldPos.yz/max(TileScaleCM,1),0),uy=float3(WorldPos.xz/max(TileScaleCM,1),0),uz=float3(WorldPos.xy/max(TileScaleCM,1),0);
+float g=GravelRoughness.SampleLevel(GravelRoughnessSampler,ux,0).r*n.x+GravelRoughness.SampleLevel(GravelRoughnessSampler,uy,0).r*n.y+GravelRoughness.SampleLevel(GravelRoughnessSampler,uz,0).r*n.z;
+float m=MossRoughness.SampleLevel(MossRoughnessSampler,ux,0).r*n.x+MossRoughness.SampleLevel(MossRoughnessSampler,uy,0).r*n.y+MossRoughness.SampleLevel(MossRoughnessSampler,uz,0).r*n.z;
+float r=RockRoughness.SampleLevel(RockRoughnessSampler,ux,0).r*n.x+RockRoughness.SampleLevel(RockRoughnessSampler,uy,0).r*n.y+RockRoughness.SampleLevel(RockRoughnessSampler,uz,0).r*n.z;
+g=lerp(PlainRoughnessMin,PlainRoughnessMax,saturate(g));m=lerp(ForestRoughnessMin,ForestRoughnessMax,saturate(m));r=lerp(RockRoughnessMin,RockRoughnessMax,saturate(r));
+float sum=max(PlainMask+ForestMask+RockMask,1e-5);float land=(g*PlainMask+m*ForestMask+r*RockMask)/sum;land=saturate(land*lerp(1,WetRoughnessScale,WetMask));return lerp(land,RiverRoughness,WaterMask);
+```
+
+### 8.4 Specular 节点
+
+1. 创建 `Scalar Parameter`：`TerrainLandSpecular`，默认 `0.25`。
+2. 创建 `Scalar Parameter`：`RiverSpecular`，默认 `0.50`。
+3. 创建 `LinearInterpolate`，命名为 `Lerp_SurfaceSpecular`：
+   - `A` 接 `TerrainLandSpecular`。
+   - `B` 接 `RiverSpecular`。
+   - `Alpha` 接主 Custom 的 `OutWaterMask`。
+4. 将输出接入主材质 `Specular`。
+
+不要把 `Specular` 接到 `OutWetMask`。湿润带只通过第 8.3 节略降粗糙度表现潮湿；若它和水面同样强烈反光，会重新产生河岸油亮感。
+
+### 8.5 调参顺序与验收
+
+1. 临时将 `TerrainNormalStrength` 设为 `0.35`，先仅调三类 `RoughnessMin/Max`；以向光的平原、森林、岩脊为观察面，确保白色镜面斑块已显著收敛。
+2. 固定粗糙度后，把 `TerrainNormalStrength` 从 `0.35` 缓慢提高，通常不超过 `0.60`；一旦岩层高光变成密集白点即回退。
+3. 最后调 `TerrainLandSpecular`，默认从 `0.25` 开始；它只做小幅修正，不用于补亮背光侧。
+4. 在河流旁复查：水面应仍有清晰流动高光，湿润带只比干地略深、略亮，不应和水面混淆。
+5. 分别关闭连续表面和 HISM 山脊观察。若尖峰/山脊资产仍有刺眼白斑，问题在 HISM 资产材质，应在 SV6 HISM Decor 阶段单独校准。
