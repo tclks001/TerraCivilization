@@ -2,6 +2,7 @@
 
 #include "TerrainSurfaceQuery.h"
 #include "TerrainVisualField.h"
+#include "TerrainVisualRiverSystem.h"
 
 class FSphereTopology;
 struct FCellGeoData;
@@ -25,8 +26,10 @@ public:
     virtual FTerrainSurfaceQueryResult QueryBaseSurface(const FVector& UnitDirection) const override;
     int32 ResolveCellId(const FVector& UnitDirection) const;
     void SetContinuousSurfaceAvailable(bool bAvailable);
+    const FTerrainVisualRiverSystem& GetRiverSystem() const { return RiverSystem; }
 
 private:
     FTerrainVisualField VisualField;
+    FTerrainVisualRiverSystem RiverSystem;
     FTerrainVisualDiagnostics Diagnostics;
 };

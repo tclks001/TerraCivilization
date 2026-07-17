@@ -2,6 +2,7 @@
 
 #include "FSphereTopology.h"
 #include "TerrainSurfaceQuery.h"
+#include "TerrainVisualRiverSystem.h"
 #include "CellGeoData.h"
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -284,6 +285,51 @@ bool UTerrainVisualSurfaceComponent::InitializeTerrainResources(const TArray<FCe
     return true;
 }
 
+bool UTerrainVisualSurfaceComponent::InitializeRiverResources(const FTerrainVisualRiverSystem& RiverSystem)
+{
+    auto CreateFloatLUT = [](const TArray<FLinearColor>& Pixels, const TCHAR* Name) -> UTexture2D*
+    {
+        UTexture2D* Texture = UTexture2D::CreateTransient(Pixels.Num(), 1, PF_A32B32G32R32F, Name);
+        if (!Texture) return nullptr;
+        Texture->Filter = TF_Nearest; Texture->SRGB = false; Texture->NeverStream = true;
+        Texture->MipGenSettings = TMGS_NoMipmaps; Texture->CompressionSettings = TC_VectorDisplacementmap;
+        FTexturePlatformData* Data = Texture->GetPlatformData();
+        float* Dest = Data ? static_cast<float*>(Data->Mips[0].BulkData.Lock(LOCK_READ_WRITE)) : nullptr;
+        if (!Dest) return nullptr;
+        for (int32 Index = 0; Index < Pixels.Num(); ++Index)
+        {
+            Dest[Index * 4] = Pixels[Index].R; Dest[Index * 4 + 1] = Pixels[Index].G;
+            Dest[Index * 4 + 2] = Pixels[Index].B; Dest[Index * 4 + 3] = Pixels[Index].A;
+        }
+        Data->Mips[0].BulkData.Unlock(); Texture->UpdateResource(); return Texture;
+    };
+    TArray<FLinearColor> SegmentPixels;
+    for (const FTerrainVisualRiverSegment& Segment : RiverSystem.GetSegments())
+    {
+        SegmentPixels.Emplace(Segment.StartUnit.X, Segment.StartUnit.Y, Segment.StartUnit.Z, Segment.StartWidthRad);
+        SegmentPixels.Emplace(Segment.EndUnit.X, Segment.EndUnit.Y, Segment.EndUnit.Z, Segment.EndWidthRad);
+    }
+    TArray<FLinearColor> LakePixels;
+    for (const FTerrainVisualRiverLake& Lake : RiverSystem.GetTerminalLakes())
+    {
+        LakePixels.Emplace(Lake.CenterUnit.X, Lake.CenterUnit.Y, Lake.CenterUnit.Z, Lake.RadiusAlongRad);
+        LakePixels.Emplace(Lake.FlowAxisUnit.X, Lake.FlowAxisUnit.Y, Lake.FlowAxisUnit.Z, Lake.RadiusAcrossRad);
+    }
+    SurfaceRiverSegmentLUT = CreateFloatLUT(SegmentPixels.IsEmpty() ? TArray<FLinearColor>{FLinearColor::Transparent, FLinearColor::Transparent} : SegmentPixels, TEXT("SurfaceRiverSegmentLUT_Transient"));
+    SurfaceRiverLakeLUT = CreateFloatLUT(LakePixels.IsEmpty() ? TArray<FLinearColor>{FLinearColor::Transparent, FLinearColor::Transparent} : LakePixels, TEXT("SurfaceRiverLakeLUT_Transient"));
+    if (!SurfaceRiverSegmentLUT || !SurfaceRiverLakeLUT) return false;
+    RiverSegmentCount = RiverSystem.GetSegments().Num();
+    RiverLakeCount = RiverSystem.GetTerminalLakes().Num();
+    if (HighlightMID)
+    {
+        HighlightMID->SetTextureParameterValue(TEXT("SurfaceRiverSegmentLUT"), SurfaceRiverSegmentLUT);
+        HighlightMID->SetTextureParameterValue(TEXT("SurfaceRiverLakeLUT"), SurfaceRiverLakeLUT);
+        HighlightMID->SetScalarParameterValue(TEXT("RiverSegmentCount"), RiverSegmentCount);
+        HighlightMID->SetScalarParameterValue(TEXT("RiverLakeCount"), RiverLakeCount);
+    }
+    return true;
+}
+
 void UTerrainVisualSurfaceComponent::SetHighlightMaterial(UMaterialInterface* InMaterial)
 {
     HighlightMID = InMaterial ? CreateDynamicMaterialInstance(1, InMaterial) : nullptr;
@@ -294,6 +340,10 @@ void UTerrainVisualSurfaceComponent::SetHighlightMaterial(UMaterialInterface* In
         HighlightMID->SetTextureParameterValue(TEXT("SurfaceCellDirectionLUT"), SurfaceCellDirectionLUT);
         HighlightMID->SetTextureParameterValue(TEXT("SurfaceHighlightLUT"), SurfaceHighlightLUT);
         HighlightMID->SetTextureParameterValue(TEXT("SurfaceTerrainLUT"), SurfaceTerrainLUT);
+        HighlightMID->SetTextureParameterValue(TEXT("SurfaceRiverSegmentLUT"), SurfaceRiverSegmentLUT);
+        HighlightMID->SetTextureParameterValue(TEXT("SurfaceRiverLakeLUT"), SurfaceRiverLakeLUT);
+        HighlightMID->SetScalarParameterValue(TEXT("RiverSegmentCount"), RiverSegmentCount);
+        HighlightMID->SetScalarParameterValue(TEXT("RiverLakeCount"), RiverLakeCount);
     }
 }
 

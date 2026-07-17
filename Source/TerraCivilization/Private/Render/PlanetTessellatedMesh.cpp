@@ -395,6 +395,18 @@ void APlanetTessellatedMesh::RebuildTerrainVisualSurface_()
     VisualConfig.MediumFrequencyNoiseFrequency = TerrainVisualMediumFrequencyNoiseFrequency;
     VisualConfig.ErosionDomainWarpAmplitude = TerrainVisualErosionDomainWarpAmplitude;
     VisualConfig.ErosionValleySharpness = TerrainVisualErosionValleySharpness;
+    VisualConfig.bEnableDecorativeRivers = bEnableTerrainVisualDecorativeRivers;
+    VisualConfig.RiverSourceCount = TerrainVisualRiverSourceCount;
+    VisualConfig.RiverTerminalBasinCount = TerrainVisualRiverTerminalBasinCount;
+    VisualConfig.RiverMinPathCells = TerrainVisualRiverMinPathCells;
+    VisualConfig.RiverMaxPathCells = TerrainVisualRiverMaxPathCells;
+    VisualConfig.RiverTerminalLakeMinDischarge = TerrainVisualRiverTerminalLakeMinDischarge;
+    VisualConfig.RiverMinWidthCM = TerrainVisualRiverMinWidthCM;
+    VisualConfig.RiverWidthScaleCM = TerrainVisualRiverWidthScaleCM;
+    VisualConfig.RiverLengthWidthGrowthCM = TerrainVisualRiverLengthWidthGrowthCM;
+    VisualConfig.RiverLakeLengthMultiplier = TerrainVisualRiverLakeLengthMultiplier;
+    VisualConfig.RiverLakeWidthMultiplier = TerrainVisualRiverLakeWidthMultiplier;
+    VisualConfig.RiverMaxLakeRadiusFraction = TerrainVisualRiverMaxLakeRadiusFraction;
 
     if (!TerrainVisualCoordinator.IsValid())
     {
@@ -447,6 +459,10 @@ void APlanetTessellatedMesh::RebuildTerrainVisualSurface_()
     if (!TerrainVisualSurfaceComp->InitializeTerrainResources(Generator->GetCellData(), VisualConfig.GlobalVisualSeed))
     {
         UE_LOG(LogPlanetTess, Warning, TEXT("[TerrainVisual][SV3] Failed to initialize terrain LUT resources."));
+    }
+    if (!TerrainVisualSurfaceComp->InitializeRiverResources(TerrainVisualCoordinator->GetRiverSystem()))
+    {
+        UE_LOG(LogPlanetTess, Warning, TEXT("[TerrainVisual][SV5] Failed to initialize river LUT resources."));
     }
     TerrainVisualSurfaceComp->SetHighlightMaterial(
         TerrainVisualSurfaceMaterial ? TerrainVisualSurfaceMaterial.Get() : TerrainVisualHighlightMaterial.Get());

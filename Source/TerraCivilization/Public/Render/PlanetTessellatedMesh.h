@@ -133,6 +133,42 @@ public:
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV4.5 Medium Frequency", meta = (ClampMin = "0.5", ClampMax = "8.0"))
     float TerrainVisualErosionValleySharpness = 2.2f;
 
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV5 Decorative Rivers")
+    bool bEnableTerrainVisualDecorativeRivers = true;
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV5 Decorative Rivers", meta = (ClampMin = "0", ClampMax = "16"))
+    int32 TerrainVisualRiverSourceCount = 10;
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV5 Decorative Rivers", meta = (ClampMin = "1", ClampMax = "4"))
+    int32 TerrainVisualRiverTerminalBasinCount = 2;
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV5 Decorative Rivers", meta = (ClampMin = "2", ClampMax = "32"))
+    int32 TerrainVisualRiverMinPathCells = 6;
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV5 Decorative Rivers", meta = (ClampMin = "2", ClampMax = "64"))
+    int32 TerrainVisualRiverMaxPathCells = 48;
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV5 Decorative Rivers", meta = (ClampMin = "1", ClampMax = "16"))
+    int32 TerrainVisualRiverTerminalLakeMinDischarge = 2;
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV5 Decorative Rivers", meta = (ClampMin = "1.0", ClampMax = "500.0"))
+    float TerrainVisualRiverMinWidthCM = 70.0f;
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV5 Decorative Rivers", meta = (ClampMin = "0.0", ClampMax = "300.0"))
+    float TerrainVisualRiverWidthScaleCM = 45.0f;
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV5 Decorative Rivers", meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float TerrainVisualRiverLengthWidthGrowthCM = 8.0f;
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV5 Decorative Rivers", meta = (ClampMin = "1.0", ClampMax = "8.0"))
+    float TerrainVisualRiverLakeLengthMultiplier = 3.2f;
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV5 Decorative Rivers", meta = (ClampMin = "1.0", ClampMax = "8.0"))
+    float TerrainVisualRiverLakeWidthMultiplier = 2.4f;
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV5 Decorative Rivers", meta = (ClampMin = "0.05", ClampMax = "0.25"))
+    float TerrainVisualRiverMaxLakeRadiusFraction = 0.25f;
+
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV2 Highlight")
     FLinearColor TerrainVisualBaseGroundColor = FLinearColor(0.08f, 0.10f, 0.06f, 1.0f);
 

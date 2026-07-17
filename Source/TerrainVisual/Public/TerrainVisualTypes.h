@@ -34,6 +34,20 @@ struct TERRAINVISUAL_API FTerrainVisualConfig
     float MediumFrequencyNoiseFrequency = 5.5f;
     float ErosionDomainWarpAmplitude = 0.42f;
     float ErosionValleySharpness = 2.2f;
+
+    // SV5: visual-only river DAG and material SDF parameters.
+    bool bEnableDecorativeRivers = true;
+    int32 RiverSourceCount = 6;
+    int32 RiverMaxPathCells = 48;
+    int32 RiverTerminalBasinCount = 2;
+    int32 RiverMinPathCells = 6;
+    int32 RiverTerminalLakeMinDischarge = 2;
+    float RiverMinWidthCM = 70.0f;
+    float RiverWidthScaleCM = 45.0f;
+    float RiverLengthWidthGrowthCM = 8.0f;
+    float RiverLakeLengthMultiplier = 3.2f;
+    float RiverLakeWidthMultiplier = 2.4f;
+    float RiverMaxLakeRadiusFraction = 0.25f;
 };
 
 struct TERRAINVISUAL_API FTerrainSurfaceQueryResult

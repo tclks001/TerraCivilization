@@ -10,6 +10,7 @@ class ITerrainSurfaceQuery;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 class UTexture2D;
+class FTerrainVisualRiverSystem;
 
 UCLASS(ClassGroup=(TerrainVisual), meta=(BlueprintSpawnableComponent))
 class TERRAINVISUAL_API UTerrainVisualSurfaceComponent : public UProceduralMeshComponent
@@ -28,6 +29,7 @@ public:
 
     bool InitializeHighlightResources(const FSphereTopology& CellTopology);
     bool InitializeTerrainResources(const TArray<FCellGeoData>& GeoCells, int32 VisualSeed);
+    bool InitializeRiverResources(const FTerrainVisualRiverSystem& RiverSystem);
     void SetHighlightMaterial(UMaterialInterface* InMaterial);
     void SetHighlightParameters(
         const FVector& PlanetCenter,
@@ -45,6 +47,8 @@ private:
     bool bHasBuiltSurface = false;
     int32 BuiltSubdivisionLevel = INDEX_NONE;
     int32 HighlightCellCount = 0;
+    int32 RiverSegmentCount = 0;
+    int32 RiverLakeCount = 0;
     TArray<FColor> HighlightPixels;
 
     UPROPERTY(Transient)
@@ -55,6 +59,10 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UTexture2D> SurfaceTerrainLUT;
+    UPROPERTY(Transient)
+    TObjectPtr<UTexture2D> SurfaceRiverSegmentLUT;
+    UPROPERTY(Transient)
+    TObjectPtr<UTexture2D> SurfaceRiverLakeLUT;
 
     UPROPERTY(Transient)
     TObjectPtr<UMaterialInstanceDynamic> HighlightMID;

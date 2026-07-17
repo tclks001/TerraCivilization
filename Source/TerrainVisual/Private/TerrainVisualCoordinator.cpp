@@ -28,6 +28,7 @@ bool FTerrainVisualCoordinator::Initialize(
     }
 
     Diagnostics.bInitialized = true;
+    RiverSystem.Build(InCellTopology, InGeoCells, *this, InConfig);
     Diagnostics.bCanActivateContinuousSurface = false;
     if (InConfig.bEnableDiagnostics)
     {
@@ -45,6 +46,7 @@ bool FTerrainVisualCoordinator::Initialize(
 void FTerrainVisualCoordinator::Reset()
 {
     VisualField.Reset();
+    RiverSystem.Reset();
     Diagnostics = FTerrainVisualDiagnostics();
 }
 
