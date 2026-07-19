@@ -46,6 +46,17 @@ FPlanetHISMHighlightConfig UPlanetHISMInteractionComponent::BuildHighlightConfig
     return Config;
 }
 
+FPlanetHISMHighlightConfig UPlanetHISMInteractionComponent::BuildRuntimeHighlightConfig_() const
+{
+    FPlanetHISMHighlightConfig Config = BuildHighlightConfig();
+    if (const APlanetTessellatedMesh* Host = GetHost(); Host && Host->IsHISMSDFTerrainVisualActive())
+    {
+        // SV7 keeps the renderer's hover state machine but routes visible highlights through SurfaceHighlightLUT.
+        Config.bEnableInstanceHighlight = false;
+    }
+    return Config;
+}
+
 void UPlanetHISMInteractionComponent::PrepareHighlightComponents()
 {
     if (APlanetTessellatedMesh* Host = GetHost())
@@ -77,11 +88,19 @@ void UPlanetHISMInteractionComponent::TickHoverFade(float DeltaSeconds)
 {
     if (APlanetTessellatedMesh* Host = GetHost())
     {
+        const int32 OldHoverCellId = Host->HISMTileRenderer.GetCurrentHoverCellId();
         Host->HISMTileRenderer.TickHoverFade(
             DeltaSeconds,
             HISMHoverFadeDuration,
-            BuildHighlightConfig(),
+            BuildRuntimeHighlightConfig_(),
             Host->GetPlanetGameplayComponent() ? Host->GetPlanetGameplayComponent()->GetGameplayContainer() : nullptr);
+
+        if (Host->UsesTerrainVisualHighlightLUT_()
+            && OldHoverCellId != Host->HISMTileRenderer.GetCurrentHoverCellId())
+        {
+            Host->WriteTerrainVisualHighlightForCell_(OldHoverCellId);
+            Host->RefreshTerrainVisualCapturePreviewCells_(OldHoverCellId);
+        }
     }
 }
 
@@ -97,13 +116,39 @@ bool UPlanetHISMInteractionComponent::TryResolveHISMHitToCellId(const FHitResult
     return Host->HISMTileRenderer.TryResolveHitToCellId(Hit, Host->bEnableHISMTileCollision, OutCellId);
 }
 
+bool UPlanetHISMInteractionComponent::TryResolveInteractionHitToCellId_(const FHitResult& Hit, int32& OutCellId) const
+{
+    APlanetTessellatedMesh* Host = GetHost();
+    if (!Host)
+    {
+        OutCellId = INDEX_NONE;
+        return false;
+    }
+
+    if (!Host->IsHISMSDFTerrainVisualActive())
+    {
+        return TryResolveHISMHitToCellId(Hit, OutCellId);
+    }
+
+    if (!Host->bEnableHISMTileCollision
+        || Hit.GetActor() != Host
+        || !Hit.GetComponent()
+        || Hit.GetComponent()->GetCollisionEnabled() == ECollisionEnabled::NoCollision)
+    {
+        OutCellId = INDEX_NONE;
+        return false;
+    }
+
+    return Host->ResolveTerrainCellFromWorldPosition(Hit.ImpactPoint, OutCellId);
+}
+
 void UPlanetHISMInteractionComponent::WriteHISMHighlightForCell(int32 CellId, bool bMarkRenderStateDirty)
 {
     if (APlanetTessellatedMesh* Host = GetHost())
     {
         Host->HISMTileRenderer.WriteHighlightForCell(
             CellId,
-            BuildHighlightConfig(),
+            BuildRuntimeHighlightConfig_(),
             Host->GetPlanetGameplayComponent() ? Host->GetPlanetGameplayComponent()->GetGameplayContainer() : nullptr,
             bMarkRenderStateDirty);
     }
@@ -139,7 +184,7 @@ void UPlanetHISMInteractionComponent::UpdateHISMHoverCell(int32 NewCellId)
         Host->HISMTileRenderer.UpdateHoverCell(
             NewCellId,
             HISMHoverFadeDuration,
-            BuildHighlightConfig(),
+            BuildRuntimeHighlightConfig_(),
             Host->GetPlanetGameplayComponent() ? Host->GetPlanetGameplayComponent()->GetGameplayContainer() : nullptr);
     }
 }
@@ -148,12 +193,19 @@ bool UPlanetHISMInteractionComponent::HandleHISMHoverHit(const FHitResult& Hit)
 {
     APlanetTessellatedMesh* Host = GetHost();
     int32 CellId = INDEX_NONE;
-    if (!Host || !TryResolveHISMHitToCellId(Hit, CellId))
+    if (!Host || !TryResolveInteractionHitToCellId_(Hit, CellId))
     {
         return false;
     }
 
-    UpdateHISMHoverCell(CellId);
+    if (Host->IsHISMSDFTerrainVisualActive())
+    {
+        Host->UpdateHISMHoverCell_(CellId);
+    }
+    else
+    {
+        UpdateHISMHoverCell(CellId);
+    }
 
     if (GEngine && CellId != INDEX_NONE && CellId != Host->HISMTileRenderer.GetLastClickedCellId())
     {
@@ -169,13 +221,17 @@ bool UPlanetHISMInteractionComponent::HandleHISMClickHit(const FHitResult& Hit)
 {
     APlanetTessellatedMesh* Host = GetHost();
     int32 CellId = INDEX_NONE;
-    if (!Host || !TryResolveHISMHitToCellId(Hit, CellId))
+    if (!Host || !TryResolveInteractionHitToCellId_(Hit, CellId))
     {
         return false;
     }
 
     Host->HISMTileRenderer.SetLastClickedCellId(CellId);
-    return Host->HandleGameplayCellClick_(CellId, TEXT("HISM Click"), Hit.Item, GetNameSafe(Hit.GetComponent()));
+    return Host->HandleGameplayCellClick_(
+        CellId,
+        Host->IsHISMSDFTerrainVisualActive() ? TEXT("HISM Spatial Projection") : TEXT("HISM Click"),
+        Hit.Item,
+        GetNameSafe(Hit.GetComponent()));
 }
 
 void UPlanetHISMInteractionComponent::ClearHISMHover()
@@ -188,7 +244,7 @@ void UPlanetHISMInteractionComponent::ClearAllHISMHighlights()
     if (APlanetTessellatedMesh* Host = GetHost())
     {
         Host->HISMTileRenderer.ClearAllHighlights(
-            BuildHighlightConfig(),
+            BuildRuntimeHighlightConfig_(),
             Host->GetPlanetGameplayComponent() ? Host->GetPlanetGameplayComponent()->GetGameplayContainer() : nullptr);
     }
 }

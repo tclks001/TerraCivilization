@@ -357,11 +357,6 @@ void FPlanetHISMTileRenderer::UpdateHoverCell(
     const FPlanetHISMHighlightConfig& Config,
     const FTerraGameplayContainer* GameplayContainer)
 {
-    if (!Config.bEnableInstanceHighlight)
-    {
-        return;
-    }
-
     if (NewCellId != INDEX_NONE && !CellIdToInstance.IsValidIndex(NewCellId))
     {
         return;

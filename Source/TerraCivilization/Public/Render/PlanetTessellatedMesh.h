@@ -284,9 +284,13 @@ public:
     UFUNCTION(CallInEditor, Category = "PlanetTopology|Tess")
     void Rebuild();
 
-    /** 尝试把鼠标命中的 HISM 实例解析成 CellId。 */
+    /** 旧兼容路径：按 HISM 实例索引反查 CellId，供 Legacy HISM 与既有棋子高度调试使用。 */
     UFUNCTION(BlueprintCallable, Category = "PlanetTopology|Tess|HISM Highlight")
     bool TryResolveHISMHitToCellId(const FHitResult& Hit, int32& OutCellId) const;
+
+    /** SV7：任意地形表面世界位置按球面方向投影到 Gameplay CellId，不依赖 HISM 实例归属。 */
+    UFUNCTION(BlueprintCallable, Category = "PlanetTopology|Terrain Visual|SV7 Spatial Interaction")
+    bool ResolveTerrainCellFromWorldPosition(const FVector& WorldPosition, int32& OutCellId) const;
 
     /** 输入层 hover 命中 HISM 时调用；成功处理返回 true。 */
     bool HandleHISMHoverHit(const FHitResult& Hit);
@@ -301,6 +305,7 @@ public:
     bool HandleContinuousSurfaceClickHit(const FHitResult& Hit);
 
     bool IsContinuousTerrainVisualActive() const;
+    bool IsHISMSDFTerrainVisualActive() const;
 
     /** 输入层 Tab / Shift+Tab 循环当前阵营可行动棋子时调用；成功处理返回 true。 */
     bool HandleC5NavigateCurrentFactionPiece(bool bReverse);

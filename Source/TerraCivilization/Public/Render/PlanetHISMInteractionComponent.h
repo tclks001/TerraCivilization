@@ -78,4 +78,6 @@ public:
 
 private:
     APlanetTessellatedMesh* GetHost() const;
+    FPlanetHISMHighlightConfig BuildRuntimeHighlightConfig_() const;
+    bool TryResolveInteractionHitToCellId_(const FHitResult& Hit, int32& OutCellId) const;
 };

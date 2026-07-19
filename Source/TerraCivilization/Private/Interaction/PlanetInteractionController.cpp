@@ -144,8 +144,9 @@ void APlanetInteractionController::PlayerTick(float DeltaTime)
     }
 
     const bool bUseHISMHighlightPath = Tess
-        && Tess->GetPlanetHISMInteractionComponent()
-        && Tess->GetPlanetHISMInteractionComponent()->bEnableHISMInstanceHighlight;
+        && (Tess->IsHISMSDFTerrainVisualActive()
+            || (Tess->GetPlanetHISMInteractionComponent()
+                && Tess->GetPlanetHISMInteractionComponent()->bEnableHISMInstanceHighlight));
     const bool bHISMHoverHandled = bHit && Tess && Tess->HandleHISMHoverHit(Hit);
 
     if (bHISMHoverHandled)

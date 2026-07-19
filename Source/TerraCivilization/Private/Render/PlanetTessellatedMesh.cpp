@@ -363,7 +363,7 @@ void APlanetTessellatedMesh::WriteHISMHighlightForCell_(int32 CellId, bool bMark
     if (UsesTerrainVisualHighlightLUT_())
     {
         WriteTerrainVisualHighlightForCell_(CellId);
-        if (IsContinuousTerrainVisualActive())
+        if (IsContinuousTerrainVisualActive() || IsHISMSDFTerrainVisualActive())
         {
             return;
         }
@@ -598,7 +598,7 @@ void APlanetTessellatedMesh::RefreshG4CapturePreviewCellsForActionTarget_(int32 
     if (UsesTerrainVisualHighlightLUT_())
     {
         RefreshTerrainVisualCapturePreviewCells_(ActionTargetCellId);
-        if (IsContinuousTerrainVisualActive())
+        if (IsContinuousTerrainVisualActive() || IsHISMSDFTerrainVisualActive())
         {
             return;
         }
@@ -956,6 +956,26 @@ bool APlanetTessellatedMesh::TryResolveHISMHitToCellId(const FHitResult& Hit, in
         : false;
 }
 
+bool APlanetTessellatedMesh::ResolveTerrainCellFromWorldPosition(const FVector& WorldPosition, int32& OutCellId) const
+{
+    OutCellId = INDEX_NONE;
+    if (!CellTopology.IsValid())
+    {
+        return false;
+    }
+
+    const FVector LocalPosition = GetActorTransform().InverseTransformPosition(WorldPosition);
+    const FVector UnitDirection = LocalPosition.GetSafeNormal();
+    if (UnitDirection.IsNearlyZero())
+    {
+        return false;
+    }
+
+    const FSphereTopologyQuery Query(CellTopology.Get());
+    OutCellId = Query.FindNearestCell(UnitDirection).CellId;
+    return CellTopology->Cells.IsValidIndex(OutCellId);
+}
+
 bool APlanetTessellatedMesh::HandleHISMHoverHit(const FHitResult& Hit)
 {
     return PlanetHISMInteractionComponent
@@ -979,12 +999,18 @@ bool APlanetTessellatedMesh::IsContinuousTerrainVisualActive() const
         && TerrainVisualCoordinator->GetDiagnostics().bCanActivateContinuousSurface;
 }
 
+bool APlanetTessellatedMesh::IsHISMSDFTerrainVisualActive() const
+{
+    return TerrainVisualMode == ETerrainVisualMode::HISMSDFExperiment
+        && TerrainVisualSurfaceComp
+        && TerrainVisualSurfaceComp->HasHighlightResources()
+        && bEnableHISMTileRendering;
+}
+
 bool APlanetTessellatedMesh::UsesTerrainVisualHighlightLUT_() const
 {
     return IsContinuousTerrainVisualActive()
-        || (TerrainVisualMode == ETerrainVisualMode::HISMSDFExperiment
-            && TerrainVisualSurfaceComp
-            && TerrainVisualSurfaceComp->HasHighlightResources());
+        || IsHISMSDFTerrainVisualActive();
 }
 
 bool APlanetTessellatedMesh::TryResolveContinuousSurfaceHitToCellId_(const FHitResult& Hit, int32& OutCellId) const
@@ -1078,15 +1104,16 @@ void APlanetTessellatedMesh::ClearAllHISMHighlights()
 {
     if (UsesTerrainVisualHighlightLUT_())
     {
+        if (PlanetHISMInteractionComponent)
+        {
+            PlanetHISMInteractionComponent->ClearAllHISMHighlights();
+        }
         if (TerrainVisualSurfaceComp)
         {
             TerrainVisualSurfaceComp->ClearHighlightCells();
         }
         RefreshAllTerrainVisualHighlights_();
-        if (IsContinuousTerrainVisualActive())
-        {
-            return;
-        }
+        return;
     }
 
     if (PlanetHISMInteractionComponent)
@@ -1118,8 +1145,9 @@ void APlanetTessellatedMesh::ApplyRenderModeVisibility_()
     ApplyTerrainVisualMode_();
 
     const bool bNeedTick = (PlanetHISMInteractionComponent
-            && PlanetHISMInteractionComponent->bEnableHISMInstanceHighlight
-            && (bEnableHISMTileRendering || IsContinuousTerrainVisualActive()))
+            && ((PlanetHISMInteractionComponent->bEnableHISMInstanceHighlight
+                    && (bEnableHISMTileRendering || IsContinuousTerrainVisualActive()))
+                || IsHISMSDFTerrainVisualActive()))
         || (PlanetGameplayComponent && PlanetGameplayComponent->bEnableG1DebugPieces);
     PrimaryActorTick.SetTickFunctionEnable(bNeedTick);
 }
