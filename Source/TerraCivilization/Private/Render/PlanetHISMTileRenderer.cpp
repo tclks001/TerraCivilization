@@ -92,7 +92,7 @@ void FPlanetHISMTileRenderer::PrepareHighlightComponents(const FPlanetHISMHighli
             return;
         }
 
-        Comp->SetNumCustomDataFloats(4);
+        Comp->SetNumCustomDataFloats(CustomDataFloatCount);
 
         const int32 MaterialCount = Comp->GetNumMaterials();
         for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
@@ -137,6 +137,9 @@ void FPlanetHISMTileRenderer::RebuildInstances(
     PlainComp->SetStaticMesh(Config.PlainTileStaticMesh);
     ForestComp->SetStaticMesh(Config.ForestTileStaticMesh);
     MountainComp->SetStaticMesh(Config.MountainTileStaticMesh);
+    PlainComp->SetNumCustomDataFloats(CustomDataFloatCount);
+    ForestComp->SetNumCustomDataFloats(CustomDataFloatCount);
+    MountainComp->SetNumCustomDataFloats(CustomDataFloatCount);
 
     if (!Config.bEnableRendering)
     {
@@ -226,14 +229,26 @@ void FPlanetHISMTileRenderer::RebuildInstances(
             CellIdToInstance[CellId].InstanceIndex = InstanceIndex;
         }
 
-        if (Config.bEnableInstanceHighlight)
+        for (int32 HighlightIndex = 0; HighlightIndex < CellContextCustomDataOffset; ++HighlightIndex)
         {
-            TargetComp->SetCustomDataValue(InstanceIndex, 0, 0.0f, false);
-            TargetComp->SetCustomDataValue(InstanceIndex, 1, 0.0f, false);
-            TargetComp->SetCustomDataValue(InstanceIndex, 2, 0.0f, false);
-            TargetComp->SetCustomDataValue(InstanceIndex, 3, 0.0f, false);
+            TargetComp->SetCustomDataValue(InstanceIndex, HighlightIndex, 0.0f, false);
+        }
+
+        TargetComp->SetCustomDataValue(InstanceIndex, CellContextCustomDataOffset, static_cast<float>(CellId), false);
+        for (int32 NeighborIndex = 0; NeighborIndex < CellContextCandidateCount - 1; ++NeighborIndex)
+        {
+            const int32 NeighborCellId = CellTopology.Cells[CellId].NeighborCellIds[NeighborIndex];
+            TargetComp->SetCustomDataValue(
+                InstanceIndex,
+                CellContextCustomDataOffset + 1 + NeighborIndex,
+                static_cast<float>(NeighborCellId != INDEX_NONE ? NeighborCellId : CellId),
+                false);
         }
     }
+
+    PlainComp->MarkRenderInstancesDirty();
+    ForestComp->MarkRenderInstancesDirty();
+    MountainComp->MarkRenderInstancesDirty();
 
     UE_LOG(LogPlanetHISMTileRenderer, Log,
         TEXT("[HISM Tiles] Rebuilt spherical tiles: Plain=%d Forest=%d Mountain=%d MissingMeshSkipped=%d Radius=%.1fcm SourceRadius=%.1fcm Scale=%.4f"),

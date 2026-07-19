@@ -27,6 +27,7 @@
 #include "DrawDebugHelpers.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/SkeletalMesh.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
@@ -292,6 +293,7 @@ void APlanetTessellatedMesh::RebuildAll_()
         PlanetGameplayComponent->RebuildGameplay();
         PlanetGameplayComponent->RebuildG1DebugPieces();
     }
+    RefreshAllTerrainVisualHighlights_();
     LogTopologyStats_();
 }
 
@@ -358,10 +360,13 @@ void APlanetTessellatedMesh::RebuildHISMTileInstances_()
 
 void APlanetTessellatedMesh::WriteHISMHighlightForCell_(int32 CellId, bool bMarkRenderStateDirty)
 {
-    if (IsContinuousTerrainVisualActive())
+    if (UsesTerrainVisualHighlightLUT_())
     {
         WriteTerrainVisualHighlightForCell_(CellId);
-        return;
+        if (IsContinuousTerrainVisualActive())
+        {
+            return;
+        }
     }
 
     if (PlanetHISMInteractionComponent)
@@ -424,31 +429,45 @@ void APlanetTessellatedMesh::RebuildTerrainVisualSurface_()
         return;
     }
 
-    if (TerrainVisualMode != ETerrainVisualMode::ContinuousSurface)
+    const bool bContinuousSurface = TerrainVisualMode == ETerrainVisualMode::ContinuousSurface;
+    const bool bHISMSDFExperiment = TerrainVisualMode == ETerrainVisualMode::HISMSDFExperiment;
+    if (!bContinuousSurface && !bHISMSDFExperiment)
     {
         TerrainVisualSurfaceComp->ClearSurface();
         TerrainVisualCoordinator->SetContinuousSurfaceAvailable(false);
+        ApplyHISMSDFExperimentMaterials_();
         return;
     }
 
-    FSphereTopology SurfaceTopology(VisualConfig.SurfaceSubdivisionLevel);
-    SurfaceTopology.Build();
-    const bool bBuilt = TerrainVisualSurfaceComp->RebuildBaseSphere(
-        SurfaceTopology,
-        *CellTopology,
-        *TerrainVisualCoordinator,
-        VisualConfig.GlobeRadiusCM);
-    TerrainVisualCoordinator->SetContinuousSurfaceAvailable(bBuilt);
-    if (!bBuilt)
+    int32 SurfaceTriangleCount = 0;
+    if (bContinuousSurface)
     {
-        UE_LOG(LogPlanetTess, Warning,
-            TEXT("[TerrainVisual][SV1] Failed to build base surface (Sub=%d Radius=%.1fcm)."),
-            VisualConfig.SurfaceSubdivisionLevel,
-            GlobeRadiusCM);
-        return;
+        FSphereTopology SurfaceTopology(VisualConfig.SurfaceSubdivisionLevel);
+        SurfaceTopology.Build();
+        const bool bBuilt = TerrainVisualSurfaceComp->RebuildBaseSphere(
+            SurfaceTopology,
+            *CellTopology,
+            *TerrainVisualCoordinator,
+            VisualConfig.GlobeRadiusCM);
+        TerrainVisualCoordinator->SetContinuousSurfaceAvailable(bBuilt);
+        if (!bBuilt)
+        {
+            UE_LOG(LogPlanetTess, Warning,
+                TEXT("[TerrainVisual][SV1] Failed to build base surface (Sub=%d Radius=%.1fcm)."),
+                VisualConfig.SurfaceSubdivisionLevel,
+                GlobeRadiusCM);
+            ApplyHISMSDFExperimentMaterials_();
+            return;
+        }
+        SurfaceTriangleCount = SurfaceTopology.PrimalTris.Num();
+    }
+    else
+    {
+        TerrainVisualSurfaceComp->ClearSurface();
+        TerrainVisualCoordinator->SetContinuousSurfaceAvailable(false);
     }
 
-    if (TerrainVisualBaseMaterial)
+    if (bContinuousSurface && TerrainVisualBaseMaterial)
     {
         TerrainVisualSurfaceComp->SetMaterial(0, TerrainVisualBaseMaterial);
     }
@@ -464,8 +483,11 @@ void APlanetTessellatedMesh::RebuildTerrainVisualSurface_()
     {
         UE_LOG(LogPlanetTess, Warning, TEXT("[TerrainVisual][SV5] Failed to initialize river LUT resources."));
     }
-    TerrainVisualSurfaceComp->SetHighlightMaterial(
-        TerrainVisualSurfaceMaterial ? TerrainVisualSurfaceMaterial.Get() : TerrainVisualHighlightMaterial.Get());
+    if (bContinuousSurface)
+    {
+        TerrainVisualSurfaceComp->SetHighlightMaterial(
+            TerrainVisualSurfaceMaterial ? TerrainVisualSurfaceMaterial.Get() : TerrainVisualHighlightMaterial.Get());
+    }
     TerrainVisualSurfaceComp->SetSurfaceEnhancementParameters(
         TerrainVisualGravelColor, TerrainVisualGravelNormal, TerrainVisualGravelRoughness,
         TerrainVisualMossColor, TerrainVisualMossNormal, TerrainVisualMossRoughness,
@@ -477,20 +499,109 @@ void APlanetTessellatedMesh::RebuildTerrainVisualSurface_()
         TerrainVisualBaseGroundColor,
         TerrainVisualHighlightPaddingRad,
         TerrainVisualHighlightStrength);
+    ApplyHISMSDFExperimentMaterials_();
 
-    UE_LOG(LogPlanetTess, Log,
-        TEXT("[TerrainVisual][SV1] Rebuilt base surface: Sub=%d Tris=%d Radius=%.1fcm."),
-        VisualConfig.SurfaceSubdivisionLevel,
-        SurfaceTopology.PrimalTris.Num(),
-        VisualConfig.GlobeRadiusCM);
+    if (bContinuousSurface)
+    {
+        UE_LOG(LogPlanetTess, Log,
+            TEXT("[TerrainVisual][SV1] Rebuilt base surface: Sub=%d Tris=%d Radius=%.1fcm."),
+            VisualConfig.SurfaceSubdivisionLevel,
+            SurfaceTriangleCount,
+            VisualConfig.GlobeRadiusCM);
+    }
+    else
+    {
+        UE_LOG(LogPlanetTess, Log,
+            TEXT("[TerrainVisual][SV6-B] Initialized HISM SDF experiment: Cells=%d ProjectionRadius=%.1fcm Material=%s."),
+            CellTopology->Cells.Num(),
+            VisualConfig.GlobeRadiusCM,
+            *GetNameSafe(TerrainVisualHISMSDFMaterial));
+    }
+}
+
+void APlanetTessellatedMesh::ApplyHISMSDFExperimentMaterials_()
+{
+    const bool bExperiment = TerrainVisualMode == ETerrainVisualMode::HISMSDFExperiment
+        && TerrainVisualHISMSDFMaterial
+        && TerrainVisualSurfaceComp
+        && CellTopology.IsValid();
+
+    const auto RestoreStaticMeshMaterials = [](UHierarchicalInstancedStaticMeshComponent* Component)
+    {
+        if (!Component || !Component->GetStaticMesh())
+        {
+            return;
+        }
+        UStaticMesh* StaticMesh = Component->GetStaticMesh();
+        for (int32 MaterialIndex = 0; MaterialIndex < StaticMesh->GetStaticMaterials().Num(); ++MaterialIndex)
+        {
+            Component->SetMaterial(MaterialIndex, StaticMesh->GetMaterial(MaterialIndex));
+        }
+    };
+
+    if (!bExperiment)
+    {
+        PlainHISMSDFMID = nullptr;
+        ForestHISMSDFMID = nullptr;
+        MountainHISMSDFMID = nullptr;
+        RestoreStaticMeshMaterials(PlainTileHISMComp);
+        RestoreStaticMeshMaterials(ForestTileHISMComp);
+        RestoreStaticMeshMaterials(MountainTileHISMComp);
+        if (PlanetHISMInteractionComponent)
+        {
+            PlanetHISMInteractionComponent->PrepareHighlightComponents();
+        }
+        return;
+    }
+
+    const auto ApplyExperimentMaterial = [this](
+        UHierarchicalInstancedStaticMeshComponent* Component,
+        TObjectPtr<UMaterialInstanceDynamic>& OutMID)
+    {
+        if (!Component || !Component->GetStaticMesh())
+        {
+            OutMID = nullptr;
+            return;
+        }
+
+        OutMID = UMaterialInstanceDynamic::Create(TerrainVisualHISMSDFMaterial, this);
+        if (!OutMID)
+        {
+            return;
+        }
+
+        TerrainVisualSurfaceComp->ApplySharedMaterialParameters(
+            OutMID,
+            GetPlanetCenterWorld_(),
+            TerrainVisualBaseGroundColor,
+            TerrainVisualHighlightPaddingRad,
+            TerrainVisualHighlightStrength);
+        OutMID->SetScalarParameterValue(
+            TEXT("HISMSDFProjectionRadiusCM"),
+            FMath::Max(GlobeRadiusCM + HISMTileRadiusOffsetCM, 1.0f));
+        OutMID->SetScalarParameterValue(TEXT("SurfaceCellCount"), CellTopology->Cells.Num());
+
+        const int32 MaterialCount = FMath::Max(Component->GetStaticMesh()->GetStaticMaterials().Num(), 1);
+        for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
+        {
+            Component->SetMaterial(MaterialIndex, OutMID);
+        }
+    };
+
+    ApplyExperimentMaterial(PlainTileHISMComp, PlainHISMSDFMID);
+    ApplyExperimentMaterial(ForestTileHISMComp, ForestHISMSDFMID);
+    ApplyExperimentMaterial(MountainTileHISMComp, MountainHISMSDFMID);
 }
 
 void APlanetTessellatedMesh::RefreshG4CapturePreviewCellsForActionTarget_(int32 ActionTargetCellId, bool bMarkLastRenderStateDirty)
 {
-    if (IsContinuousTerrainVisualActive())
+    if (UsesTerrainVisualHighlightLUT_())
     {
         RefreshTerrainVisualCapturePreviewCells_(ActionTargetCellId);
-        return;
+        if (IsContinuousTerrainVisualActive())
+        {
+            return;
+        }
     }
 
     if (PlanetHISMInteractionComponent)
@@ -507,7 +618,7 @@ void APlanetTessellatedMesh::UpdateHISMHoverCell_(int32 NewCellId)
         PlanetHISMInteractionComponent->UpdateHISMHoverCell(NewCellId);
     }
 
-    if (IsContinuousTerrainVisualActive())
+    if (UsesTerrainVisualHighlightLUT_())
     {
         WriteTerrainVisualHighlightForCell_(OldHoverCellId);
         RefreshTerrainVisualCapturePreviewCells_(OldHoverCellId);
@@ -518,7 +629,7 @@ void APlanetTessellatedMesh::UpdateHISMHoverCell_(int32 NewCellId)
 
 void APlanetTessellatedMesh::WriteTerrainVisualHighlightForCell_(int32 CellId)
 {
-    if (!IsContinuousTerrainVisualActive()
+    if (!UsesTerrainVisualHighlightLUT_()
         || !TerrainVisualSurfaceComp
         || !CellTopology.IsValid()
         || !CellTopology->Cells.IsValidIndex(CellId))
@@ -594,7 +705,7 @@ void APlanetTessellatedMesh::RefreshTerrainVisualCapturePreviewCells_(int32 Acti
 
 void APlanetTessellatedMesh::RefreshAllTerrainVisualHighlights_()
 {
-    if (!IsContinuousTerrainVisualActive() || !CellTopology.IsValid())
+    if (!UsesTerrainVisualHighlightLUT_() || !CellTopology.IsValid())
     {
         return;
     }
@@ -619,7 +730,7 @@ void APlanetTessellatedMesh::RefreshGameplayHighlights_(const TArray<int32>& Dir
     {
         PlanetGameplayComponent->RefreshGameplayHighlights(DirtyCellIds);
     }
-    if (IsContinuousTerrainVisualActive())
+    if (UsesTerrainVisualHighlightLUT_())
     {
         for (const int32 CellId : DirtyCellIds)
         {
@@ -868,6 +979,14 @@ bool APlanetTessellatedMesh::IsContinuousTerrainVisualActive() const
         && TerrainVisualCoordinator->GetDiagnostics().bCanActivateContinuousSurface;
 }
 
+bool APlanetTessellatedMesh::UsesTerrainVisualHighlightLUT_() const
+{
+    return IsContinuousTerrainVisualActive()
+        || (TerrainVisualMode == ETerrainVisualMode::HISMSDFExperiment
+            && TerrainVisualSurfaceComp
+            && TerrainVisualSurfaceComp->HasHighlightResources());
+}
+
 bool APlanetTessellatedMesh::TryResolveContinuousSurfaceHitToCellId_(const FHitResult& Hit, int32& OutCellId) const
 {
     OutCellId = INDEX_NONE;
@@ -957,10 +1076,17 @@ void APlanetTessellatedMesh::ClearHISMHover()
 
 void APlanetTessellatedMesh::ClearAllHISMHighlights()
 {
-    if (IsContinuousTerrainVisualActive())
+    if (UsesTerrainVisualHighlightLUT_())
     {
+        if (TerrainVisualSurfaceComp)
+        {
+            TerrainVisualSurfaceComp->ClearHighlightCells();
+        }
         RefreshAllTerrainVisualHighlights_();
-        return;
+        if (IsContinuousTerrainVisualActive())
+        {
+            return;
+        }
     }
 
     if (PlanetHISMInteractionComponent)

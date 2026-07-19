@@ -8,6 +8,7 @@ enum class ETerrainVisualMode : uint8
 {
     LegacyHISMDebug,
     ContinuousSurface,
+    HISMSDFExperiment,
 };
 
 struct TERRAINVISUAL_API FTerrainVisualConfig

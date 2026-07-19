@@ -14,6 +14,7 @@
 #include "PlanetTessellatedMesh.generated.h"
 
 class UTexture2D;
+class UMaterialInstanceDynamic;
 class UAnimationAsset;
 class UAnimInstance;
 class UAnimMontage;
@@ -94,6 +95,10 @@ public:
     /** SV3 连续表面地形材质；为空时继续使用 SV2 高亮材质。 */
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV3 Surface")
     TObjectPtr<UMaterialInterface> TerrainVisualSurfaceMaterial;
+
+    /** SV6-B：只在 HISM + SDF 实验模式覆盖三种旧 Tile HISM 的共享径向投影材质。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV6-B HISM SDF Experiment")
+    TObjectPtr<UMaterialInterface> TerrainVisualHISMSDFMaterial;
 
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV6-A Surface Enhancement") TObjectPtr<UTexture2D> TerrainVisualGravelColor;
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV6-A Surface Enhancement") TObjectPtr<UTexture2D> TerrainVisualGravelNormal;
@@ -343,6 +348,7 @@ private:
     /** SimpleGameplay：按 WorldGen 三地形输出重建平原 / 森林 / 山脉三套 HISM 实例。 */
     void RebuildHISMTileInstances_();
     void RebuildTerrainVisualSurface_();
+    void ApplyHISMSDFExperimentMaterials_();
 
     FPlanetHISMTileRenderConfig BuildHISMTileRenderConfig_() const;
     FPlanetHISMHighlightConfig BuildHISMHighlightConfig_() const;
@@ -350,6 +356,7 @@ private:
     /** SimpleGameplay：统一应用 HISM 显示 / 碰撞开关。 */
     void ApplyRenderModeVisibility_();
     void ApplyTerrainVisualMode_();
+    bool UsesTerrainVisualHighlightLUT_() const;
     bool TryResolveContinuousSurfaceHitToCellId_(const FHitResult& Hit, int32& OutCellId) const;
 
     /** SimpleGameplay：把单个 Cell 当前 Gameplay/hover 逻辑合成为最终 RGB + Intensity 自定义数据。 */
@@ -483,6 +490,15 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Terrain Visual",
               meta = (AllowPrivateAccess = "true", NoEditInline))
     TObjectPtr<UTerrainVisualSurfaceComponent> TerrainVisualSurfaceComp;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UMaterialInstanceDynamic> PlainHISMSDFMID;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UMaterialInstanceDynamic> ForestHISMSDFMID;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UMaterialInstanceDynamic> MountainHISMSDFMID;
 
     /** TerrainVisual SV0/SV1：只读视觉场和 Cell 查询协调器。 */
     TUniquePtr<FTerrainVisualCoordinator> TerrainVisualCoordinator;

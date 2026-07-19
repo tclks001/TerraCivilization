@@ -42,6 +42,12 @@ public:
         const FLinearColor& BaseGroundColor,
         float HighlightPaddingRad,
         float HighlightStrength);
+    void ApplySharedMaterialParameters(
+        UMaterialInstanceDynamic* MaterialInstance,
+        const FVector& PlanetCenter,
+        const FLinearColor& BaseGroundColor,
+        float HighlightPaddingRad,
+        float HighlightStrength) const;
     bool WriteHighlightCell(int32 CellId, const FLinearColor& Color, float Intensity);
     void ClearHighlightCells();
 

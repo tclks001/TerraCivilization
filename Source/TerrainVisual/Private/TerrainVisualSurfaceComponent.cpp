@@ -402,6 +402,50 @@ void UTerrainVisualSurfaceComponent::SetHighlightParameters(
     HighlightMID->SetScalarParameterValue(TEXT("HighlightStrength"), FMath::Max(HighlightStrength, 0.0f));
 }
 
+void UTerrainVisualSurfaceComponent::ApplySharedMaterialParameters(
+    UMaterialInstanceDynamic* MaterialInstance,
+    const FVector& PlanetCenter,
+    const FLinearColor& BaseGroundColor,
+    float HighlightPaddingRad,
+    float HighlightStrength) const
+{
+    if (!MaterialInstance)
+    {
+        return;
+    }
+
+    MaterialInstance->SetTextureParameterValue(TEXT("SurfaceCellDirectionLUT"), SurfaceCellDirectionLUT);
+    MaterialInstance->SetTextureParameterValue(TEXT("SurfaceHighlightLUT"), SurfaceHighlightLUT);
+    MaterialInstance->SetTextureParameterValue(TEXT("SurfaceTerrainLUT"), SurfaceTerrainLUT);
+    MaterialInstance->SetTextureParameterValue(TEXT("SurfaceRiverSegmentLUT"), SurfaceRiverSegmentLUT);
+    MaterialInstance->SetTextureParameterValue(TEXT("SurfaceRiverLakeLUT"), SurfaceRiverLakeLUT);
+    MaterialInstance->SetScalarParameterValue(TEXT("RiverSegmentCount"), RiverSegmentCount);
+    MaterialInstance->SetScalarParameterValue(TEXT("RiverLakeCount"), RiverLakeCount);
+
+    MaterialInstance->SetTextureParameterValue(TEXT("GravelColor"), GravelColorTexture);
+    MaterialInstance->SetTextureParameterValue(TEXT("GravelNormal"), GravelNormalTexture);
+    MaterialInstance->SetTextureParameterValue(TEXT("GravelRoughness"), GravelRoughnessTexture);
+    MaterialInstance->SetTextureParameterValue(TEXT("MossColor"), MossColorTexture);
+    MaterialInstance->SetTextureParameterValue(TEXT("MossNormal"), MossNormalTexture);
+    MaterialInstance->SetTextureParameterValue(TEXT("MossRoughness"), MossRoughnessTexture);
+    MaterialInstance->SetTextureParameterValue(TEXT("RockColor"), RockColorTexture);
+    MaterialInstance->SetTextureParameterValue(TEXT("RockNormal"), RockNormalTexture);
+    MaterialInstance->SetTextureParameterValue(TEXT("RockRoughness"), RockRoughnessTexture);
+    MaterialInstance->SetVectorParameterValue(TEXT("PlainTint"), SurfacePlainTint);
+    MaterialInstance->SetVectorParameterValue(TEXT("ForestTint"), SurfaceForestTint);
+    MaterialInstance->SetVectorParameterValue(TEXT("MountainTint"), SurfaceMountainTint);
+    MaterialInstance->SetScalarParameterValue(TEXT("TerrainTileScaleCM"), SurfaceTileScaleCM);
+    MaterialInstance->SetScalarParameterValue(TEXT("TerrainTriplanarSharpness"), SurfaceTriplanarSharpness);
+    MaterialInstance->SetScalarParameterValue(TEXT("TerrainNormalStrength"), SurfaceNormalStrength);
+
+    MaterialInstance->SetVectorParameterValue(
+        TEXT("PlanetCenter"),
+        FLinearColor(PlanetCenter.X, PlanetCenter.Y, PlanetCenter.Z, 0.0f));
+    MaterialInstance->SetVectorParameterValue(TEXT("BaseGroundColor"), BaseGroundColor);
+    MaterialInstance->SetScalarParameterValue(TEXT("HighlightPaddingRad"), FMath::Max(HighlightPaddingRad, 0.0001f));
+    MaterialInstance->SetScalarParameterValue(TEXT("HighlightStrength"), FMath::Max(HighlightStrength, 0.0f));
+}
+
 bool UTerrainVisualSurfaceComponent::WriteHighlightCell(int32 CellId, const FLinearColor& Color, float Intensity)
 {
     if (!HighlightPixels.IsValidIndex(CellId))

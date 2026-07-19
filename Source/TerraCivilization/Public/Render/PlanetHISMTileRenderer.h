@@ -57,6 +57,11 @@ struct FPlanetHISMHighlightConfig
 class TERRACIVILIZATION_API FPlanetHISMTileRenderer
 {
 public:
+    static constexpr int32 HighlightCustomDataOffset = 0;
+    static constexpr int32 CellContextCustomDataOffset = 4;
+    static constexpr int32 CellContextCandidateCount = 7;
+    static constexpr int32 CustomDataFloatCount = CellContextCustomDataOffset + CellContextCandidateCount;
+
     void Initialize(
         UHierarchicalInstancedStaticMeshComponent* InPlainComp,
         UHierarchicalInstancedStaticMeshComponent* InForestComp,
