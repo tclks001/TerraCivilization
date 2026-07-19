@@ -257,6 +257,14 @@ public:
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|HISM Tiles", meta = (ClampMin = "0.001"))
     float HISMTileAdditionalUniformScale = 1.0f;
 
+    /** SV8 验收：在每条山脊段两个 Cell 中心之间的测地线中点额外摆放 Mountain StaticMesh，仅在 HISM + SDF 模式显示。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV8 Topology LUT Verification")
+    bool bEnableSV8RidgeMidpointVerificationMeshes = true;
+
+    /** SV8 验收资产；为空时复用 MountainTileStaticMesh。资产坐标须与球面 Tile 约定一致。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV8 Topology LUT Verification")
+    TObjectPtr<UStaticMesh> SV8VerificationMountainStaticMesh;
+
     //----------------------------------------------------------
     // 生命周期
     //----------------------------------------------------------
@@ -352,6 +360,7 @@ private:
 
     /** SimpleGameplay：按 WorldGen 三地形输出重建平原 / 森林 / 山脉三套 HISM 实例。 */
     void RebuildHISMTileInstances_();
+    void RebuildSV8RidgeMidpointVerificationInstances_();
     void RebuildTerrainVisualSurface_();
     void ApplyHISMSDFExperimentMaterials_();
 
@@ -491,6 +500,11 @@ public:
               meta = (AllowPrivateAccess = "true", NoEditInline))
     TObjectPtr<UHierarchicalInstancedStaticMeshComponent> MountainTileHISMComp;
 
+    /** SV8：独立、无碰撞的山脊中点验证实例，不参与 InstanceId -> CellId 或棋子高度链路。 */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Terrain Visual|SV8 Topology LUT Verification",
+              meta = (AllowPrivateAccess = "true", NoEditInline))
+    TObjectPtr<UHierarchicalInstancedStaticMeshComponent> SV8VerificationRidgeMidpointHISMComp;
+
     /** TerrainVisual SV1：连续基础表面，独立于旧 HISM 渲染组件。 */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Terrain Visual",
               meta = (AllowPrivateAccess = "true", NoEditInline))
@@ -504,6 +518,9 @@ public:
 
     UPROPERTY(Transient)
     TObjectPtr<UMaterialInstanceDynamic> MountainHISMSDFMID;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UMaterialInstanceDynamic> SV8VerificationRidgeMidpointHISMSDFMID;
 
     /** TerrainVisual SV0/SV1：只读视觉场和 Cell 查询协调器。 */
     TUniquePtr<FTerrainVisualCoordinator> TerrainVisualCoordinator;

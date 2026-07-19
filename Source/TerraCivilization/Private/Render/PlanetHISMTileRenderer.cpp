@@ -229,20 +229,9 @@ void FPlanetHISMTileRenderer::RebuildInstances(
             CellIdToInstance[CellId].InstanceIndex = InstanceIndex;
         }
 
-        for (int32 HighlightIndex = 0; HighlightIndex < CellContextCustomDataOffset; ++HighlightIndex)
+        for (int32 HighlightIndex = 0; HighlightIndex < CustomDataFloatCount; ++HighlightIndex)
         {
             TargetComp->SetCustomDataValue(InstanceIndex, HighlightIndex, 0.0f, false);
-        }
-
-        TargetComp->SetCustomDataValue(InstanceIndex, CellContextCustomDataOffset, static_cast<float>(CellId), false);
-        for (int32 NeighborIndex = 0; NeighborIndex < CellContextCandidateCount - 1; ++NeighborIndex)
-        {
-            const int32 NeighborCellId = CellTopology.Cells[CellId].NeighborCellIds[NeighborIndex];
-            TargetComp->SetCustomDataValue(
-                InstanceIndex,
-                CellContextCustomDataOffset + 1 + NeighborIndex,
-                static_cast<float>(NeighborCellId != INDEX_NONE ? NeighborCellId : CellId),
-                false);
         }
     }
 

@@ -1,11 +1,14 @@
 #include "TerrainVisualSurfaceComponent.h"
 
 #include "FSphereTopology.h"
+#include "FSphereTopologyQuery.h"
 #include "TerrainSurfaceQuery.h"
 #include "TerrainVisualRiverSystem.h"
 #include "CellGeoData.h"
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogTerrainVisualSurface, Log, All);
 
 UTerrainVisualSurfaceComponent::UTerrainVisualSurfaceComponent(const FObjectInitializer& ObjectInitializer)
     : Super(ObjectInitializer)
@@ -220,6 +223,228 @@ bool UTerrainVisualSurfaceComponent::InitializeHighlightResources(const FSphereT
     return true;
 }
 
+bool UTerrainVisualSurfaceComponent::InitializeTopologyQueryResources(const FSphereTopology& CellTopology)
+{
+    SurfaceTopologyNodeCenterLUT = nullptr;
+    SurfaceTopologyLeafCellLUT = nullptr;
+    TopologySubdivisionLevel = 0;
+    TopologyRootCount = 0;
+
+    const int32 SubdivisionLevel = CellTopology.SubdivisionLevel;
+    const int32 RootCount = CellTopology.TriTreeRoots.Num();
+    if (SubdivisionLevel < 0 || RootCount <= 0 || CellTopology.Cells.IsEmpty())
+    {
+        return false;
+    }
+
+    TArray<const FTriTreeNode*> CurrentLevel;
+    CurrentLevel.Reserve(RootCount);
+    for (const FTriTreeNode* Root : CellTopology.TriTreeRoots)
+    {
+        if (!Root)
+        {
+            return false;
+        }
+        CurrentLevel.Add(Root);
+    }
+
+    TArray<FLinearColor> NodePixels;
+    TArray<FLinearColor> LeafPixels;
+    int32 ExpectedLevelNodeCount = RootCount;
+    for (int32 Level = 0; Level <= SubdivisionLevel; ++Level)
+    {
+        if (CurrentLevel.Num() != ExpectedLevelNodeCount)
+        {
+            UE_LOG(LogTerrainVisualSurface, Error,
+                TEXT("[TerrainVisual][SV8] Topology tree level size mismatch. Level=%d Actual=%d Expected=%d"),
+                Level,
+                CurrentLevel.Num(),
+                ExpectedLevelNodeCount);
+            return false;
+        }
+
+        TArray<const FTriTreeNode*> NextLevel;
+        if (Level < SubdivisionLevel)
+        {
+            NextLevel.Reserve(CurrentLevel.Num() * 4);
+        }
+
+        for (const FTriTreeNode* Node : CurrentLevel)
+        {
+            const FVector Center = Node->Center.GetSafeNormal();
+            if (Center.IsNearlyZero())
+            {
+                return false;
+            }
+            NodePixels.Emplace(Center.X, Center.Y, Center.Z, 1.0f);
+
+            if (Level == SubdivisionLevel)
+            {
+                const int32 Cell0 = Node->CellIds[0];
+                const int32 Cell1 = Node->CellIds[1];
+                const int32 Cell2 = Node->CellIds[2];
+                if (!CellTopology.Cells.IsValidIndex(Cell0)
+                    || !CellTopology.Cells.IsValidIndex(Cell1)
+                    || !CellTopology.Cells.IsValidIndex(Cell2))
+                {
+                    return false;
+                }
+                LeafPixels.Emplace(static_cast<float>(Cell0), static_cast<float>(Cell1), static_cast<float>(Cell2), 1.0f);
+                continue;
+            }
+
+            for (int32 ChildIndex = 0; ChildIndex < 4; ++ChildIndex)
+            {
+                const FTriTreeNode* Child = Node->Children[ChildIndex];
+                if (!Child)
+                {
+                    return false;
+                }
+                NextLevel.Add(Child);
+            }
+        }
+
+        CurrentLevel = MoveTemp(NextLevel);
+        ExpectedLevelNodeCount *= 4;
+    }
+
+    if (NodePixels.IsEmpty() || LeafPixels.IsEmpty())
+    {
+        return false;
+    }
+
+    const auto CreateFloatLUT = [](const TArray<FLinearColor>& Pixels, const TCHAR* Name) -> UTexture2D*
+    {
+        UTexture2D* Texture = UTexture2D::CreateTransient(Pixels.Num(), 1, PF_A32B32G32R32F, Name);
+        if (!Texture)
+        {
+            return nullptr;
+        }
+        Texture->Filter = TF_Nearest;
+        Texture->SRGB = false;
+        Texture->NeverStream = true;
+        Texture->MipGenSettings = TMGS_NoMipmaps;
+        Texture->CompressionSettings = TC_VectorDisplacementmap;
+
+        FTexturePlatformData* Data = Texture->GetPlatformData();
+        float* Dest = Data && Data->Mips.Num() > 0
+            ? static_cast<float*>(Data->Mips[0].BulkData.Lock(LOCK_READ_WRITE))
+            : nullptr;
+        if (!Dest)
+        {
+            return nullptr;
+        }
+        for (int32 Index = 0; Index < Pixels.Num(); ++Index)
+        {
+            Dest[Index * 4] = Pixels[Index].R;
+            Dest[Index * 4 + 1] = Pixels[Index].G;
+            Dest[Index * 4 + 2] = Pixels[Index].B;
+            Dest[Index * 4 + 3] = Pixels[Index].A;
+        }
+        Data->Mips[0].BulkData.Unlock();
+        Texture->UpdateResource();
+        return Texture;
+    };
+
+    const auto ResolveSerializedCell = [&CellTopology, &NodePixels, &LeafPixels, RootCount, SubdivisionLevel](const FVector& UnitDirection)
+    {
+        int32 LocalNodeIndex = INDEX_NONE;
+        float BestDot = -FLT_MAX;
+        for (int32 RootIndex = 0; RootIndex < RootCount; ++RootIndex)
+        {
+            const FLinearColor& PackedCenter = NodePixels[RootIndex];
+            const float Dot = FVector::DotProduct(FVector(PackedCenter.R, PackedCenter.G, PackedCenter.B), UnitDirection);
+            if (Dot > BestDot)
+            {
+                BestDot = Dot;
+                LocalNodeIndex = RootIndex;
+            }
+        }
+
+        int32 LevelOffset = 0;
+        int32 LevelNodeCount = RootCount;
+        for (int32 Level = 0; Level < SubdivisionLevel; ++Level)
+        {
+            const int32 NextLevelOffset = LevelOffset + LevelNodeCount;
+            const int32 ChildBaseIndex = LocalNodeIndex * 4;
+            int32 BestChildIndex = INDEX_NONE;
+            BestDot = -FLT_MAX;
+            for (int32 ChildIndex = 0; ChildIndex < 4; ++ChildIndex)
+            {
+                const FLinearColor& PackedCenter = NodePixels[NextLevelOffset + ChildBaseIndex + ChildIndex];
+                const float Dot = FVector::DotProduct(FVector(PackedCenter.R, PackedCenter.G, PackedCenter.B), UnitDirection);
+                if (Dot > BestDot)
+                {
+                    BestDot = Dot;
+                    BestChildIndex = ChildIndex;
+                }
+            }
+            LocalNodeIndex = ChildBaseIndex + BestChildIndex;
+            LevelOffset = NextLevelOffset;
+            LevelNodeCount *= 4;
+        }
+
+        const FLinearColor& PackedLeaf = LeafPixels[LocalNodeIndex];
+        const int32 CandidateCellIds[3] = {
+            FMath::RoundToInt(PackedLeaf.R),
+            FMath::RoundToInt(PackedLeaf.G),
+            FMath::RoundToInt(PackedLeaf.B)};
+        int32 BestCellId = INDEX_NONE;
+        BestDot = -FLT_MAX;
+        for (const int32 CellId : CandidateCellIds)
+        {
+            const float Dot = FVector::DotProduct(CellTopology.Cells[CellId].UnitCenter, UnitDirection);
+            if (Dot > BestDot)
+            {
+                BestDot = Dot;
+                BestCellId = CellId;
+            }
+        }
+        return BestCellId;
+    };
+
+    const FSphereTopologyQuery CpuQuery(&CellTopology);
+    FRandomStream VerificationRandom(875713);
+    constexpr int32 VerificationSampleCount = 256;
+    for (int32 SampleIndex = 0; SampleIndex < VerificationSampleCount; ++SampleIndex)
+    {
+        const FVector UnitDirection = SampleIndex < CellTopology.Cells.Num()
+            ? CellTopology.Cells[SampleIndex].UnitCenter
+            : VerificationRandom.VRand();
+        const int32 ExpectedCellId = CpuQuery.FindNearestCell(UnitDirection).CellId;
+        const int32 ActualCellId = ResolveSerializedCell(UnitDirection);
+        if (ExpectedCellId != ActualCellId)
+        {
+            UE_LOG(LogTerrainVisualSurface, Error,
+                TEXT("[TerrainVisual][SV8] Topology LUT verification failed. Sample=%d Expected=%d Actual=%d"),
+                SampleIndex,
+                ExpectedCellId,
+                ActualCellId);
+            return false;
+        }
+    }
+
+    SurfaceTopologyNodeCenterLUT = CreateFloatLUT(NodePixels, TEXT("SurfaceTopologyNodeCenterLUT_Transient"));
+    SurfaceTopologyLeafCellLUT = CreateFloatLUT(LeafPixels, TEXT("SurfaceTopologyLeafCellLUT_Transient"));
+    if (!SurfaceTopologyNodeCenterLUT || !SurfaceTopologyLeafCellLUT)
+    {
+        SurfaceTopologyNodeCenterLUT = nullptr;
+        SurfaceTopologyLeafCellLUT = nullptr;
+        return false;
+    }
+
+    TopologySubdivisionLevel = SubdivisionLevel;
+    TopologyRootCount = RootCount;
+    UE_LOG(LogTerrainVisualSurface, Log,
+        TEXT("[TerrainVisual][SV8] Topology Query LUT ready. Sub=%d Roots=%d Nodes=%d Leafs=%d VerifySamples=%d"),
+        TopologySubdivisionLevel,
+        TopologyRootCount,
+        NodePixels.Num(),
+        LeafPixels.Num(),
+        VerificationSampleCount);
+    return true;
+}
+
 bool UTerrainVisualSurfaceComponent::InitializeTerrainResources(const TArray<FCellGeoData>& GeoCells, int32 VisualSeed)
 {
     if (GeoCells.IsEmpty())
@@ -339,11 +564,15 @@ void UTerrainVisualSurfaceComponent::SetHighlightMaterial(UMaterialInterface* In
     {
         HighlightMID->SetTextureParameterValue(TEXT("SurfaceCellDirectionLUT"), SurfaceCellDirectionLUT);
         HighlightMID->SetTextureParameterValue(TEXT("SurfaceHighlightLUT"), SurfaceHighlightLUT);
+        HighlightMID->SetTextureParameterValue(TEXT("SurfaceTopologyNodeCenterLUT"), SurfaceTopologyNodeCenterLUT);
+        HighlightMID->SetTextureParameterValue(TEXT("SurfaceTopologyLeafCellLUT"), SurfaceTopologyLeafCellLUT);
         HighlightMID->SetTextureParameterValue(TEXT("SurfaceTerrainLUT"), SurfaceTerrainLUT);
         HighlightMID->SetTextureParameterValue(TEXT("SurfaceRiverSegmentLUT"), SurfaceRiverSegmentLUT);
         HighlightMID->SetTextureParameterValue(TEXT("SurfaceRiverLakeLUT"), SurfaceRiverLakeLUT);
         HighlightMID->SetScalarParameterValue(TEXT("RiverSegmentCount"), RiverSegmentCount);
         HighlightMID->SetScalarParameterValue(TEXT("RiverLakeCount"), RiverLakeCount);
+        HighlightMID->SetScalarParameterValue(TEXT("TopologySubdivisionLevel"), TopologySubdivisionLevel);
+        HighlightMID->SetScalarParameterValue(TEXT("TopologyRootCount"), TopologyRootCount);
         ApplySurfaceEnhancementParameters_();
     }
 }
@@ -416,11 +645,15 @@ void UTerrainVisualSurfaceComponent::ApplySharedMaterialParameters(
 
     MaterialInstance->SetTextureParameterValue(TEXT("SurfaceCellDirectionLUT"), SurfaceCellDirectionLUT);
     MaterialInstance->SetTextureParameterValue(TEXT("SurfaceHighlightLUT"), SurfaceHighlightLUT);
+    MaterialInstance->SetTextureParameterValue(TEXT("SurfaceTopologyNodeCenterLUT"), SurfaceTopologyNodeCenterLUT);
+    MaterialInstance->SetTextureParameterValue(TEXT("SurfaceTopologyLeafCellLUT"), SurfaceTopologyLeafCellLUT);
     MaterialInstance->SetTextureParameterValue(TEXT("SurfaceTerrainLUT"), SurfaceTerrainLUT);
     MaterialInstance->SetTextureParameterValue(TEXT("SurfaceRiverSegmentLUT"), SurfaceRiverSegmentLUT);
     MaterialInstance->SetTextureParameterValue(TEXT("SurfaceRiverLakeLUT"), SurfaceRiverLakeLUT);
     MaterialInstance->SetScalarParameterValue(TEXT("RiverSegmentCount"), RiverSegmentCount);
     MaterialInstance->SetScalarParameterValue(TEXT("RiverLakeCount"), RiverLakeCount);
+    MaterialInstance->SetScalarParameterValue(TEXT("TopologySubdivisionLevel"), TopologySubdivisionLevel);
+    MaterialInstance->SetScalarParameterValue(TEXT("TopologyRootCount"), TopologyRootCount);
 
     MaterialInstance->SetTextureParameterValue(TEXT("GravelColor"), GravelColorTexture);
     MaterialInstance->SetTextureParameterValue(TEXT("GravelNormal"), GravelNormalTexture);

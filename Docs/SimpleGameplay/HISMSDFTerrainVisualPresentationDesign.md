@@ -97,6 +97,8 @@ SV6-B 的 Owner/Neighbor 只是一项实验期局部加速数据；它不能覆�
 
 ### SV8：GPU 球面拓扑查询 LUT
 
+> 状态：C++ 已完成，待 SV8 材质验收。
+
 目标：在材质中精确复现 `FSphereTopologyQuery::FindNearestCell` 的球面三角树决策，去除地形 HISM 对 Owner/Neighbor PICD 的依赖。
 
 CPU 查询的真实算法是：
@@ -222,4 +224,3 @@ SV7 可以先使用 CPU `FSphereTopologyQuery` 完成交互迁移；SV8 的 GPU 
 3. 材质从 GPU 拓扑 LUT 得到全局 Cell SDF，上层资产不需要 Owner/Neighbor 才能连续绘制地形类别、水体、积雪和高亮。
 4. 离散网格的自然遮挡、资产底部融合和统一 SDF 材质共同将接缝控制在可接受范围。
 5. `ContinuousSurface` 只保留为对照/回退模式；新地形视觉不再依赖其网格、碰撞或材质上下文。
-

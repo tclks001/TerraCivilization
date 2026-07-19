@@ -28,6 +28,7 @@ public:
     void ClearSurface();
 
     bool InitializeHighlightResources(const FSphereTopology& CellTopology);
+    bool InitializeTopologyQueryResources(const FSphereTopology& CellTopology);
     bool InitializeTerrainResources(const TArray<FCellGeoData>& GeoCells, int32 VisualSeed);
     bool InitializeRiverResources(const FTerrainVisualRiverSystem& RiverSystem);
     void SetHighlightMaterial(UMaterialInterface* InMaterial);
@@ -54,6 +55,7 @@ public:
     bool HasBuiltSurface() const { return bHasBuiltSurface; }
     int32 GetBuiltSubdivisionLevel() const { return BuiltSubdivisionLevel; }
     bool HasHighlightResources() const { return SurfaceCellDirectionLUT != nullptr && SurfaceHighlightLUT != nullptr; }
+    bool HasTopologyQueryResources() const { return SurfaceTopologyNodeCenterLUT != nullptr && SurfaceTopologyLeafCellLUT != nullptr; }
 
 private:
     bool bHasBuiltSurface = false;
@@ -61,6 +63,8 @@ private:
     int32 HighlightCellCount = 0;
     int32 RiverSegmentCount = 0;
     int32 RiverLakeCount = 0;
+    int32 TopologySubdivisionLevel = 0;
+    int32 TopologyRootCount = 0;
     TArray<FColor> HighlightPixels;
 
     UPROPERTY(Transient)
@@ -68,6 +72,12 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UTexture2D> SurfaceHighlightLUT;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UTexture2D> SurfaceTopologyNodeCenterLUT;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UTexture2D> SurfaceTopologyLeafCellLUT;
 
     UPROPERTY(Transient)
     TObjectPtr<UTexture2D> SurfaceTerrainLUT;

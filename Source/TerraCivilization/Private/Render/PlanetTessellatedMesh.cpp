@@ -78,6 +78,14 @@ APlanetTessellatedMesh::APlanetTessellatedMesh()
     MountainTileHISMComp->SetCollisionObjectType(ECC_WorldStatic);
     MountainTileHISMComp->SetCollisionResponseToAllChannels(ECR_Block);
 
+    SV8VerificationRidgeMidpointHISMComp = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("SV8VerificationRidgeMidpointHISMComp"));
+    SV8VerificationRidgeMidpointHISMComp->SetupAttachment(RootScene);
+    SV8VerificationRidgeMidpointHISMComp->SetCanEverAffectNavigation(false);
+    SV8VerificationRidgeMidpointHISMComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    SV8VerificationRidgeMidpointHISMComp->SetCollisionResponseToAllChannels(ECR_Ignore);
+    SV8VerificationRidgeMidpointHISMComp->SetVisibility(false);
+    SV8VerificationRidgeMidpointHISMComp->SetHiddenInGame(true);
+
     TerrainVisualSurfaceComp = CreateDefaultSubobject<UTerrainVisualSurfaceComponent>(TEXT("TerrainVisualSurfaceComp"));
     TerrainVisualSurfaceComp->SetupAttachment(RootScene);
     TerrainVisualSurfaceComp->SetVisibility(false);
@@ -356,6 +364,70 @@ void APlanetTessellatedMesh::RebuildHISMTileInstances_()
         *CellTopology,
         Generator->GetCellData(),
         BuildHISMTileRenderConfig_());
+    RebuildSV8RidgeMidpointVerificationInstances_();
+}
+
+void APlanetTessellatedMesh::RebuildSV8RidgeMidpointVerificationInstances_()
+{
+    if (!SV8VerificationRidgeMidpointHISMComp)
+    {
+        return;
+    }
+
+    SV8VerificationRidgeMidpointHISMComp->ClearInstances();
+    SV8VerificationRidgeMidpointHISMComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    SV8VerificationRidgeMidpointHISMComp->SetCollisionResponseToAllChannels(ECR_Ignore);
+
+    UStaticMesh* VerificationMesh = SV8VerificationMountainStaticMesh
+        ? SV8VerificationMountainStaticMesh.Get()
+        : MountainTileStaticMesh.Get();
+    SV8VerificationRidgeMidpointHISMComp->SetStaticMesh(VerificationMesh);
+    if (!bEnableSV8RidgeMidpointVerificationMeshes
+        || !VerificationMesh
+        || !CellTopology.IsValid()
+        || !Generator.IsValid())
+    {
+        return;
+    }
+
+    const TArray<FIntPoint>& RidgeSegments = PlanetGameplayComponent
+        ? PlanetGameplayComponent->GetMountainRidgeSegments()
+        : Generator->GetMountainRidgeSegments();
+    TArray<FVector> RidgeMidpoints;
+    RidgeMidpoints.Reserve(RidgeSegments.Num());
+    for (const FIntPoint& Segment : RidgeSegments)
+    {
+        if (!CellTopology->Cells.IsValidIndex(Segment.X) || !CellTopology->Cells.IsValidIndex(Segment.Y))
+        {
+            continue;
+        }
+        const FVector StartUnit = CellTopology->Cells[Segment.X].UnitCenter.GetSafeNormal();
+        const FVector EndUnit = CellTopology->Cells[Segment.Y].UnitCenter.GetSafeNormal();
+        const FVector MidpointUnit = (StartUnit + EndUnit).GetSafeNormal();
+        if (!MidpointUnit.IsNearlyZero())
+        {
+            RidgeMidpoints.Add(MidpointUnit);
+        }
+    }
+
+    const float SourceRadius = FMath::Max(HISMTileSourceRadiusCM, 1.0f);
+    const float TargetRadius = FMath::Max(GlobeRadiusCM + HISMTileRadiusOffsetCM, 1.0f);
+    const float UniformScale = (TargetRadius / SourceRadius) * FMath::Max(HISMTileAdditionalUniformScale, 0.001f);
+    const FVector Scale3D(UniformScale);
+    for (const FVector& MidpointUnit : RidgeMidpoints)
+    {
+        const FQuat Rotation = FQuat::FindBetweenNormals(FVector::UpVector, MidpointUnit);
+        SV8VerificationRidgeMidpointHISMComp->AddInstance(FTransform(Rotation, FVector::ZeroVector, Scale3D), false);
+    }
+    SV8VerificationRidgeMidpointHISMComp->MarkRenderInstancesDirty();
+
+    UE_LOG(LogPlanetTess, Log,
+        TEXT("[TerrainVisual][SV8] Rebuilt ridge midpoint verification HISM. Segments=%d Instances=%d Mesh=%s Radius=%.1fcm Scale=%.4f"),
+        RidgeSegments.Num(),
+        RidgeMidpoints.Num(),
+        *GetNameSafe(VerificationMesh),
+        TargetRadius,
+        UniformScale);
 }
 
 void APlanetTessellatedMesh::WriteHISMHighlightForCell_(int32 CellId, bool bMarkRenderStateDirty)
@@ -475,6 +547,10 @@ void APlanetTessellatedMesh::RebuildTerrainVisualSurface_()
     {
         UE_LOG(LogPlanetTess, Warning, TEXT("[TerrainVisual][SV2] Failed to initialize highlight LUT resources."));
     }
+    if (!TerrainVisualSurfaceComp->InitializeTopologyQueryResources(*CellTopology))
+    {
+        UE_LOG(LogPlanetTess, Warning, TEXT("[TerrainVisual][SV8] Failed to initialize topology query LUT resources."));
+    }
     if (!TerrainVisualSurfaceComp->InitializeTerrainResources(Generator->GetCellData(), VisualConfig.GlobalVisualSeed))
     {
         UE_LOG(LogPlanetTess, Warning, TEXT("[TerrainVisual][SV3] Failed to initialize terrain LUT resources."));
@@ -524,6 +600,7 @@ void APlanetTessellatedMesh::ApplyHISMSDFExperimentMaterials_()
     const bool bExperiment = TerrainVisualMode == ETerrainVisualMode::HISMSDFExperiment
         && TerrainVisualHISMSDFMaterial
         && TerrainVisualSurfaceComp
+        && TerrainVisualSurfaceComp->HasTopologyQueryResources()
         && CellTopology.IsValid();
 
     const auto RestoreStaticMeshMaterials = [](UHierarchicalInstancedStaticMeshComponent* Component)
@@ -544,9 +621,11 @@ void APlanetTessellatedMesh::ApplyHISMSDFExperimentMaterials_()
         PlainHISMSDFMID = nullptr;
         ForestHISMSDFMID = nullptr;
         MountainHISMSDFMID = nullptr;
+        SV8VerificationRidgeMidpointHISMSDFMID = nullptr;
         RestoreStaticMeshMaterials(PlainTileHISMComp);
         RestoreStaticMeshMaterials(ForestTileHISMComp);
         RestoreStaticMeshMaterials(MountainTileHISMComp);
+        RestoreStaticMeshMaterials(SV8VerificationRidgeMidpointHISMComp);
         if (PlanetHISMInteractionComponent)
         {
             PlanetHISMInteractionComponent->PrepareHighlightComponents();
@@ -591,6 +670,7 @@ void APlanetTessellatedMesh::ApplyHISMSDFExperimentMaterials_()
     ApplyExperimentMaterial(PlainTileHISMComp, PlainHISMSDFMID);
     ApplyExperimentMaterial(ForestTileHISMComp, ForestHISMSDFMID);
     ApplyExperimentMaterial(MountainTileHISMComp, MountainHISMSDFMID);
+    ApplyExperimentMaterial(SV8VerificationRidgeMidpointHISMComp, SV8VerificationRidgeMidpointHISMSDFMID);
 }
 
 void APlanetTessellatedMesh::RefreshG4CapturePreviewCellsForActionTarget_(int32 ActionTargetCellId, bool bMarkLastRenderStateDirty)
@@ -1004,6 +1084,7 @@ bool APlanetTessellatedMesh::IsHISMSDFTerrainVisualActive() const
     return TerrainVisualMode == ETerrainVisualMode::HISMSDFExperiment
         && TerrainVisualSurfaceComp
         && TerrainVisualSurfaceComp->HasHighlightResources()
+        && TerrainVisualSurfaceComp->HasTopologyQueryResources()
         && bEnableHISMTileRendering;
 }
 
@@ -1155,6 +1236,17 @@ void APlanetTessellatedMesh::ApplyRenderModeVisibility_()
 void APlanetTessellatedMesh::ApplyTerrainVisualMode_()
 {
     const bool bContinuous = IsContinuousTerrainVisualActive();
+    const bool bShowSV8Verification = IsHISMSDFTerrainVisualActive()
+        && bEnableSV8RidgeMidpointVerificationMeshes
+        && SV8VerificationRidgeMidpointHISMComp
+        && SV8VerificationRidgeMidpointHISMComp->GetInstanceCount() > 0;
+    if (SV8VerificationRidgeMidpointHISMComp)
+    {
+        SV8VerificationRidgeMidpointHISMComp->SetVisibility(bShowSV8Verification, true);
+        SV8VerificationRidgeMidpointHISMComp->SetHiddenInGame(!bShowSV8Verification);
+        SV8VerificationRidgeMidpointHISMComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        SV8VerificationRidgeMidpointHISMComp->SetCollisionResponseToAllChannels(ECR_Ignore);
+    }
     if (TerrainVisualSurfaceComp)
     {
         TerrainVisualSurfaceComp->SetVisibility(bContinuous, true);
