@@ -77,6 +77,18 @@
 - 回退默认材质
 - 视觉纯白 / 棋盘格 / 全黑
 
+### Normal sampled as Color has a stable visual fingerprint
+
+即使 Normal 资产已经设置 `TC_Normalmap`、`sRGB=false`，材质节点的 `Sampler Type=Color` 仍会把 `[0,1]` RGB 原样送入 Normal，引起整体切线法线偏向正 X/Y。
+
+优先诊断：
+
+1. 打开 Buffer Visualization -> World Normal。
+2. 正确朝上的地面应接近蓝色；整片明显偏黄时，先检查 Normal Sample/Parameter 的 `Sampler Type`。
+3. 显式设为 `Normal`，并再次核对纹理 `Compression Settings=Normalmap`、`sRGB=false` 和 DX/GL 绿通道约定。
+
+不要先归因于绕序、UV 或顶点法线；它们通常不会产生这种整片 `(+X,+Y)` 偏置。
+
 ## UE Custom Node HLSL Rules
 
 UE Custom 节点不是独立 `.usf` 文件，它的 Code 会被拼进函数体。默认遵守：
@@ -121,3 +133,23 @@ DO_SOMETHING(uv0, n0);
 3. 若 `Opaque + Roughness=0` 下反射立刻正常，问题多半在透明材质通路本身
 
 如果着色函数里有 `1 / cos(theta)`、指数衰减、强非线性吸收，边界处出现三角锯齿时，先怀疑参数尺度而不是先怀疑几何细分。
+
+### Validate the reflection path before tuning waves
+
+当水面“不动/不反射”时做两次二分：
+
+1. 把噪声直接接 Emissive，确认 Time 与波动逻辑在运行。
+2. 临时改 `Opaque + Roughness=0 + Specular=1`；反射立刻出现时，根因在 Translucent 反射路径，而不是噪声。
+
+Single Layer Water 还依赖场景条件：Atmosphere Sun Light、可用 SkyLight capture，以及非 None 的 Reflection Method。材质正确但场景缺其中一项，仍可能没有可信反射。
+
+### Scale nonlinear water parameters as a coupled set
+
+若光滑几何法线下，SLW 在掠射角/昼夜边界仍按三角形分块，检查 Beer-Lambert 一类 `exp(-sigma*d/cos(theta))` 的尺度敏感性。可尝试：
+
+```text
+geometry thickness/offset *= N
+scattering and absorption coefficients /= N
+```
+
+这样近似保持光学厚度 `sigma*d`，同时降低单位光程斜率。不要只改厚度或只改系数；那会分别导致过度不透明或失去水色。该方法是参数诊断，不替代正确顶点法线。

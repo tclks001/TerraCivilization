@@ -18,10 +18,14 @@
 - 顶点法线优先直接写 `+UnitCenter`
 - 不需要切线空间法线贴图时，Tangents 可以留空
 
+在 UE 的外部球面渲染约定下，光滑球面顶点法线取 `+UnitCenter`（朝外）。不要凭旧经验写成 `-UnitCenter`；先用 Lit/Unlit 和 World Normal 做 sign 验证。
+
 重要认知：
 
 - base pass 之外，阴影、背光裁剪、几何代理路径也会消费顶点法线
 - 仅靠像素阶段反算法线，不能修复这些路径上的锯齿或阴影断层
+
+若 BaseColor/像素 Normal 看起来平滑，但昼夜线、阴影或 Lumen 几何代理按三角形分块，直接检查 vertex buffer 法线。材质 Normal 引脚不能修复不执行该像素路径的 pass。
 
 ## Triangle-Constant Attribute Contracts
 
@@ -40,6 +44,12 @@
 - 用独立索引 `BaseIdx + 0/1/2` 组织三角形
 
 不要为了省一点顶点内存，破坏 shader 的离散契约。
+
+## Verify Coordinate-system Semantics
+
+涉及东/西、旋转方向、cross product 或球面切向量时，先从坐标参数化推导，再用 Debug Arrow 目视验证。不要把右手系二维旋转直觉直接搬到 UE 左手系。
+
+项目若约定 `+Z` 为北极、本初子午线经过 `+X`，则地理“向东”的具体符号必须由该项目的经度定义推导；将推导公式、手系和极区退化分支写入设计稿，不只写一个未经验证的向量常量。
 
 ## Practical Rule of Thumb
 

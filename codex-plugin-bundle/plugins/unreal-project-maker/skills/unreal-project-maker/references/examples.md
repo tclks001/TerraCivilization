@@ -194,6 +194,62 @@
 下一步请按这个顺序操作：1. 复制旧材质；2. 新增两个标量参数；3. 给 Custom 节点补第 N~M 个 Inputs；4. 粘贴新版 HLSL；5. 把材质挂回代码拥有的 Material 槽；6. 确认日志里出现新的阶段摘要行和输入合规提示。
 ```
 
+## Example 8: PIE 正常但 Standalone/Packaged 缺运行态对象
+
+**用户可能会这样说**
+
+- “PIE 里一切正常，打包后棋子/地形/材质全没了。”
+- “Standalone 启动后生成器和查询结构是空的。”
+
+**先读**
+
+- [cpp-and-lifecycle.md](cpp-and-lifecycle.md)
+- [validation-and-debugging.md](validation-and-debugging.md)
+
+**建议动作**
+
+1. 在 `BeginPlay` 输出纯 C++ 拓扑、生成器、Gameplay 容器、Transient 资源和初始化标志。
+2. 查这些状态是否只由 `OnConstruction` 或 Editor-only 路径创建。
+3. 在 `World->IsGameWorld()` 下做缺失检测并调用统一 Rebuild。
+4. 用 fresh Standalone 和本次专用日志验证，不能只重进 PIE。
+
+## Example 9: 原生组件重构导致旧 Blueprint 或 Details 崩溃
+
+**用户可能会这样说**
+
+- “拆分 Actor 组件后，旧蓝图/地图加载崩溃。”
+- “打开新建的派生 Blueprint，PropertyEditor stack overflow。”
+
+**先读**
+
+- [cpp-and-lifecycle.md](cpp-and-lifecycle.md)
+- [validation-and-debugging.md](validation-and-debugging.md)
+- [workflow.md](workflow.md)
+
+**建议动作**
+
+1. 区分 stale Blueprint subobject export 与原生反射树递归。
+2. 检查被删除/改名的 Default Subobject、嵌套可见 ActorComponent、缺失的 `NoEditInline` 和 EditorPreview construction。
+3. 修复后创建全新派生 Blueprint；迁移旧地图实例与引用。
+4. 在 fresh Editor 打开新 Blueprint，并用 fresh Standalone 加载迁移地图。
+
+## Example 10: 编译链接被 Unreal DLL 占用
+
+**用户可能会这样说**
+
+- “构建到链接时报 LNK1104，DLL 被 UnrealEditor.exe 占用。”
+
+**先读**
+
+- [validation-and-debugging.md](validation-and-debugging.md)
+
+**建议动作**
+
+1. 确认占用进程的项目和来源。
+2. 只结束本任务启动的当前项目进程；用户已有 Editor 不自动关闭。
+3. 用相同构建命令重试并报告真实结果。
+4. 如果不能安全释放 DLL，明确报告对象文件编译状态与链接阻塞，不把它写成构建成功。
+
 ## Rule of Thumb
 
 如果用户请求看起来同时涉及“方案选择 + C++ + 材质 + 编辑器手工步骤 + 验收”，就把它当成一个完整阶段任务来处理，而不是当成单点修 bug。
