@@ -61,6 +61,8 @@ SV8 后，`FPlanetHISMTileRenderer` 的 Per Instance Custom Data 从 11 个恢�
 
 ### 3.1 山脊测地线中点验证 HISM
 
+> SV8 验收完成后，该组件在 SV9 中原地演进为正式 Ridge HISM：原生子对象名保留以兼容已有地图/Blueprint，`NoCollision` 验证语义改为 `QueryOnly + Visibility Block`，并新增同级 `SV9PeakHISMComp`。本节其余内容保留作为 SV8 验收历史记录。
+
 为直接验证“无需实例 Cell 上下文的跨资产材质查询”，Actor 新增独立的 `SV8VerificationRidgeMidpointHISMComp`：
 
 - 对 WorldGen/Gameplay 权威 `MountainRidgeSegments` 的每一段，读取两端 Cell 中心单位向量 `A/B`，以 `normalize(A + B)` 求球面大圆短弧的中点方向。

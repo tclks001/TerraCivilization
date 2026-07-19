@@ -139,22 +139,85 @@ namespace TerraSphericalTileGenerator
 		return true;
 	}
 
-	void BuildTileMesh(const FTSTGSphericalTileAssetBuildSettings& Settings, const FHeightSampler& HeightSampler, UE::Geometry::FDynamicMesh3& Mesh)
+	const FString& ResolveStaticMeshPath(const FTSTGSphericalTileAssetBuildSettings& Settings)
+	{
+		switch (Settings.AssetShape)
+		{
+		case ETSTGAssetShape::Ridge:
+			return Settings.RidgeStaticMeshAssetPathAndName;
+		case ETSTGAssetShape::Peak:
+			return Settings.PeakStaticMeshAssetPathAndName;
+		case ETSTGAssetShape::Tile:
+		default:
+			return Settings.StaticMeshAssetPathAndName;
+		}
+	}
+
+	const FString& ResolveMaterialInstancePath(const FTSTGSphericalTileAssetBuildSettings& Settings)
+	{
+		switch (Settings.AssetShape)
+		{
+		case ETSTGAssetShape::Ridge:
+			return Settings.RidgeMaterialInstanceAssetPathAndName;
+		case ETSTGAssetShape::Peak:
+			return Settings.PeakMaterialInstanceAssetPathAndName;
+		case ETSTGAssetShape::Tile:
+		default:
+			return Settings.MaterialInstanceAssetPathAndName;
+		}
+	}
+
+	float EvaluateRidgeProfile(const FTSTGSphericalTileAssetBuildSettings& Settings, float U, float V)
+	{
+		const float SeedPhase = FMath::Fmod(FMath::Abs(static_cast<float>(Settings.ShapeVariationSeed)) * 0.000173f, 1.0f) * UE_TWO_PI;
+		const float CenterOffset = Settings.RidgeCenterlineWaviness *
+			(0.72f * FMath::Sin(U * UE_TWO_PI + SeedPhase)
+				+ 0.28f * FMath::Sin(U * UE_TWO_PI * 2.37f + SeedPhase * 1.73f + 1.13f));
+		const float CrestV = FMath::Clamp(0.5f + CenterOffset * 0.5f, 0.15f, 0.85f);
+		const float CrestDistance = V <= CrestV
+			? (CrestV - V) / FMath::Max(CrestV, UE_SMALL_NUMBER)
+			: (V - CrestV) / FMath::Max(1.0f - CrestV, UE_SMALL_NUMBER);
+		float CrossProfile = FMath::Pow(
+			FMath::Clamp(1.0f - CrestDistance, 0.0f, 1.0f),
+			FMath::Max(Settings.RidgeProfileExponent, 0.25f));
+		const float ShapeNoise = 0.67f * FMath::Sin(U * UE_TWO_PI * Settings.ShapeNoiseFrequency + SeedPhase)
+			+ 0.33f * FMath::Sin(U * UE_TWO_PI * Settings.ShapeNoiseFrequency * 2.11f + V * UE_TWO_PI + SeedPhase * 1.41f);
+		CrossProfile *= FMath::Max(0.1f, 1.0f + Settings.ShapeNoiseStrength * ShapeNoise);
+
+		if (Settings.RidgeEndTaperFraction <= UE_SMALL_NUMBER)
+		{
+			return CrossProfile;
+		}
+
+		const float EndDistance = FMath::Min(U, 1.0f - U);
+		const float EndMask = FMath::SmoothStep(0.0f, Settings.RidgeEndTaperFraction, EndDistance);
+		return CrossProfile * EndMask;
+	}
+
+	float EvaluatePeakProfile(const FTSTGSphericalTileAssetBuildSettings& Settings, float U, float V)
+	{
+		const float X = (U - 0.5f) * 2.0f;
+		const float Y = (V - 0.5f) * 2.0f;
+		const float Radius01 = FMath::Sqrt(X * X + Y * Y);
+		const float BaseProfile = FMath::Pow(
+			FMath::Clamp(1.0f - Radius01, 0.0f, 1.0f),
+			FMath::Max(Settings.PeakProfileExponent, 0.25f));
+		const float Angle = FMath::Atan2(Y, X);
+		const float SeedPhase = FMath::Fmod(FMath::Abs(static_cast<float>(Settings.ShapeVariationSeed)) * 0.000173f, 1.0f) * UE_TWO_PI;
+		const float ShapeNoise = 0.65f * FMath::Sin(Angle * Settings.ShapeNoiseFrequency + SeedPhase)
+			+ 0.35f * FMath::Sin((Angle + Radius01) * Settings.ShapeNoiseFrequency * 2.17f + SeedPhase * 1.61f);
+		return BaseProfile * FMath::Max(0.1f, 1.0f + Settings.ShapeNoiseStrength * ShapeNoise);
+	}
+
+	void BuildTerrainMesh(const FTSTGSphericalTileAssetBuildSettings& Settings, const FHeightSampler& HeightSampler, UE::Geometry::FDynamicMesh3& Mesh)
 	{
 		using namespace UE::Geometry;
 
 		Mesh.Clear();
 		Mesh.EnableAttributes();
 		Mesh.Attributes()->SetNumUVLayers(1);
-		// 故意不启用 NormalOverlay：
-		// 顶点位置在 cube-sphere 方向基础上叠加了 EdgeOcclusionOffset 与 HeightOffset，
-		// 使得真正的表面法线并不等于 cube-sphere 原始方向。
-		// 如果这里手写一份错误的法线，MikkTSpace 会依据它反解切线/副切线，
-		// 最终 TangentToWorld 与真实几何不匹配，导致法线贴图沿 XY 方向出现单向受光偏差。
-		// 让 UE 在 StaticMesh Build 阶段（bEnableRecomputeNormals=true）根据几何重算平滑法线，
-		// 再让 MikkT（bEnableRecomputeTangents=true）在同一份法线上求切线，从而得到一致的 TBN。
-
 		FDynamicMeshUVOverlay* UVOverlay = Mesh.Attributes()->PrimaryUV();
+		FDynamicMeshNormalOverlay* NormalOverlay = Mesh.Attributes()->PrimaryNormals();
 
 		const int32 N = FMath::Clamp(Settings.SubdivisionsPerSide, 1, 512);
 		const int32 VertexCountPerSide = N + 1;
@@ -163,6 +226,8 @@ namespace TerraSphericalTileGenerator
 
 		TArray<int32> VertexIds;
 		VertexIds.SetNum(VertexCountPerSide * VertexCountPerSide);
+		TArray<int32> NormalElementIds;
+		NormalElementIds.Init(INDEX_NONE, VertexCountPerSide * VertexCountPerSide);
 
 		for (int32 Y = 0; Y <= N; ++Y)
 		{
@@ -180,11 +245,37 @@ namespace TerraSphericalTileGenerator
 				const FVector2f CenterDelta = UvVector - CenterVector;
 				const float CenterDistance01 = FMath::Clamp(FMath::Sqrt(FVector2f::DotProduct(CenterDelta, CenterDelta)) / 0.5f, 0.0f, 1.0f);
 				const float EdgeOcclusionOffset = Settings.SphereExtensionAmplitude * (1.0f - 2.0f * CenterDistance01);
-				const float HeightOffset = Settings.HeightmapExtensionAmplitude * HeightSampler.Sample(U, V);
-				const double Radius = FMath::Max(0.001, static_cast<double>(Settings.BaseRadius + EdgeOcclusionOffset + HeightOffset));
+				float ShapeOffset = 0.0f;
+				float HeightOffset = Settings.HeightmapExtensionAmplitude * HeightSampler.Sample(U, V);
+				if (Settings.AssetShape == ETSTGAssetShape::Ridge)
+				{
+					const float Profile = EvaluateRidgeProfile(Settings, U, V);
+					ShapeOffset = Settings.RidgeHeightCM * Profile;
+					HeightOffset = HeightSampler.bValid
+						? (HeightSampler.Sample(U, V) - 0.5f) * 2.0f * Settings.RidgeHeightmapAmplitudeCM * Profile
+						: 0.0f;
+				}
+				else if (Settings.AssetShape == ETSTGAssetShape::Peak)
+				{
+					const float Profile = EvaluatePeakProfile(Settings, U, V);
+					ShapeOffset = Settings.PeakHeightCM * Profile;
+					HeightOffset = HeightSampler.bValid
+						? (HeightSampler.Sample(U, V) - 0.5f) * 2.0f * Settings.PeakHeightmapAmplitudeCM * Profile
+						: 0.0f;
+				}
+
+				const double Radius = FMath::Max(0.001, static_cast<double>(
+					Settings.BaseRadius + EdgeOcclusionOffset + ShapeOffset + HeightOffset));
 
 				const int32 VertexId = Mesh.AppendVertex(Normal * Radius);
-				VertexIds[Y * VertexCountPerSide + X] = VertexId;
+				const int32 GridIndex = Y * VertexCountPerSide + X;
+				VertexIds[GridIndex] = VertexId;
+				if (NormalOverlay != nullptr)
+				{
+					// All HISM terrain assets use the undeformed sphere direction as their base normal.
+					// The shared SDF material can then flatten every asset to the same radial field.
+					NormalElementIds[GridIndex] = NormalOverlay->AppendElement(FVector3f(Normal));
+				}
 			}
 		}
 
@@ -196,9 +287,23 @@ namespace TerraSphericalTileGenerator
 				const int32 V10 = VertexIds[Y * VertexCountPerSide + X + 1];
 				const int32 V01 = VertexIds[(Y + 1) * VertexCountPerSide + X];
 				const int32 V11 = VertexIds[(Y + 1) * VertexCountPerSide + X + 1];
+				const int32 N00 = NormalElementIds[Y * VertexCountPerSide + X];
+				const int32 N10 = NormalElementIds[Y * VertexCountPerSide + X + 1];
+				const int32 N01 = NormalElementIds[(Y + 1) * VertexCountPerSide + X];
+				const int32 N11 = NormalElementIds[(Y + 1) * VertexCountPerSide + X + 1];
 
 				const int32 T0 = Mesh.AppendTriangle(V00, V01, V10);
 				const int32 T1 = Mesh.AppendTriangle(V10, V01, V11);
+
+				if (T0 >= 0 && NormalOverlay != nullptr)
+				{
+					NormalOverlay->SetTriangle(T0, FIndex3i(N00, N01, N10));
+				}
+
+				if (T1 >= 0 && NormalOverlay != nullptr)
+				{
+					NormalOverlay->SetTriangle(T1, FIndex3i(N10, N01, N11));
+				}
 
 				if (T0 >= 0 && UVOverlay != nullptr)
 				{
@@ -237,12 +342,13 @@ namespace TerraSphericalTileGenerator
 			return nullptr;
 		}
 
-		if (!ValidateAssetPath(Settings.MaterialInstanceAssetPathAndName, TEXT("MaterialInstanceAssetPathAndName"), OutErrorMessage))
+		const FString& MaterialInstancePath = ResolveMaterialInstancePath(Settings);
+		if (!ValidateAssetPath(MaterialInstancePath, TEXT("MaterialInstanceAssetPathAndName"), OutErrorMessage))
 		{
 			return nullptr;
 		}
 
-		const FString PackageName = FPackageName::ObjectPathToPackageName(Settings.MaterialInstanceAssetPathAndName);
+		const FString PackageName = FPackageName::ObjectPathToPackageName(MaterialInstancePath);
 		const FString AssetName = FPackageName::GetLongPackageAssetName(PackageName);
 		UPackage* Package = CreatePackage(*PackageName);
 		if (Package == nullptr)
@@ -278,7 +384,7 @@ namespace TerraSphericalTileGenerator
 	}
 }
 
-UStaticMesh* UTerraSphericalTileGeneratorLibrary::GenerateSphericalTileStaticMeshAsset(
+UStaticMesh* UTerraSphericalTileGeneratorLibrary::GenerateSphericalTerrainStaticMeshAsset(
 	const FTSTGSphericalTileAssetBuildSettings& Settings,
 	FString& OutErrorMessage)
 {
@@ -286,7 +392,8 @@ UStaticMesh* UTerraSphericalTileGeneratorLibrary::GenerateSphericalTileStaticMes
 
 	OutErrorMessage.Reset();
 
-	if (!ValidateAssetPath(Settings.StaticMeshAssetPathAndName, TEXT("StaticMeshAssetPathAndName"), OutErrorMessage))
+	const FString& StaticMeshPath = ResolveStaticMeshPath(Settings);
+	if (!ValidateAssetPath(StaticMeshPath, TEXT("StaticMeshAssetPathAndName"), OutErrorMessage))
 	{
 		return nullptr;
 	}
@@ -301,7 +408,7 @@ UStaticMesh* UTerraSphericalTileGeneratorLibrary::GenerateSphericalTileStaticMes
 	DynamicMesh->EditMesh(
 		[&Settings, &HeightSampler](UE::Geometry::FDynamicMesh3& Mesh)
 		{
-			BuildTileMesh(Settings, HeightSampler, Mesh);
+			BuildTerrainMesh(Settings, HeightSampler, Mesh);
 		},
 		EDynamicMeshChangeType::GeneralEdit,
 		EDynamicMeshAttributeChangeFlags::MeshTopology |
@@ -311,8 +418,8 @@ UStaticMesh* UTerraSphericalTileGeneratorLibrary::GenerateSphericalTileStaticMes
 		true);
 
 	FGeometryScriptCreateNewStaticMeshAssetOptions StaticMeshOptions;
-	// Height and edge-occlusion displace the spherical patch, so normals must match final geometry.
-	StaticMeshOptions.bEnableRecomputeNormals = true;
+	// Preserve the explicit radial normal contract; only rebuild tangents against UV0 and those normals.
+	StaticMeshOptions.bEnableRecomputeNormals = false;
 	StaticMeshOptions.bEnableRecomputeTangents = true;
 	StaticMeshOptions.bEnableNanite = Settings.bEnableNanite;
 	StaticMeshOptions.bEnableCollision = Settings.bEnableCollision;
@@ -321,14 +428,14 @@ UStaticMesh* UTerraSphericalTileGeneratorLibrary::GenerateSphericalTileStaticMes
 	EGeometryScriptOutcomePins Outcome = EGeometryScriptOutcomePins::Failure;
 	UStaticMesh* StaticMesh = UGeometryScriptLibrary_CreateNewAssetFunctions::CreateNewStaticMeshAssetFromMesh(
 		DynamicMesh,
-		Settings.StaticMeshAssetPathAndName,
+		StaticMeshPath,
 		StaticMeshOptions,
 		Outcome,
 		nullptr);
 
 	if (Outcome != EGeometryScriptOutcomePins::Success || StaticMesh == nullptr)
 	{
-		OutErrorMessage = FString::Printf(TEXT("创建 StaticMesh 资产失败：%s"), *Settings.StaticMeshAssetPathAndName);
+		OutErrorMessage = FString::Printf(TEXT("创建 StaticMesh 资产失败：%s"), *StaticMeshPath);
 		return nullptr;
 	}
 
@@ -343,6 +450,15 @@ UStaticMesh* UTerraSphericalTileGeneratorLibrary::GenerateSphericalTileStaticMes
 		return StaticMesh;
 	}
 
-	OutErrorMessage = TEXT("OK");
+	OutErrorMessage = FString::Printf(TEXT("OK: %s"), *StaticMeshPath);
 	return StaticMesh;
+}
+
+UStaticMesh* UTerraSphericalTileGeneratorLibrary::GenerateSphericalTileStaticMeshAsset(
+	const FTSTGSphericalTileAssetBuildSettings& Settings,
+	FString& OutErrorMessage)
+{
+	FTSTGSphericalTileAssetBuildSettings TileSettings = Settings;
+	TileSettings.AssetShape = ETSTGAssetShape::Tile;
+	return GenerateSphericalTerrainStaticMeshAsset(TileSettings, OutErrorMessage);
 }

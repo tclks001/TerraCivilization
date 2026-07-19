@@ -257,13 +257,54 @@ public:
     UPROPERTY(EditAnywhere, Category = "PlanetTopology|Tess|HISM Tiles", meta = (ClampMin = "0.001"))
     float HISMTileAdditionalUniformScale = 1.0f;
 
-    /** SV8 验收：在每条山脊段两个 Cell 中心之间的测地线中点额外摆放 Mountain StaticMesh，仅在 HISM + SDF 模式显示。 */
-    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV8 Topology LUT Verification")
+    /** SV9：沿每条 WorldGen MountainRidgeSegment 摆放球面山脊资产。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV9 Terrain Assets")
+    bool bEnableSV9RidgeHISM = true;
+
+    /** Deprecated SV8 switch retained so old map instances do not silently disable the evolved Ridge component. */
+    UPROPERTY(EditAnywhere, AdvancedDisplay, Category = "PlanetTopology|Terrain Visual|SV8 Topology LUT Verification",
+              meta = (DeprecatedProperty, DeprecationMessage = "Use bEnableSV9RidgeHISM."))
     bool bEnableSV8RidgeMidpointVerificationMeshes = true;
 
-    /** SV8 验收资产；为空时复用 MountainTileStaticMesh。资产坐标须与球面 Tile 约定一致。 */
-    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV8 Topology LUT Verification")
+    /** TerraSphericalTileGenerator 生成的 Ridge；局部 +X 沿山脊，+Z 为球面径向。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV9 Terrain Assets")
+    TObjectPtr<UStaticMesh> SV9RidgeStaticMesh;
+
+    /** Deprecated SV8 asset slot; used only as a fallback when SV9RidgeStaticMesh is empty. */
+    UPROPERTY(EditAnywhere, AdvancedDisplay, Category = "PlanetTopology|Terrain Visual|SV8 Topology LUT Verification",
+              meta = (DeprecatedProperty, DeprecationMessage = "Use SV9RidgeStaticMesh."))
     TObjectPtr<UStaticMesh> SV8VerificationMountainStaticMesh;
+
+    /** SV9：在部分 Mountain Cell 上摆放尖峰。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV9 Terrain Assets")
+    bool bEnableSV9PeakHISM = true;
+
+    /** TerraSphericalTileGenerator 生成的 Peak；局部 +Z 为球面径向。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV9 Terrain Assets")
+    TObjectPtr<UStaticMesh> SV9PeakStaticMesh;
+
+    /** 每个候选 Mountain Cell 生成尖峰的确定性概率。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV9 Terrain Assets", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SV9PeakSpawnProbability = 0.24f;
+
+    /** 尖峰之间至少间隔的 Cell 邻接步数；首版支持 0..3。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV9 Terrain Assets", meta = (ClampMin = "0", ClampMax = "3"))
+    int32 SV9PeakMinCellSteps = 1;
+
+    /** Ridge/Peak 相对基础 Tile 半径的额外径向偏移。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV9 Terrain Assets", meta = (ClampMin = "-1000.0", ClampMax = "1000.0"))
+    float SV9TerrainAssetRadiusOffsetCM = 0.0f;
+
+    /** Ridge/Peak 的额外统一缩放；资产仍使用 HISMTileSourceRadiusCM 作为源半径。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV9 Terrain Assets", meta = (ClampMin = "0.001", ClampMax = "4.0"))
+    float SV9TerrainAssetUniformScale = 1.0f;
+
+    /** 预留：以后按稳定噪声选择多资产变体；当前只有一个 Ridge 和一个 Peak 时保持关闭。 */
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV9 Terrain Assets")
+    bool bEnableSV9AssetVariantSelection = false;
+
+    UPROPERTY(EditAnywhere, Category = "PlanetTopology|Terrain Visual|SV9 Terrain Assets")
+    int32 SV9AssetVariantSeed = 9137;
 
     //----------------------------------------------------------
     // 生命周期
@@ -360,7 +401,7 @@ private:
 
     /** SimpleGameplay：按 WorldGen 三地形输出重建平原 / 森林 / 山脉三套 HISM 实例。 */
     void RebuildHISMTileInstances_();
-    void RebuildSV8RidgeMidpointVerificationInstances_();
+    void RebuildSV9TerrainAssetInstances_();
     void RebuildTerrainVisualSurface_();
     void ApplyHISMSDFExperimentMaterials_();
 
@@ -500,10 +541,14 @@ public:
               meta = (AllowPrivateAccess = "true", NoEditInline))
     TObjectPtr<UHierarchicalInstancedStaticMeshComponent> MountainTileHISMComp;
 
-    /** SV8：独立、无碰撞的山脊中点验证实例，不参与 InstanceId -> CellId 或棋子高度链路。 */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Terrain Visual|SV8 Topology LUT Verification",
+    /** SV9 Ridge。保留 SV8 原生子对象名以兼容已保存的地图/Blueprint 模板。 */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Terrain Visual|SV9 Terrain Assets",
               meta = (AllowPrivateAccess = "true", NoEditInline))
     TObjectPtr<UHierarchicalInstancedStaticMeshComponent> SV8VerificationRidgeMidpointHISMComp;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Terrain Visual|SV9 Terrain Assets",
+              meta = (AllowPrivateAccess = "true", NoEditInline))
+    TObjectPtr<UHierarchicalInstancedStaticMeshComponent> SV9PeakHISMComp;
 
     /** TerrainVisual SV1：连续基础表面，独立于旧 HISM 渲染组件。 */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlanetTopology|Terrain Visual",
@@ -520,7 +565,10 @@ public:
     TObjectPtr<UMaterialInstanceDynamic> MountainHISMSDFMID;
 
     UPROPERTY(Transient)
-    TObjectPtr<UMaterialInstanceDynamic> SV8VerificationRidgeMidpointHISMSDFMID;
+    TObjectPtr<UMaterialInstanceDynamic> SV9RidgeHISMSDFMID;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UMaterialInstanceDynamic> SV9PeakHISMSDFMID;
 
     /** TerrainVisual SV0/SV1：只读视觉场和 Cell 查询协调器。 */
     TUniquePtr<FTerrainVisualCoordinator> TerrainVisualCoordinator;

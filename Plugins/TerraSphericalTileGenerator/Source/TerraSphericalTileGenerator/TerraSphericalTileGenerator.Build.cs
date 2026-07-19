@@ -25,8 +25,11 @@ public class TerraSphericalTileGenerator : ModuleRules
 				"GeometryScriptingCore",
 				"GeometryScriptingEditor",
 				"MaterialEditor",
+				"PropertyEditor",
 				"Slate",
-				"SlateCore"
+				"SlateCore",
+				"ToolMenus",
+				"LevelEditor"
 			});
 	}
 }

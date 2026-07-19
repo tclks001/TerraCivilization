@@ -74,6 +74,13 @@
 			]
 		},
 		{
+			"Name": "TerraSphericalTileGenerator",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
 			"Name": "AIModuleToolset",
 			"Enabled": true
 		},

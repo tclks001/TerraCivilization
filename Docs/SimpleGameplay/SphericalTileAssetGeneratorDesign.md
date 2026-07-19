@@ -1,485 +1,174 @@
-# TerraCivilization 球面地块 StaticMesh 资产生成插件设计稿
+# TerraSphericalTileGenerator 插件设计稿
 
-> 本稿属于 `Docs/SimpleGameplay` 下的简易玩法迭代文档，用于指导本次基于 `GeometryScript` / `DynamicMesh` 的编辑器资产生成插件实现。
+> 编码：UTF-8，简体中文。
 >
-> 目标：把 ambientCG 等来源的 PBR 纹理组生成适合 `Static Mesh Instance / HISM` 摆放的球面圆形地块资产，用自然遮挡隐藏地块边缘毛边。
+> 本稿维护插件职责、资产契约、几何算法和扩展边界。逐步操作见 [TerraSphericalTileGenerator使用说明.md](TerraSphericalTileGenerator使用说明.md)。
 
----
+## 1. 目标与边界
 
-## 1. 设计目标
+`TerraSphericalTileGenerator` 是 Editor-only GeometryScript 资产生成插件。它离线生成以局部原点为球心、局部 `+Z` 为径向中心的高细分 StaticMesh，供运行时 HISM 实例化。
 
-当前简易玩法尝试把球面地表显示交给大量地块 `StaticMesh` 实例：
+当前支持三种形态：
 
-- 不区分五边形和六边形资产。
-- 单个地块资产生成得比逻辑 Cell 略大。
-- 地块边缘向球内压低，让相邻实例靠自然遮挡覆盖边缘毛边。
-- PBR 纹理继续使用原始 UV，不随球面变形重新展开。
-- 高度图只影响局部起伏，不受中心到边缘遮挡衰减限制。
+| `AssetShape` | 用途 | 形态 |
+| --- | --- | --- |
+| `Tile` | 旧 Plain/Forest/Mountain 地块 | 带压边和高度图起伏的球面方形 patch。 |
+| `Ridge` | SV9 连续山脊外壳 | 沿局部 `+X` 延伸、从中间折起的球面网格片。 |
+| `Peak` | SV9 山脉尖峰 | 中心尖、外圈落回基础球面的圆锥状 patch。 |
 
-插件应优先服务编辑器内批量生成资产，而不是运行时生成。
+插件只负责生成和保存资产，不参与 WorldGen、Gameplay、HISM 摆放、点击或材质 SDF 查询。SV9 运行时只消费生成后的 StaticMesh。
 
----
+## 2. 坐标与资产契约
 
-## 2. 插件定位
-
-插件名称：`TerraSphericalTileGenerator`
-
-模块类型：`Editor`
-
-主要能力：
-
-- 暴露一个编辑器蓝图可调用函数库。
-- 输入 PBR 纹理和参数。
-- 构建一个带 UV 的高细分四边形网格。
-- 将平面网格按 cube-sphere 思路映射为球面补丁。
-- 按 UV 边缘遮挡项和高度图采样项调整顶点半径。
-- 创建 `StaticMesh` 资产。
-- 可选创建材质实例，把颜色、法线、粗糙、高度纹理打包引用到资产附近。
-
----
-
-## 3. 暴露给编辑器的参数
-
-```cpp
-USTRUCT(BlueprintType)
-struct FTSTGSphericalTileAssetBuildSettings
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PBR")
-    UTexture2D* BaseColorTexture = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PBR")
-    UTexture2D* NormalTexture = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PBR")
-    UTexture2D* HeightTexture = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PBR")
-    UTexture2D* RoughnessTexture = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mesh")
-    int32 SubdivisionsPerSide = 64;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shape")
-    float BaseRadius = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shape")
-    float SphereExtensionAmplitude = 8.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shape")
-    float HeightmapExtensionAmplitude = 4.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shape")
-    float PatchAngularSizeDegrees = 18.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Asset")
-    FString StaticMeshAssetPathAndName = "/Game/Generated/SphericalTiles/SM_SphericalTile";
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material")
-    bool bCreateMaterialInstance = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material")
-    UMaterialInterface* ParentMaterial = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material")
-    FString MaterialInstanceAssetPathAndName = "/Game/Generated/SphericalTiles/MI_SphericalTile";
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material")
-    FTSTGTextureParameterNames TextureParameterNames;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Static Mesh")
-    bool bEnableCollision = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Static Mesh")
-    bool bEnableNanite = false;
-};
-```
-
-说明：
-
-- `BaseColorTexture`：颜色贴图，通常使用 ambientCG 的 `Color` / `Albedo` / `BaseColor` 贴图。
-- `NormalTexture`：只接受 ambientCG 的 `NormalDX` 切线空间法线贴图。导入设置必须为 `NormalMap` 压缩、`sRGB=false`；插件和父材质不支持 `NormalGL`，也不会自动翻转绿色通道。
-- `HeightTexture`：高度图，插件会读取该贴图的顶层 mip 并按 UV 双线性采样，用于真实修改网格顶点高度。
-- `RoughnessTexture`：粗糙度贴图，用于写入材质实例参数，不参与几何生成。
-- `SubdivisionsPerSide`：四边形网格每边细分程度，生成 `(N+1)*(N+1)` 个顶点、`N*N*2` 个三角形。当前代码 clamp 到 `1..512`。
-- `BaseRadius`：地块基础球面半径。
-- `SphereExtensionAmplitude`：边缘向内压低 / 中心向外鼓起的遮挡幅度。
-- `HeightmapExtensionAmplitude`：高度图起伏幅度。
-- `PatchAngularSizeDegrees`：地块在单位球面上的角宽度，用于从平面 patch 映射到球面方向。当前代码 clamp 到 `0.1..179.0`。
-- `StaticMeshAssetPathAndName`：最终 `StaticMesh` 资产对象路径，例如 `/Game/Generated/SphericalTiles/SM_Plain_01`。
-- `bCreateMaterialInstance`：是否尝试创建材质实例。
-- `ParentMaterial`：材质实例的父材质。为空时仍会生成 `StaticMesh`，但不会创建或绑定材质实例。
-- `MaterialInstanceAssetPathAndName`：材质实例资产对象路径，例如 `/Game/Generated/SphericalTiles/MI_Plain_01`。
-- `TextureParameterNames`：父材质中的纹理参数名，默认是 `BaseColorTexture`、`NormalTexture`、`RoughnessTexture`、`HeightTexture`。
-- `bEnableCollision`：是否为生成的 `StaticMesh` 启用碰撞；启用时使用复杂碰撞作为简单碰撞。
-- `bEnableNanite`：是否在创建 `StaticMesh` 时启用 Nanite。
-
----
-
-## 4. 网格生成流程
-
-### 4.1 平面四边形网格
-
-先在 UV 空间生成规则网格：
+所有形态统一使用：
 
 ```text
-u = x / N
-v = y / N
+Local origin = 资产球心
+Local +Z     = patch 中心的球面径向
+Local +X     = Ridge 山脊延伸方向
+Local +Y     = Ridge 横跨山脊的方向
+BaseRadius   = 资产基础球面半径，默认 100 cm
+UV0          = 参数域 (u,v) 的 0..1 映射
 ```
 
-每个四边形拆成两个三角形，并保留原始 UV。
+运行时不把实例平移到 Cell 中心，而是让实例保持在 Planet Actor 局部原点，通过旋转把局部 `+Z` 对齐目标方向，并以 `TargetRadius/BaseRadius` 统一缩放。因此 Ridge/Peak 和旧 Tile 必须使用相同的 `BaseRadius` 契约。
 
-### 4.2 cube-sphere 式球面映射
-
-把 UV 先映射到局部方形 patch：
+## 3. 模块结构
 
 ```text
-sx = (u - 0.5) * tan(PatchAngularSize / 2) * 2
-sy = (v - 0.5) * tan(PatchAngularSize / 2) * 2
-RawDir = normalize(float3(sx, sy, 1))
+TerraSphericalTileGenerator (Editor module)
+├─ FTerraSphericalTileGeneratorModule
+│  ├─ Tools 菜单入口
+│  └─ Nomad Tab
+├─ STerraSphericalTileGeneratorPanel
+│  ├─ IDetailsView
+│  ├─ Generate Selected
+│  ├─ Generate Ridge
+│  └─ Generate Peak
+├─ UTerraSphericalTileGeneratorSettings
+│  └─ EditorPerProjectUserSettings 持久化
+└─ UTerraSphericalTileGeneratorLibrary
+   ├─ GenerateSphericalTerrainStaticMeshAsset
+   └─ GenerateSphericalTileStaticMeshAsset（旧 API 兼容）
 ```
 
-该方向可视为 cube face 上的一个点投影到单位球面。
+UI、Blueprint Function Library 和后续自动化统一调用同一生成入口。旧 `GenerateSphericalTileStaticMeshAsset` 强制生成 `Tile`，已有 Editor Utility Blueprint 不会因新增形态改变语义。
 
-### 4.3 半径计算
+## 4. 公共球面网格基础
 
-每个顶点的半径由三部分组成：
+规则网格包含 `(N+1)^2` 个顶点和 `2*N^2` 个三角形：
 
 ```text
-radius = BaseRadius + EdgeOcclusionOffset + HeightOffset
+u = x/N
+v = y/N
+sx = (2u-1) * tan(PatchAngularSize/2)
+sy = (2v-1) * tan(PatchAngularSize/2)
+Dir = normalize(float3(sx, sy, 1))
+Position = Dir * Radius
 ```
 
-遮挡项按 UV 到中心的径向 dot 距离控制，越靠内越向上，越靠外越向下：
+基础半径为：
 
 ```text
-CenterVector = float2(0.5, 0.5)
-CenterDelta = float2(u, v) - CenterVector
-CenterDistance01 = saturate(sqrt(dot(CenterDelta, CenterDelta)) / 0.5)
-EdgeOcclusionOffset = SphereExtensionAmplitude * (1 - 2 * CenterDistance01)
+Radius = BaseRadius
+       + EdgeOcclusionOffset
+       + AnalyticShapeOffset
+       + HeightTextureOffset
 ```
 
-说明：
+`EdgeOcclusionOffset` 沿用旧 Tile 的中心鼓起、外缘压低逻辑，使实例边缘可以被相邻 patch 自然遮挡。Tile/Ridge/Peak 都把位移前的球面方向显式写入 Primary Normal Overlay，StaticMesh Build 阶段保留该径向法线并只重算 MikkTSpace 切线。这是 HISM+SDF 材质的基础法线契约：`TerrainVisualNormalStrength=0` 时，所有地形资产都必须退化为同一连续径向法线，而不是暴露各自的位移几何法线。
 
-- 中心处 `CenterDistance01=0`，遮挡项为 `+SphereExtensionAmplitude`。
-- 距离中心 0.5 UV 单位处 `CenterDistance01=1`，遮挡项为 `-SphereExtensionAmplitude`。
-- 四角会被 clamp 到同样的最低边缘高度，确保四周边界都压进球内，适合依靠相邻实例自然遮挡。
+## 5. Ridge 算法
 
-高度图项：
+### 5.1 横截面
+
+Ridge 以局部 `+X` 为山脊方向。脊顶位置允许沿 `u` 做低频侧向摆动，得到 `CrestV(u)`。左右两侧分别归一化到自己的边缘：
 
 ```text
-HeightOffset = HeightmapExtensionAmplitude * HeightSample(u, v)
+if v <= CrestV:
+    CrestDistance = (CrestV-v)/CrestV
+else:
+    CrestDistance = (v-CrestV)/(1-CrestV)
+
+CrossProfile = pow(saturate(1-CrestDistance), RidgeProfileExponent)
 ```
 
-其中 `HeightSample` 初版从 `HeightTexture` 顶层 mip 做双线性采样，取线性灰度值；缺失高度图时按 `0` 处理。
+该分段归一化保证 `v=0` 和 `v=1` 的形态高度严格为零，即局部 `Y` 正负两侧都落回基础球面。脊顶即使侧向摆动，也不会抬起任一侧边缘。
 
-最终坐标：
+### 5.2 X 端部与高度图
+
+默认 `RidgeEndTaperFraction=0`，局部 `X` 两端可以保持高度，由相邻山脊实例互相遮挡。需要独立短山脊时可把该参数调大，使端部用 `smoothstep` 落地。
 
 ```text
-Position = RawDir * radius
+ShapeOffset = RidgeHeightCM * CrossProfile * EndMask
+TextureOffset = (HeightSample-0.5) * 2
+              * RidgeHeightmapAmplitudeCM
+              * CrossProfile * EndMask
 ```
 
----
+高度图位移与剖面遮罩相乘，因此不会破坏 `Y` 两侧落地契约。没有 Height 纹理时位移为零，不按黑色高度图处理。
 
-## 5. 纹理和材质打包策略
+## 6. Peak 算法
 
-`StaticMesh` 资产本身只保存几何、UV 和材质槽。PBR 纹理不会真正内嵌进网格文件，而是通过材质/材质实例引用。
+Peak 使用圆形参数距离：
 
-初版采用：
+```text
+x = 2u-1
+y = 2v-1
+r = length(float2(x,y))
+PeakProfile = pow(saturate(1-r), PeakProfileExponent)
+```
 
-- 创建或复用一个动态生成的 `MaterialInstanceConstant`。
-- 将 `BaseColorTexture`、`NormalTexture`、`RoughnessTexture`、`HeightTexture` 写入常用参数名。
-- 把材质实例赋给生成的 `StaticMesh` 第 0 个材质槽。
+`r>=1` 的外圈高度为零，得到中心尖、四周落地的尖圆锥 patch：
 
-默认参数名：
+```text
+ShapeOffset = PeakHeightCM * PeakProfile
+TextureOffset = (HeightSample-0.5) * 2
+              * PeakHeightmapAmplitudeCM
+              * PeakProfile
+```
 
-| 参数 | 名称 |
+首版不做不对称双峰或侵蚀缺口。生成器已暴露 `ShapeVariationSeed/ShapeNoiseStrength/ShapeNoiseFrequency`：本轮默认 Noise Strength 为 0；以后只需更改 Seed 和输出路径即可生成确定性 Ridge/Peak 变体，且噪声始终乘在基础 Profile 上，不破坏落地边缘。
+
+## 7. PBR、碰撞与 Nanite
+
+- `BaseColor/NormalDX/Roughness/Height` 可写入生成的材质实例。
+- Normal 必须是 DirectX 切线空间法线，纹理导入为 Normalmap、`sRGB=false`，父材质 Sampler Type 为 `Normal`。
+- Height 纹理必须保留可读 Source 顶层 Mip；支持 `G8/G16/BGRA8/RGBA16/RGBA16F`。
+- SV9 Ridge/Peak 应开启碰撞，否则 HISM 组件即使 `QueryOnly` 也没有可命中的复杂碰撞数据。
+- 高细分 Ridge/Peak 推荐开启 Nanite；是否开启由 `bEnableNanite` 控制。
+- 生成器创建 StaticMesh 后由运行时 HISM+SDF 材质覆盖其材质槽，因此资产自带 MI 主要用于编辑器单体预览。
+
+## 8. UI 与保存
+
+插件注册 `Tools -> Terra Spherical Terrain Asset Generator`。面板用 `IDetailsView` 显示同一个强类型设置对象，参数保存在 `EditorPerProjectUserSettings`。
+
+按钮语义：
+
+- `Generate Selected`：按当前 `AssetShape` 生成。
+- `Generate Ridge`：切换到 Ridge 并使用 Ridge 输出路径生成。
+- `Generate Peak`：切换到 Peak 并使用 Peak 输出路径生成。
+
+输出对象路径根据形态选择：Tile 使用旧通用路径，Ridge/Peak 使用各自的 SV9 路径。插件不会把 DynamicMesh 保存到地图；DynamicMesh 只是编辑器内临时烘焙源，最终资产是 StaticMesh。
+
+## 9. 验收与排错
+
+验收：
+
+1. Editor 目标编译，Tools 菜单可打开面板，参数重开后保留。
+2. 旧 Tile Blueprint API 继续生成旧球面 patch。
+3. Ridge 沿局部 X 延伸，Y 两侧落地，默认 X 两端不强制落地。
+4. Peak 中心形成尖圆锥，外圈落地。
+5. Height 纹理能在形态遮罩内产生位移，不抬起接缝边缘。
+6. StaticMesh 可开启 Nanite 和复杂碰撞，并保留 UV0、显式径向法线和据此重算的切线。
+7. 在 HISM+SDF 材质下把 `TerrainVisualNormalStrength` 设为 0，Tile/Ridge/Peak 的 `World Normal` 均连续径向；Ridge/Peak 不得残留尖峰或陡坡几何法线。
+
+| 现象 | 检查 |
 | --- | --- |
-| 颜色 | `BaseColorTexture` |
-| 法线 | `NormalTexture` |
-| 粗糙 | `RoughnessTexture` |
-| 高度 | `HeightTexture` |
-
-> 若没有提供父材质，插件仍会生成网格资产，但材质实例创建会跳过。
-
----
-
-## 6. 编辑器入口
-
-使用 `UBlueprintFunctionLibrary` 暴露：
-
-```cpp
-UFUNCTION(BlueprintCallable, CallInEditor, Category = "Terra|Spherical Tile Generator")
-static UStaticMesh* GenerateSphericalTileStaticMeshAsset(
-    const FTSTGSphericalTileAssetBuildSettings& Settings,
-    FString& OutErrorMessage);
-```
-
-这样后续可以通过：
-
-- Editor Utility Widget
-- Blutility
-- Python/蓝图自动化
-- 未来自定义 Details 面板
-
-调用生成。
-
----
-
-## 7. 详细具体用法
-
-### 7.1 启用插件并重启编辑器
-
-工程文件 [TerraCivilization.uproject](../../TerraCivilization.uproject) 已启用：
-
-- `GeometryScripting`
-- `TerraSphericalTileGenerator`
-
-如果编辑器已经打开，第一次加入插件后需要重启编辑器，让 `TerraSphericalTileGenerator` 的 Editor 模块加载。
-
-验证方式：
-
-1. 打开 UE 编辑器。
-2. 进入 `Edit -> Plugins`。
-3. 搜索 `Terra Spherical Tile Generator`。
-4. 确认插件处于启用状态。
-
-### 7.2 准备 ambientCG PBR 纹理
-
-从 ambientCG 下载某个材质时，建议至少准备四张贴图：
-
-| 用途 | ambientCG 常见命名 | 填入字段 |
-| --- | --- | --- |
-| 颜色 | `Color` / `Albedo` / `BaseColor` | `BaseColorTexture` |
-| 法线 | `NormalDX` | `NormalTexture` |
-| 高度 | `Displacement` / `Height` | `HeightTexture` |
-| 粗糙 | `Roughness` | `RoughnessTexture` |
-
-导入 UE 后建议检查：
-
-- `BaseColorTexture`：通常保持 `sRGB=true`。
-- `NormalTexture`：必须使用 `NormalDX`，压缩类型应为 `NormalMap`，且 `sRGB=false`。不得传入 `NormalGL`；插件不会自动翻转绿色通道。
-- `HeightTexture`：建议关闭 `sRGB`，并保留源文件数据；插件会读取 `Texture->Source` 顶层 mip。
-- `RoughnessTexture`：建议关闭 `sRGB`。
-
-注意：
-
-- `HeightTexture` 为空时仍可生成资产，只是没有高度图起伏，只有中心鼓起和边缘压低。
-- 如果 `HeightTexture` 没有有效 `Source` 数据，函数会失败并在 `OutErrorMessage` 中返回原因。
-- 当前高度采样支持常见源格式：`G8`、`G16`、`BGRA8`、`RGBA16`、`RGBA16F`；其他格式会按 `0` 高度处理。
-
-### 7.3 准备父材质
-
-插件本身不会自动创建完整主材质。若希望生成后自动绑定 PBR 纹理，需要先准备一个父材质，例如：
-
-```text
-/Game/Materials/M_TerraSphericalTile_Master
-```
-
-父材质至少建议包含四个 `TextureObject` / `TextureSampleParameter2D` 参数：
-
-| 参数名 | 默认字段 | 连接建议 |
-| --- | --- | --- |
-| `BaseColorTexture` | `TextureParameterNames.BaseColor` | 连接到 `Base Color` |
-| `NormalTexture` | `TextureParameterNames.Normal` | 连接到 `Normal` |
-| `RoughnessTexture` | `TextureParameterNames.Roughness` | 连接到 `Roughness` |
-| `HeightTexture` | `TextureParameterNames.Height` | 可不连接，或用于后续材质效果 |
-
-最小父材质建议：
-
-```text
-TextureSampleParameter2D(BaseColorTexture) -> Base Color
-TextureSampleParameter2D(NormalTexture)    -> Normal
-TextureSampleParameter2D(RoughnessTexture) -> Roughness
-```
-
-> **❗ 必需的法线采样设置**（新建节点默认不对，必须手动改）：
->
-> - 在父材质里，选中接到 `Material.Normal` 引脚的 `TextureSampleParameter2D(NormalTexture)` 节点，
->   在 Details 面板中将 **`Sampler Type` 显式设为 `Normal`**（不能保留新建节点的默认值 `Color`）。
-> - 同时法线贴图本身的导入设置必须是 `Compression Settings = TC_Normalmap` + `sRGB = false`（参见 §7.2）。
->
-> 若 `Sampler Type` 错设为 `Color`，UE **不会**自动执行 `2*rgb - 1` 的 unpack，采样出来的 `[0, 1]` 原始颜色会直接当作切线空间法线送入引脚，
-> 经 TBN 变换后世界法线会被整体扳向 `(+X, +Y, 0)`，表现为地块在 **World Normal 可视化下整片黄色**、且 **XY 正方向光能照亮、XY 负方向光死黑**。
-> 详细的排查与修复流程见 §7.9 常见问题排查表。
-
-说明：
-
-- 几何高度已经在资产生成时烘焙进顶点位置，材质里的 `HeightTexture` 不是必需连接项。
-- 如果父材质的参数名不同，可以在 `TextureParameterNames` 中改成对应名称。
-- 如果 `ParentMaterial=nullptr`，插件仍会生成 `StaticMesh`，但不会创建 `MaterialInstanceConstant`，也不会给网格自动绑定材质。
-
-### 7.4 用 Editor Utility Blueprint 调用
-
-推荐用 `Editor Utility Blueprint` 作为第一版手动生成入口。
-
-操作步骤：
-
-1. 在内容浏览器中新建一个 `Editor Utility Blueprint`。
-2. 父类选择 `EditorUtilityObject`，命名示例：`EUO_GenerateSphericalTileAsset`。
-3. 打开蓝图，创建一个可调用函数，例如 `GeneratePlainTile`。
-4. 在函数中创建 `FTSTGSphericalTileAssetBuildSettings` 结构体变量。
-5. 给结构体填入纹理、半径和输出路径。
-6. 调用 `Generate Spherical Tile Static Mesh Asset` 节点。
-7. 打印 `OutErrorMessage`。
-8. 右键该 Utility Blueprint，执行对应的编辑器调用入口。
-
-蓝图逻辑可按以下结构组织：
-
-```text
-Make FTSTGSphericalTileAssetBuildSettings
-    BaseColorTexture = T_Ground_Color
-    NormalTexture = T_Ground_Normal
-    HeightTexture = T_Ground_Height
-    RoughnessTexture = T_Ground_Roughness
-    SubdivisionsPerSide = 64
-    BaseRadius = 100.0
-    SphereExtensionAmplitude = 8.0
-    HeightmapExtensionAmplitude = 4.0
-    PatchAngularSizeDegrees = 18.0
-    StaticMeshAssetPathAndName = /Game/Generated/SphericalTiles/SM_Plain_01
-    bCreateMaterialInstance = true
-    ParentMaterial = /Game/Materials/M_TerraSphericalTile_Master
-    MaterialInstanceAssetPathAndName = /Game/Generated/SphericalTiles/MI_Plain_01
-    bEnableCollision = true
-    bEnableNanite = false
-        -> Generate Spherical Tile Static Mesh Asset
-        -> Print OutErrorMessage
-```
-
-成功时：
-
-- 返回值是新生成的 `StaticMesh`。
-- `OutErrorMessage` 为 `OK`。
-- 内容浏览器中会出现 `StaticMeshAssetPathAndName` 指向的网格资产。
-- 如果提供了 `ParentMaterial`，还会出现 `MaterialInstanceAssetPathAndName` 指向的材质实例，并自动绑定到网格第 0 材质槽。
-
-### 7.5 推荐参数起点
-
-#### 平原资产
-
-```text
-SubdivisionsPerSide = 64
-BaseRadius = 100.0
-SphereExtensionAmplitude = 6.0 ~ 8.0
-HeightmapExtensionAmplitude = 1.0 ~ 3.0
-PatchAngularSizeDegrees = 16.0 ~ 20.0
-bEnableCollision = true
-bEnableNanite = false
-```
-
-平原高度起伏应较弱，重点是让边界压进球内，不要让高度图造成明显穿帮。
-
-#### 森林资产
-
-```text
-SubdivisionsPerSide = 64
-BaseRadius = 100.0
-SphereExtensionAmplitude = 8.0 ~ 10.0
-HeightmapExtensionAmplitude = 2.0 ~ 5.0
-PatchAngularSizeDegrees = 16.0 ~ 20.0
-bEnableCollision = true
-bEnableNanite = false
-```
-
-森林可以稍微增加高度起伏，后续也可以在父材质或独立实例上叠加树冠、草丛等视觉层。
-
-#### 山脉资产
-
-```text
-SubdivisionsPerSide = 128
-BaseRadius = 100.0
-SphereExtensionAmplitude = 10.0 ~ 14.0
-HeightmapExtensionAmplitude = 8.0 ~ 20.0
-PatchAngularSizeDegrees = 16.0 ~ 22.0
-bEnableCollision = true
-bEnableNanite = true
-```
-
-山脉建议更高细分，并开启 Nanite 做初步尝试。若 HISM 大量实例化后性能或内存压力过大，再降低 `SubdivisionsPerSide` 或关闭 Nanite 对比。
-
-### 7.6 输出路径规范
-
-`StaticMeshAssetPathAndName` 和 `MaterialInstanceAssetPathAndName` 必须是 UE 对象路径，而不是磁盘路径。
-
-正确示例：
-
-```text
-/Game/Generated/SphericalTiles/SM_Plain_01
-/Game/Generated/SphericalTiles/MI_Plain_01
-```
-
-错误示例：
-
-```text
-C:/workspace/TerraCivilization/Content/Generated/SphericalTiles/SM_Plain_01.uasset
-Content/Generated/SphericalTiles/SM_Plain_01
-/Game/Generated/SphericalTiles/
-```
-
-命名建议：
-
-| 地形 | StaticMesh | MaterialInstance |
-| --- | --- | --- |
-| 平原 | `/Game/Generated/SphericalTiles/SM_Tile_Plain_01` | `/Game/Generated/SphericalTiles/MI_Tile_Plain_01` |
-| 森林 | `/Game/Generated/SphericalTiles/SM_Tile_Forest_01` | `/Game/Generated/SphericalTiles/MI_Tile_Forest_01` |
-| 山脉 | `/Game/Generated/SphericalTiles/SM_Tile_Mountain_01` | `/Game/Generated/SphericalTiles/MI_Tile_Mountain_01` |
-
-### 7.7 生成后的检查
-
-生成完成后建议逐项检查：
-
-1. 打开生成的 `StaticMesh`。
-2. 确认网格形状是一个球面 patch，而不是平面。
-3. 在 `UV` 预览中确认 UV 覆盖 `0..1`。
-4. 查看边界是否明显低于中心。
-5. 查看高度图起伏是否符合材质预期。
-6. 若创建了材质实例，确认第 0 材质槽已绑定对应 `MI_*`。
-7. 把多个实例放在相近球面方向上，观察边缘是否能自然互相遮挡。
-8. 如果作为 HISM 使用，确认实例的朝向需要把资产本地 `+Z` 方向对齐到目标 Cell 的球面外法线。
-
-### 7.8 和 HISM 摆放的关系
-
-该插件只负责生成单个地块 `StaticMesh` 资产，不负责在棋盘上摆放实例。
-
-后续 HISM 摆放时建议遵循：
-
-```text
-InstanceLocation = Cell.UnitCenter * PlacementRadius
-InstanceRotation = RotationBetweenVectors(LocalUp = +Z, TargetUp = Cell.UnitCenter)
-InstanceScale = 适配 Cell 尺寸的统一缩放，必要时略大于逻辑 Cell
-```
-
-关键点：
-
-- 生成资产时，网格默认朝向局部 `+Z` 球面方向。
-- 摆到全局球面时，需要把局部 `+Z` 旋到 `Cell.UnitCenter`。
-- `PatchAngularSizeDegrees` 和实例缩放共同决定资产覆盖范围。
-- 若边缘仍露毛边，优先增大 `SphereExtensionAmplitude` 或实例缩放，而不是盲目增加高度图幅度。
-
-### 7.9 常见问题排查
-
-| 现象 | 可能原因 | 处理方式 |
-| --- | --- | --- |
-| `OutErrorMessage` 提示对象路径无效 | 使用了磁盘路径或目录路径 | 改成 `/Game/.../AssetName` 格式 |
-| 生成了网格但没有材质 | `ParentMaterial=nullptr` 或 `bCreateMaterialInstance=false` | 指定父材质并启用 `bCreateMaterialInstance` |
-| 材质实例生成了但贴图没生效 | 父材质参数名与默认参数名不一致 | 修改 `TextureParameterNames` 或父材质参数名 |
-| **地块在 World Normal 可视化下整片黄色（≈ `(+X, +Y, 0)`），且只有 XY 正方向入射的光能照亮、XY 负方向入射的光下地块死黑**（关闭高度图后仍然如此，且顶点绕序、UV 都已确认无误） | **父材质中 `TextureSampleParameter2D(NormalTexture)` 节点的 `Sampler Type` 错设为 `Color`（新建节点的默认值）**，导致采样出来的 `[0, 1]` RGB 未被 UE unpack 到 `[-1, +1]`，直接当作切线空间法线进入引脚 | 打开父材质→选中接到 `Material.Normal` 的 `TextureSampleParameter2D` 节点→Details 面板把 `Sampler Type` 改为 `Normal`；同时确认贴图导入设置 `Compression Settings = TC_Normalmap` 且 `sRGB = false`。修正后 World Normal 应回到蓝色，方向光绕 Z 轴旋转时照光应连续过渡 |
-| 高度图没有起伏 | `HeightTexture=nullptr`、高度幅度太小或源格式未支持 | 指定高度图，提高 `HeightmapExtensionAmplitude`，检查纹理导入格式 |
-| 边缘仍然露毛边 | 压边幅度或实例覆盖不足 | 提高 `SphereExtensionAmplitude`，或让 HISM 实例缩放略大 |
-| 山脉太尖 / 穿插严重 | `HeightmapExtensionAmplitude` 过大 | 降低高度图幅度或换更平滑高度图 |
-| 网格过重 | `SubdivisionsPerSide` 太高 | 平原/森林先用 `64`，山脉再尝试 `128` |
-| 大量实例性能不稳定 | Nanite、碰撞、材质复杂度组合过重 | 分别测试关闭 `bEnableCollision`、关闭 `bEnableNanite`、降低细分 |
-
----
-
-## 8. 验收标准
-
-- 插件能在编辑器目标中编译。
-- `TerraCivilization.uproject` 启用 `GeometryScripting` 和 `TerraSphericalTileGenerator`。
-- 函数库能输入 ambientCG 导入的四张纹理。
-- 能生成一个 `StaticMesh` 资产。
-- 生成网格保留原始 `0..1` UV。
-- 顶点按 cube-sphere 方向投影到球面 patch。
-- 顶点半径包含遮挡项和高度图项。
-- 相邻实例放大摆放时，边缘向内压低，有利于自然遮挡。
+| Tools 菜单没有入口 | 插件是否在 `.uproject` 启用，Editor 是否在重新编译后重启。 |
+| Ridge 横向摆放 | 资产和 SV9 都约定 `+X=山脊方向`；检查资产是否由 Ridge 模式生成。 |
+| Ridge Y 边缘悬空 | 确认使用最新版分段 `CrestV` 剖面，且高度图位移乘了同一 Profile。 |
+| 无 Height 纹理时整体下陷 | 缺失 Height 必须视为零位移，不得把采样默认 0 当作中心值 0.5。 |
+| Hover/Click 穿过 Ridge/Peak | 生成资产必须启用碰撞，Actor 的总 HISM Collision 开关也必须开启。 |
+| `NormalStrength=0` 时 Ridge/Peak 仍显示陡坡法线 | 资产由旧版生成器烘焙了几何法线；删除或换路径重新生成资产，确认生成器保留径向 Normal Overlay 且 `bEnableRecomputeNormals=false`。 |
+| `NormalStrength>0` 时 World Normal 偏黄或单向受光 | NormalDX 导入、压缩、sRGB、父材质 Sampler Type 或重算切线配置错误。 |
